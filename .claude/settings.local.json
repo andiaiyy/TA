@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(venv\\\\Scripts\\\\python.exe -c \"from config.settings import BASE_DIR; print\\(BASE_DIR\\)\")",
+      "Bash(venv\\\\Scripts\\\\python.exe -c \"from utils.hashing import sha256_file; print\\('OK'\\)\")",
+      "Bash(venv\\\\Scripts\\\\python.exe -c \"from utils.timestamps import now_iso; print\\(now_iso\\(\\)\\)\")",
+      "Bash(python -m pytest tests/test_hikari_all_pipelines.py -v)",
+      "Bash(python -m pip install imbalanced-learn --quiet)",
+      "Bash(python run_pipeline.py --list-pipelines --dataset-type HIKARI2021)",
+      "Bash(python -m pytest tests/test_hikari_all_pipelines.py -v --tb=short)",
+      "Bash(python -m pytest tests/test_experiment_service.py -v --tb=short)",
+      "Bash(Get-ChildItem -Path \"d:\\\\Program\\\\claude\\\\orchestrator\\\\__pycache__\" -Filter \"experiment_service*.pyc\")",
+      "Bash(Remove-Item -Force)",
+      "Bash(Write-Host \"Cleared\")"
+    ]
+  }
+}
