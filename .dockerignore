@@ -1,0 +1,16 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+.idea/
+.vscode/
+*.db
+storage/datasets/*.csv
+storage/artifacts/
+docker-compose.yml
+.dockerignore
+.env
+*.md
+tests/
