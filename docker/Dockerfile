@@ -1,0 +1,31 @@
+# ============================================================
+# Main application image — Streamlit UI + Orchestrator
+# ============================================================
+FROM python:3.11-slim
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python deps first (cache layer)
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code
+COPY . .
+RUN pip install -e .
+
+# Create storage directories (will be overridden by volume mounts)
+RUN mkdir -p storage/datasets storage/artifacts
+
+# Streamlit config — disable telemetry, set server port
+RUN mkdir -p /root/.streamlit
+RUN echo '[server]\nheadless = true\nport = 8501\nenableCORS = false\nenableXsrfProtection = false\n\n[browser]\ngatherUsageStats = false' > /root/.streamlit/config.toml
+
+EXPOSE 8501
+
+# Initialize DB and start Streamlit
+CMD python -m database.migration && streamlit run ui/app.py

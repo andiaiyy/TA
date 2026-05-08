@@ -1,0 +1,93 @@
+"""
+Dataset validator.
+
+Validates a parsed DataFrame against a schema from contracts/dataset_schemas.py.
+Returns a structured ValidationResult — never raises for validation failures.
+
+⚠️  IMPORT RESTRICTION: No imports from ui/, database/, or pipelines/.
+"""
+from dataclasses import dataclass, field
+import pandas as pd
+
+from contracts.dataset_schemas import get_schema
+
+
+@dataclass
+class ValidationResult:
+    """Structured validation result."""
+    is_valid: bool
+    dataset_type: str
+    row_count: int
+    column_count: int
+    label_column: str | None
+    unique_labels: list[str] = field(default_factory=list)
+    missing_columns: list[str] = field(default_factory=list)
+    extra_columns: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+
+
+def validate_dataset(df: pd.DataFrame, dataset_type: str) -> ValidationResult:
+    """
+    Validate a DataFrame against a dataset schema.
+
+    Steps:
+      1. Look up schema via get_schema()
+      2. If unknown dataset_type → invalid
+      3. Compare columns: find missing and extra
+      4. Missing columns → invalid (pipeline will break)
+      5. Extra columns → warning only (allow supersets)
+      6. Empty DataFrame → invalid
+      7. Check label column exists, extract unique labels
+
+    Args:
+        df: Parsed DataFrame (headers already stripped).
+        dataset_type: e.g. "CICIDS2017".
+
+    Returns:
+        ValidationResult with all fields populated.
+    """
+    schema = get_schema(dataset_type)
+
+    if schema is None:
+        return ValidationResult(
+            is_valid=False,
+            dataset_type=dataset_type,
+            row_count=len(df),
+            column_count=len(df.columns),
+            label_column=None,
+            errors=[f"Unknown dataset type: {dataset_type}"],
+        )
+
+    expected = set(schema["expected_columns"])
+    actual = set(df.columns.tolist())
+
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+
+    errors = []
+
+    if missing:
+        errors.append(f"Missing required columns: {missing}")
+
+    if len(df) == 0:
+        errors.append("DataFrame is empty (0 rows)")
+
+    label_col = schema["label_column"]
+    unique_labels = []
+
+    if label_col in df.columns:
+        unique_labels = sorted(df[label_col].dropna().unique().tolist())
+    elif label_col not in missing:
+        errors.append(f"Label column '{label_col}' not found")
+
+    return ValidationResult(
+        is_valid=len(errors) == 0,
+        dataset_type=dataset_type,
+        row_count=len(df),
+        column_count=len(df.columns),
+        label_column=label_col if label_col in df.columns else None,
+        unique_labels=unique_labels,
+        missing_columns=missing,
+        extra_columns=extra,
+        errors=errors,
+    )

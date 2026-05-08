@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ids-research-platform"
+version = "1.0.0"
+requires-python = ">=3.10"
+
+[tool.setuptools]
+packages = [
+    "config", "contracts", "database", "orchestrator",
+    "pipelines", "pipelines.cicids2017", "pipelines.hikari2021",
+    "workers", "utils", "ui", "ui.views", "ui.pages",
+]
