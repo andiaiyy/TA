@@ -9,7 +9,12 @@ from config.pipeline_registry import get_pipeline_instance
 from workers.local_worker import run_pipeline
 
 
-def execute_pipeline(pipeline_id: str, df: pd.DataFrame, dataset_type: str) -> PipelineResult:
+def execute_pipeline(
+    pipeline_id: str,
+    df: pd.DataFrame,
+    dataset_type: str,
+    dataset_path: str = "",
+) -> PipelineResult:
     """
     Resolve pipeline, build input, execute, return result.
     Raises ValueError if pipeline or schema not found.
@@ -26,6 +31,7 @@ def execute_pipeline(pipeline_id: str, df: pd.DataFrame, dataset_type: str) -> P
         df=df,
         label_column=schema["label_column"],
         dataset_type=dataset_type,
+        dataset_path=dataset_path,
     )
     return run_pipeline(instance, pipeline_input)
 

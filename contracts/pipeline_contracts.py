@@ -14,6 +14,7 @@ class PipelineInput:
     dataset_type: str
     test_size: float = 0.2
     random_state: int = 42
+    dataset_path: str = ""   # raw file path for pipelines that read files directly (e.g. EVE Suricata)
 
 
 @dataclass

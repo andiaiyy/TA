@@ -1,7 +1,18 @@
 """
 Streamlit entrypoint.
-Run: streamlit run ui/app.py  (requires: pip install -e . first)
+Run: streamlit run ui/app.py
 """
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from utils.logging_config import setup_logging
+setup_logging()
+
+import logging
+logger = logging.getLogger(__name__)
+
 import streamlit as st
 from database.db import init_db
 
@@ -14,7 +25,7 @@ def _startup_cleanup():
     from orchestrator.experiment_service import cleanup_stale_experiments
     cleaned = cleanup_stale_experiments()
     if cleaned > 0:
-        print(f"[startup] Cleaned up {cleaned} stale experiment(s)")
+        logger.info("Startup cleanup: removed %d stale experiment(s)", cleaned)
 
 
 _startup_cleanup()

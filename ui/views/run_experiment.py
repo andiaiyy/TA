@@ -2,6 +2,7 @@
 Run Experiment page — supports both sync and async execution.
 """
 import time
+from pathlib import Path
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -11,26 +12,134 @@ matplotlib.use('Agg')
 
 from orchestrator.experiment_service import (
     validate_dataset_for_ui, create_and_run_experiment, get_experiment_status,
+    cancel_experiment,
 )
 from orchestrator.execution_service import get_pipeline_info
 from orchestrator.validation_service import get_available_datasets
 from orchestrator.result_service import get_experiment_metrics, get_full_experiment, get_experiment_metadata
+from config.settings import DATASETS_DIR
+
+_EXT_MAP = {"EVE_SURICATA": ".json"}
+
+_POLL_INTERVALS = {
+    "svc": 30,
+    "knn": 15,
+    "lr":  10,
+    "rfc": 10,
+    "rfe": 10,
+    "dt":  5,
+    "nb":  5,
+}
+_DEFAULT_POLL_INTERVAL = 8
+
+
+def _get_poll_interval(pipeline_id: str) -> int:
+    pid_lower = (pipeline_id or "").lower()
+    for key, seconds in _POLL_INTERVALS.items():
+        if key in pid_lower:
+            return seconds
+    return _DEFAULT_POLL_INTERVAL
+
+_TYPE_META = {
+    "CICIDS2017":   {"icon": "🌐", "desc": "Network traffic · 78 features · CSV"},
+    "HIKARI2021":   {"icon": "🔷", "desc": "Network traffic · 88 features · CSV"},
+    "EVE_SURICATA": {"icon": "🛡️", "desc": "Suricata IDS logs · EVE JSON"},
+}
+
+
+def _list_dataset_files(dataset_type: str) -> list[str]:
+    d = Path(DATASETS_DIR)
+    if not d.exists():
+        return []
+    ext = _EXT_MAP.get(dataset_type, ".csv")
+    return sorted(str(f) for f in d.glob(f"*{ext}") if f.is_file())
+
+
+@st.dialog("📂 Select Dataset File")
+def _file_dialog(dataset_type: str):
+    meta = _TYPE_META.get(dataset_type, {})
+    st.markdown(f"### {meta.get('icon', '')} {dataset_type}")
+    st.caption(meta.get("desc", ""))
+    st.markdown("---")
+
+    files = _list_dataset_files(dataset_type)
+    ext = _EXT_MAP.get(dataset_type, ".csv")
+
+    if files:
+        selected_file = st.selectbox(
+            f"Available `{ext}` files in `storage/datasets/`",
+            options=files,
+            format_func=lambda p: Path(p).name,
+        )
+    else:
+        st.warning(
+            f"No `{ext}` files found in `storage/datasets/`.\n\n"
+            "Place your dataset file there and try again."
+        )
+        selected_file = None
+
+    st.markdown("")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("✅ Confirm", type="primary", disabled=(selected_file is None), use_container_width=True):
+            st.session_state["dataset_type"] = dataset_type
+            st.session_state["dataset_path"] = selected_file
+            st.session_state.pop("pending_dtype", None)
+            for key in ("validation", "last_result", "polling_experiment_id"):
+                st.session_state.pop(key, None)
+            st.rerun()
+    with col2:
+        if st.button("Cancel", use_container_width=True):
+            st.session_state.pop("pending_dtype", None)
+            st.rerun()
 
 
 def render():
     st.title("🧪 Run Experiment")
 
+    # Open file dialog if a type card was just clicked
+    pending = st.session_state.get("pending_dtype")
+    if pending:
+        _file_dialog(pending)
+
     # === SECTION 1: Dataset Selection ===
     st.header("1. Dataset Selection")
-    col1, col2 = st.columns(2)
-    with col1:
-        dataset_type = st.selectbox("Dataset Type", options=get_available_datasets())
-        st.session_state["dataset_type"] = dataset_type
-    with col2:
-        dataset_path = st.text_input("Dataset File Path", placeholder="storage/datasets/your_file.csv")
-        st.session_state["dataset_path"] = dataset_path
 
-    if st.button("🔍 Validate Dataset", type="primary", disabled=not dataset_path):
+    dataset_path = st.session_state.get("dataset_path")
+    dataset_type = st.session_state.get("dataset_type", "")
+
+    if dataset_path:
+        # Show confirmed selection with a Change button
+        c1, c2, c3 = st.columns([3, 4, 1])
+        with c1:
+            meta = _TYPE_META.get(dataset_type, {})
+            st.markdown(f"**Type:** {meta.get('icon', '')} `{dataset_type}`")
+        with c2:
+            st.markdown(f"**File:** `{Path(dataset_path).name}`")
+        with c3:
+            if st.button("🔄 Change"):
+                # Clear current selection — type cards re-appear
+                for key in ("dataset_type", "dataset_path", "validation", "last_result", "polling_experiment_id"):
+                    st.session_state.pop(key, None)
+                st.rerun()
+    else:
+        # Show dataset type tiles — clicking one opens the file dialog
+        st.markdown("Select a dataset type to get started:")
+        cols = st.columns(len(get_available_datasets()))
+        for col, dtype in zip(cols, get_available_datasets()):
+            meta = _TYPE_META.get(dtype, {})
+            with col:
+                if st.button(
+                    f"{meta.get('icon', '')} **{dtype}**\n\n{meta.get('desc', '')}",
+                    use_container_width=True,
+                    key=f"dtype_btn_{dtype}",
+                ):
+                    st.session_state["pending_dtype"] = dtype
+                    st.rerun()
+        return  # nothing else to render until a dataset is selected
+
+    # Validate button
+    if st.button("🔍 Validate Dataset", type="primary"):
         with st.spinner("Validating..."):
             st.session_state["validation"] = validate_dataset_for_ui(dataset_type, dataset_path)
             st.session_state.pop("last_result", None)
@@ -86,7 +195,6 @@ def render():
     # === SECTION 3: Execute ===
     st.header("3. Execute")
 
-    # If currently polling an async experiment, handle that and skip Run button
     if "polling_experiment_id" in st.session_state:
         _poll_experiment(st.session_state["polling_experiment_id"])
         return
@@ -131,7 +239,18 @@ def _poll_experiment(experiment_id: str):
             else:
                 st.write("Pipeline is executing. This may take several minutes...")
             st.write("This page auto-refreshes every 5 seconds.")
-        time.sleep(5)
+        if st.button("🛑 Cancel Experiment", key=f"cancel_poll_{experiment_id}"):
+            r = cancel_experiment(experiment_id)
+            if r["success"]:
+                st.session_state.pop("polling_experiment_id", None)
+                st.warning("Experiment cancelled.")
+            else:
+                st.error(r["message"])
+            st.rerun()
+        pipeline_id = status_data.get("pipeline_id", "")
+        interval = _get_poll_interval(pipeline_id)
+        st.caption(f"Refreshing in {interval}s...")
+        time.sleep(interval)
         st.rerun()
 
     elif status == "FINISHED":
@@ -149,7 +268,11 @@ def _poll_experiment(experiment_id: str):
 
     elif status == "FAILED":
         st.session_state.pop("polling_experiment_id", None)
-        st.error(f"❌ Experiment failed: {status_data.get('error_message', 'Unknown error')}")
+        error_msg = status_data.get("error_message", "Unknown error")
+        if error_msg == "Cancelled by user":
+            st.warning("⚠️ Experiment was cancelled.")
+        else:
+            st.error(f"❌ Experiment failed: {error_msg}")
 
 
 def _display_results(result: dict):

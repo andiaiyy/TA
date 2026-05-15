@@ -35,7 +35,8 @@ def test_env(tmp_path):
 
     with patch("database.db.get_connection", side_effect=_get_conn), \
          patch("utils.artifact_saver.ARTIFACTS_DIR", artifacts_dir), \
-         patch("orchestrator.experiment_service.sha256_file", return_value="abc123"):
+         patch("orchestrator.experiment_service.sha256_file", return_value="abc123"), \
+         patch("config.settings.BASE_DIR", str(tmp_path)):
         init_db(db_path)
         yield {"db_path": db_path, "artifacts_dir": artifacts_dir, "csv_path": csv_path}
 

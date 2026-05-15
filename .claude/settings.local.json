@@ -9,9 +9,24 @@
       "Bash(python run_pipeline.py --list-pipelines --dataset-type HIKARI2021)",
       "Bash(python -m pytest tests/test_hikari_all_pipelines.py -v --tb=short)",
       "Bash(python -m pytest tests/test_experiment_service.py -v --tb=short)",
-      "Bash(Get-ChildItem -Path \"d:\\\\Program\\\\claude\\\\orchestrator\\\\__pycache__\" -Filter \"experiment_service*.pyc\")",
+      "Bash(Get-ChildItem -Path \"d:\\\\Program\\\\TA\\\\orchestrator\\\\__pycache__\" -Filter \"experiment_service*.pyc\")",
       "Bash(Remove-Item -Force)",
-      "Bash(Write-Host \"Cleared\")"
+      "Bash(Write-Host \"Cleared\")",
+      "Bash(pip install *)",
+      "Bash(python -c ' *)",
+      "PowerShell(& \"d:\\\\Program\\\\TA\\\\venv\\\\Scripts\\\\pip.exe\" install tqdm xgboost --quiet)",
+      "PowerShell(& \"d:\\\\Program\\\\TA\\\\venv\\\\Scripts\\\\python.exe\" -m pytest tests/test_parser.py -q 2>&1)",
+      "Bash(python -c \"from config.pipeline_registry import PIPELINE_REGISTRY; eve = {k:v['algorithm'] for k,v in PIPELINE_REGISTRY.items\\(\\) if v['dataset_type']=='EVE_SURICATA'}; print\\(eve\\)\")",
+      "Bash(.venv\\\\Scripts\\\\python.exe -c \"from config.pipeline_registry import PIPELINE_REGISTRY; eve = {k:v['algorithm'] for k,v in PIPELINE_REGISTRY.items\\(\\) if v['dataset_type']=='EVE_SURICATA'}; print\\(eve\\)\")",
+      "PowerShell(.venv\\\\Scripts\\\\python.exe -c \"from config.pipeline_registry import PIPELINE_REGISTRY; eve = {k:v['algorithm'] for k,v in PIPELINE_REGISTRY.items\\(\\) if v['dataset_type']=='EVE_SURICATA'}; print\\(eve\\)\")",
+      "PowerShell(& \"d:\\\\Program\\\\TA\\\\.venv\\\\Scripts\\\\python.exe\" -c \"from config.pipeline_registry import PIPELINE_REGISTRY; eve = {k:v['algorithm'] for k,v in PIPELINE_REGISTRY.items\\(\\) if v['dataset_type']=='EVE_SURICATA'}; print\\(eve\\)\")",
+      "PowerShell(& \"d:\\\\Program\\\\TA\\\\venv\\\\Scripts\\\\python.exe\" -c \"from config.pipeline_registry import PIPELINE_REGISTRY; eve = {k:v['algorithm'] for k,v in PIPELINE_REGISTRY.items\\(\\) if v['dataset_type']=='EVE_SURICATA'}; print\\(eve\\)\")",
+      "PowerShell(& \"d:\\\\Program\\\\TA\\\\venv\\\\Scripts\\\\python.exe\" -c \"from pipelines.eve_suricata.phase_runner import run_phases_1_through_9, _csv_to_phase1_df; print\\('OK'\\)\")",
+      "Bash(cd /d \"d:\\\\Program\\\\TA\")",
+      "Bash(venv\\\\Scripts\\\\python.exe -c \"from config.settings import BASE_DIR; print\\('BASE_DIR:', BASE_DIR\\)\")",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\andia\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Program-TA\\\\16d89442-cdf3-441e-b47e-30509dc8e240\\\\tasks\\\\btayiu85x.output\" -Wait -Tail 50)",
+      "PowerShell(Get-Content \"C:\\\\Users\\\\andia\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\d--Program-TA\\\\16d89442-cdf3-441e-b47e-30509dc8e240\\\\tasks\\\\bvpqarn6c.output\" -Wait -Tail 30)",
+      "Bash(python -m pytest tests/ -v --tb=short)"
     ]
   }
 }
