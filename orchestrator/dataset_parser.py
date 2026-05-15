@@ -45,8 +45,9 @@ def parse_dataset(file_path: str) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    if path.suffix.lower() != ".csv":
-        raise ValueError(f"Unsupported file format: {path.suffix}. Only .csv is supported.")
+    ext = path.suffix.lower()
+    if ext not in (".csv", ".json"):
+        raise ValueError(f"Unsupported file format: {path.suffix}. Supported: .csv, .json")
 
     # Path safety check — only allow files within the project directory.
     # Use is_relative_to (Python 3.9+) to avoid startswith substring confusion
@@ -63,9 +64,35 @@ def parse_dataset(file_path: str) -> pd.DataFrame:
             f"Got: {resolved}"
         )
 
-    # Use resolved path for the actual read to avoid TOCTOU between check and open.
-    df = pd.read_csv(resolved)
-    df.columns = df.columns.str.strip()
-    df.replace([np.inf, -np.inf], np.nan, inplace=True)
+    if ext == ".csv":
+        # Use resolved path for the actual read to avoid TOCTOU between check and open.
+        df = pd.read_csv(resolved)
+        df.columns = df.columns.str.strip()
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
+        return df
 
+    # .json — EVE Suricata NDJSON format (one JSON object per line).
+    # Read a small stub for validation; Phase 1 handles the full file.
+    import json as _json
+    records = []
+    with open(resolved, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = _json.loads(line)
+                if isinstance(obj, dict):
+                    records.append(obj)
+            except Exception:
+                continue
+            if len(records) >= 100:
+                break
+    if not records:
+        raise ValueError(
+            "JSON file contains no valid records. "
+            "Expected NDJSON format (one JSON object per line, EVE Suricata)."
+        )
+    df = pd.json_normalize(records, max_level=1)
+    df.columns = df.columns.str.strip()
     return df

@@ -22,7 +22,7 @@ def get_artifact_dir(experiment_id: str) -> Path:
 
 
 def save_model(experiment_id: str, model: object) -> str:
-    """Save model with joblib. Returns relative path."""
+    """Save model using joblib serialization as model.pkl. Returns relative path."""
     d = get_artifact_dir(experiment_id)
     path = d / "model.pkl"
     joblib.dump(model, path)

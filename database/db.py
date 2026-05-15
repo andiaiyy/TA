@@ -181,6 +181,60 @@ def list_experiments(db_path: str | None = None) -> list[dict]:
         conn.close()
 
 
+def list_experiments_paginated(
+    limit: int = 50,
+    offset: int = 0,
+    db_path: str | None = None,
+) -> tuple[list[dict], int]:
+    """
+    Return a page of experiments + total count.
+
+    Returns:
+        (rows, total_count)
+    """
+    conn = get_connection(db_path)
+    try:
+        total = conn.execute("SELECT COUNT(*) FROM experiments").fetchone()[0]
+        rows = conn.execute(
+            "SELECT * FROM experiments ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [dict(r) for r in rows], int(total)
+    finally:
+        conn.close()
+
+
+@_retry_on_locked()
+def cancel_experiment(
+    experiment_id: str,
+    completed_at: str,
+    db_path: str | None = None,
+) -> bool:
+    """
+    Cancel a QUEUED or RUNNING experiment by marking it FAILED.
+    Returns True if the row was updated, False if already in a terminal state.
+    """
+    import logging
+    conn = get_connection(db_path)
+    try:
+        cur = conn.execute(
+            """UPDATE experiments
+               SET status = 'FAILED',
+                   completed_at = ?,
+                   error_message = 'Cancelled by user'
+               WHERE id = ? AND status IN ('QUEUED', 'RUNNING')""",
+            (completed_at, experiment_id),
+        )
+        conn.commit()
+        if cur.rowcount == 0:
+            logging.getLogger(__name__).warning(
+                "cancel_experiment: experiment %s not in QUEUED/RUNNING — skipped", experiment_id
+            )
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
 def list_experiments_by_status(status: str, db_path: str | None = None) -> list[dict]:
     """Return experiments filtered by status."""
     conn = get_connection(db_path)

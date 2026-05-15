@@ -38,6 +38,11 @@ services:
       context: .
       dockerfile: docker/worker.Dockerfile
     container_name: ids_worker
+    command: >
+      celery -A workers.celery_worker worker
+      --loglevel=info
+      --pool=solo
+      --concurrency=1
     volumes:
       - ./storage:/app/storage          # shared storage with UI
     depends_on:
@@ -48,6 +53,9 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - USE_ASYNC=true
       - DB_PATH=/app/storage/experiments.db
+      - CELERY_CONCURRENCY=1
+      - JSON_LOGS=true
+      - LOG_LEVEL=INFO
     restart: unless-stopped
 
   # --- Streamlit UI ---

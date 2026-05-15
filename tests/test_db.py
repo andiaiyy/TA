@@ -64,6 +64,7 @@ def test_list_experiments_ordered(tmp_db):
 def test_list_experiments_by_status(tmp_db):
     create_experiment("exp-1", "C", "/d.csv", "h", "p", "2026-01-01T00:00:00Z", tmp_db)
     create_experiment("exp-2", "C", "/d.csv", "h", "p", "2026-01-02T00:00:00Z", tmp_db)
+    set_running("exp-1", "2026-01-01T00:30:00Z", tmp_db)
     set_finished("exp-1", "2026-01-01T01:00:00Z", 0.9, 0.9, 0.9, 0.9, "m", "p", tmp_db)
     assert len(list_experiments_by_status("FINISHED", tmp_db)) == 1
     assert len(list_experiments_by_status("QUEUED", tmp_db)) == 1

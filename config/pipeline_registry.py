@@ -10,6 +10,10 @@ from pipelines.hikari2021.knn_pipeline import HikariKNNPipeline
 from pipelines.hikari2021.svc_pipeline import HikariSVCPipeline
 from pipelines.hikari2021.nbgc_pipeline import HikariNBGCPipeline
 from pipelines.hikari2021.lr_pipeline import HikariLRPipeline
+from pipelines.eve_suricata.rfc_pipeline import EveRFCPipeline
+from pipelines.eve_suricata.dt_pipeline import EveDTPipeline
+from pipelines.eve_suricata.knn_pipeline import EveKNNPipeline
+from pipelines.eve_suricata.xgb_pipeline import EveXGBPipeline
 
 PIPELINE_REGISTRY = {
     "cicids2017.rf_paper_a": {
@@ -60,6 +64,34 @@ PIPELINE_REGISTRY = {
         "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
         "algorithm": "Logistic Regression",
         "class": HikariLRPipeline,
+    },
+    "eve_suricata.rfc": {
+        "dataset_type": "EVE_SURICATA",
+        "name": "Random Forest — EVE/Suricata 11-Phase Pipeline",
+        "paper": "EVE/Suricata IDS Pipeline",
+        "algorithm": "Random Forest",
+        "class": EveRFCPipeline,
+    },
+    "eve_suricata.dt": {
+        "dataset_type": "EVE_SURICATA",
+        "name": "Decision Tree — EVE/Suricata 11-Phase Pipeline",
+        "paper": "EVE/Suricata IDS Pipeline",
+        "algorithm": "Decision Tree",
+        "class": EveDTPipeline,
+    },
+    "eve_suricata.knn": {
+        "dataset_type": "EVE_SURICATA",
+        "name": "K-Nearest Neighbors + StandardScaler — EVE/Suricata 11-Phase Pipeline",
+        "paper": "EVE/Suricata IDS Pipeline",
+        "algorithm": "K-Nearest Neighbors",
+        "class": EveKNNPipeline,
+    },
+    "eve_suricata.xgb": {
+        "dataset_type": "EVE_SURICATA",
+        "name": "XGBoost — EVE/Suricata 11-Phase Pipeline",
+        "paper": "EVE/Suricata IDS Pipeline",
+        "algorithm": "XGBoost",
+        "class": EveXGBPipeline,
     },
 }
 
