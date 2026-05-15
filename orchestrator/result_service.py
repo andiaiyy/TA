@@ -10,6 +10,17 @@ def list_all_experiments() -> list[dict]:
     return list_experiments()
 
 
+def list_experiments_page(limit: int = 50, offset: int = 0) -> tuple[list[dict], int]:
+    """
+    Return a page of experiments and the total count.
+
+    Returns:
+        (experiments, total_count)
+    """
+    from database.db import list_experiments_paginated
+    return list_experiments_paginated(limit=limit, offset=offset)
+
+
 def list_by_status(status: str) -> list[dict]:
     """Return experiments filtered by status."""
     return list_experiments_by_status(status)

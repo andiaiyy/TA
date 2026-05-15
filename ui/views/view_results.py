@@ -6,39 +6,78 @@ import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
 
-from orchestrator.result_service import list_all_experiments, get_full_experiment
-from orchestrator.experiment_service import rerun_experiment
+from orchestrator.result_service import list_all_experiments, list_experiments_page, get_full_experiment
+from orchestrator.experiment_service import rerun_experiment, cancel_experiment
 
-_STATUS_ICON = {"FINISHED": "✅", "FAILED": "❌", "RUNNING": "🔄", "QUEUED": "⏳"}
+_STATUS_LABEL = {
+    "FINISHED": "✅ FINISHED",
+    "FAILED": "❌ FAILED",
+    "RUNNING": "🔄 RUNNING",
+    "QUEUED": "⏳ QUEUED",
+}
+
+PAGE_SIZE = 20
 
 
 def render():
     st.title("📊 Experiment History")
-    experiments = list_all_experiments()
-    if not experiments:
-        st.info("No experiments yet.")
+
+    # --- Pagination state ---
+    if "history_page" not in st.session_state:
+        st.session_state["history_page"] = 0
+
+    page = st.session_state["history_page"]
+    offset = page * PAGE_SIZE
+    experiments, total = list_experiments_page(limit=PAGE_SIZE, offset=offset)
+    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
+
+    if total == 0:
+        st.info("No experiments yet. Go to 'Run Experiment' to create one.")
         return
+
+    # Clamp page in case experiments were deleted
+    if page >= total_pages:
+        st.session_state["history_page"] = total_pages - 1
+        st.rerun()
+
+    st.caption(f"Showing {offset + 1}–{min(offset + PAGE_SIZE, total)} of {total} experiments")
 
     # Summary table
     display = []
     for e in experiments:
-        icon = _STATUS_ICON.get(e["status"], "❓")
         display.append({
             "ID": e["id"][:8] + "...",
             "Dataset": e["dataset_type"],
             "Pipeline": e["pipeline_id"],
-            "Status": f"{icon} {e['status']}",
+            "Status": _STATUS_LABEL.get(e["status"], e["status"]),
             "Accuracy": f"{e['accuracy']:.4f}" if e.get("accuracy") is not None else "—",
             "F1": f"{e['f1_score']:.4f}" if e.get("f1_score") is not None else "—",
             "Created": e["created_at"][:19] if e.get("created_at") else "—",
         })
     st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
 
-    # Detail view
-    st.subheader("Detail")
+    # Pagination controls
+    col_prev, col_info, col_next = st.columns([1, 2, 1])
+    with col_prev:
+        if st.button("← Previous", disabled=(page == 0)):
+            st.session_state["history_page"] = page - 1
+            st.rerun()
+    with col_info:
+        st.markdown(
+            f"<div style='text-align:center;padding-top:6px'>Page {page + 1} of {total_pages}</div>",
+            unsafe_allow_html=True,
+        )
+    with col_next:
+        if st.button("Next →", disabled=(page >= total_pages - 1)):
+            st.session_state["history_page"] = page + 1
+            st.rerun()
+
+    # Detail view — fetch from all experiments for the selectbox
+    all_experiments = list_all_experiments()
+    st.subheader("Experiment Detail")
     exp_map = {
         f"{e['id'][:8]}... | {e['pipeline_id']} | {e['status']}": e["id"]
-        for e in experiments
+        for e in all_experiments
     }
     selected_label = st.selectbox("Select experiment:", list(exp_map.keys()))
     selected_id = exp_map[selected_label]
@@ -120,8 +159,22 @@ def render():
                 st.pyplot(fig)
                 plt.close(fig)
 
+    elif exp["status"] in ("QUEUED", "RUNNING"):
+        st.info(f"⏳ Experiment is {exp['status'].lower()}. Refresh to see updates.")
+        if st.button("🛑 Cancel Experiment", key=f"cancel_{selected_id}"):
+            r = cancel_experiment(selected_id)
+            if r["success"]:
+                st.warning("Experiment cancelled.")
+                st.rerun()
+            else:
+                st.error(r["message"])
+
     elif exp["status"] == "FAILED":
-        st.error(f"Failed: {exp.get('error_message', 'Unknown')}")
+        error_msg = exp.get("error_message", "Unknown")
+        if error_msg == "Cancelled by user":
+            st.warning("⚠️ Experiment was cancelled by user.")
+        else:
+            st.error(f"Failed: {error_msg}")
 
     # === PDF Download Button ===
     if exp["status"] == "FINISHED" and metrics:

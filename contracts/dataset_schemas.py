@@ -78,9 +78,20 @@ HIKARI2021_SCHEMA = {
     ]
 }
 
+EVE_SURICATA_SCHEMA = {
+    "label_column": "Target",
+    "file_format": "json_or_csv",
+    "expected_top_level_keys": [
+        "timestamp", "flow_id", "event_type",
+        "src_ip", "src_port", "dest_ip", "dest_port", "proto",
+    ],
+    "expected_columns": [],
+}
+
 DATASET_SCHEMAS = {
     "CICIDS2017": CICIDS2017_SCHEMA,
     "HIKARI2021": HIKARI2021_SCHEMA,
+    "EVE_SURICATA": EVE_SURICATA_SCHEMA,
 }
 
 

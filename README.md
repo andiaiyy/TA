@@ -33,14 +33,20 @@ pipelines/              ← Pure ML: no DB imports, no UI imports
   ├─ base.py                 (BasePipeline ABC)
   ├─ cicids2017/
   │   └─ rf_paper_a.py       (RF + RFE)
-  └─ hikari2021/
-      ├─ _common.py          (shared preprocessing helper)
-      ├─ rfc_pipeline.py     (Random Forest + RandomUnderSampler)
-      ├─ dt_pipeline.py      (Decision Tree)
-      ├─ knn_pipeline.py     (KNN + RUS post-split)
-      ├─ svc_pipeline.py     (SVC, probability=True)
-      ├─ nbgc_pipeline.py    (Gaussian Naive Bayes)
-      └─ lr_pipeline.py      (Logistic Regression + PCA)
+  ├─ hikari2021/
+  │   ├─ _common.py          (shared preprocessing helper)
+  │   ├─ rfc_pipeline.py     (Random Forest + RandomUnderSampler)
+  │   ├─ dt_pipeline.py      (Decision Tree)
+  │   ├─ knn_pipeline.py     (KNN + RUS post-split)
+  │   ├─ svc_pipeline.py     (SVC, probability=True)
+  │   ├─ nbgc_pipeline.py    (Gaussian Naive Bayes)
+  │   └─ lr_pipeline.py      (Logistic Regression + PCA)
+  └─ eve_suricata/
+      ├─ phase_runner.py     (shared phases 1-9 for all EVE models)
+      ├─ eve_rfc_pipeline.py (Random Forest on RFE features)
+      ├─ eve_dt_pipeline.py  (Decision Tree on RFE features)
+      ├─ eve_lsvc_pipeline.py(Linear SVC on MI features, decision_function ROC)
+      └─ eve_xgb_pipeline.py (XGBoost on MI features, optional dependency)
 database/               ← SQLite CRUD + schema migrations
 contracts/              ← Shared data classes (no project-layer imports)
 config/                 ← Pipeline registry + Celery config
@@ -84,6 +90,36 @@ All HIKARI2021 pipelines use 70/30 train/test split. The RFC pipeline uses 80/20
 
 > **Note on LR:** The StandardScaler + PCA is fitted on the full dataset before splitting — intentionally faithful to the original notebook. This constitutes data leakage and is documented as such.
 
+> **Note on SVC:** SVC has O(n²) complexity. A runtime warning is logged when the dataset exceeds 50K rows. Consider using a subset for initial testing.
+
+### EVE_SURICATA
+Network traffic dataset from Suricata IDS in EVE JSON (NDJSON) format. Labels are binary: 0 = Benign, 1 = Attack (derived from alert severity). Unlike CICIDS2017 and HIKARI2021, input is a `.json` / `.log` file — not a CSV.
+
+All four EVE pipelines share an identical 11-phase preprocessing chain (Phases 1–9 implemented in `phase_runner.py`). Only the model differs between them.
+
+**Shared phase pipeline:**
+
+| Phase | Name | What it does |
+|---|---|---|
+| 1 | Load & Label | 2-pass NDJSON ingestion, binary labeling, disk-backed sharding |
+| 2 | Feature Engineering | Hash encoding, flow/alert totals, categorical expansion |
+| 3 | Computed Features | Interaction terms, row-level stats, normalization |
+| 4 | Aggressive Cleaning | NaN/Inf elimination, constant-column removal |
+| 7 | Correlation Analysis | Leakage detection — artifacts written but output not piped forward |
+| 8 | Train/Test Split | Stratified attack-aware split |
+| 9 | Feature Selection | MI + RFE (top 25) + PCA — returns three feature sets |
+
+**Pipelines:**
+
+| Pipeline ID | Algorithm | Features used | ROC method |
+|---|---|---|---|
+| `eve_suricata.rfc` | Random Forest (100 trees) | RFE top 25 | predict_proba |
+| `eve_suricata.dt` | Decision Tree | RFE top 25 | predict_proba |
+| `eve_suricata.lsvc` | Linear SVC + StandardScaler | MI top 25 | decision_function |
+| `eve_suricata.xgb` | XGBoost | MI top 25 | predict_proba |
+
+> **XGBoost is an optional dependency.** If `xgboost` is not installed, the pipeline raises a clear `ImportError` at run time. All other pipelines are unaffected.
+
 ---
 
 ## Setup
@@ -94,7 +130,7 @@ All HIKARI2021 pipelines use 70/30 train/test split. The RFC pipeline uses 80/20
 
 ```bash
 # 1. Clone / navigate to project
-cd d:/Program/claude
+cd d:/Program/TA
 
 # 2. Create and activate virtual environment
 python -m venv venv
@@ -116,6 +152,10 @@ matplotlib>=3.7.0
 pytest>=7.4.0
 reportlab>=4.0.0
 imbalanced-learn>=0.11.0
+celery>=5.3.0
+redis>=5.0.0
+xgboost>=2.0.0
+tqdm>=4.65.0
 ```
 
 ### Option B — Docker (full async stack)
@@ -217,7 +257,7 @@ Each experiment saves three files under `storage/artifacts/{experiment_id}/`:
 
 | File | Contents |
 |---|---|
-| `model.joblib` | Trained sklearn model object |
+| `model.pkl` | Trained sklearn model object (joblib format) |
 | `metrics.json` | All numeric metrics + extra_info (ROC, feature importance, learning curve) |
 | `metadata.json` | Dataset path, hash, pipeline ID, label mapping, feature names, timestamps |
 
@@ -232,7 +272,7 @@ Single table: `experiments`
 | Column | Type | Notes |
 |---|---|---|
 | `experiment_id` | TEXT | UUID, primary key |
-| `dataset_type` | TEXT | `CICIDS2017` or `HIKARI2021` |
+| `dataset_type` | TEXT | `CICIDS2017`, `HIKARI2021`, or `EVE_SURICATA` |
 | `dataset_path` | TEXT | Path to source CSV |
 | `dataset_hash` | TEXT | SHA-256 of the CSV file |
 | `pipeline_id` | TEXT | Registry key |
@@ -245,7 +285,7 @@ Single table: `experiments`
 | `recall` | REAL | |
 | `f1_score` | REAL | |
 | `metrics_path` | TEXT | Relative path to metrics.json |
-| `model_path` | TEXT | Relative path to model.joblib |
+| `model_path` | TEXT | Relative path to model.pkl |
 | `error_message` | TEXT | Populated on FAILED status |
 
 Schema versioning is managed by `database/migration.py`. Migrations run automatically on `init_db()`.
@@ -322,6 +362,7 @@ pytest tests/test_validator.py tests/test_parser.py -v      # dataset layer
 pytest tests/test_pipeline_rf.py -v                         # CICIDS2017 pipeline
 pytest tests/test_pipeline_hikari.py -v                     # HIKARI2021 RFC pipeline
 pytest tests/test_hikari_all_pipelines.py -v                # all 5 new HIKARI pipelines (50 tests)
+pytest tests/test_eve_pipeline.py -v                        # EVE/Suricata pipelines
 pytest tests/test_experiment_service.py -v                  # orchestrator integration
 pytest tests/test_execution_service.py -v                   # execution service
 pytest tests/test_artifact_saver.py -v                      # utils
@@ -358,21 +399,29 @@ SHA-256 hashing of the input file provides an integrity check — the database r
 
 **Celery idempotency guard.** The worker checks the experiment status before execution (`acks_late=True` can cause redelivery). If the experiment is already `FINISHED` or `FAILED`, the task is skipped safely.
 
+**EVE/Suricata phase isolation.** All four EVE models call the same `run_phases_1_through_9()` function. Intermediate files are written to a `tempfile.mkdtemp()` directory and cleaned up via a `cleanup()` callable in the `finally` block — even on failure. This keeps the pipeline stateless and prevents disk leaks across runs.
+
+**LinearSVC ROC without predict_proba.** `LinearSVC` has no `predict_proba`. The EVE LSVC pipeline uses `decision_function` scores instead, which are valid inputs for `roc_auc_score` and `roc_curve`.
+
+**XGBoost as a soft dependency.** `eve_xgb_pipeline.py` wraps the `xgboost` import in a `try/except` at module level. If XGBoost is not installed, the class still loads but `run()` raises a descriptive `ImportError`. This avoids breaking the registry import for users who don't need XGBoost.
+
 ---
 
 ## Project Status
 
 | Layer | Status |
 |---|---|
-| Dataset schemas (CICIDS2017, HIKARI2021) | ✅ Complete |
+| Dataset schemas (CICIDS2017, HIKARI2021, EVE_SURICATA) | ✅ Complete |
 | Database (SQLite + migrations) | ✅ Complete |
 | CICIDS2017 pipelines (RF + RFE) | ✅ Complete |
 | HIKARI2021 pipelines (RFC, DT, KNN, SVC, NBGC, LR) | ✅ Complete |
+| EVE/Suricata pipelines (RFC, DT, LinearSVC, XGBoost) | ✅ Complete |
+| EVE/Suricata 11-phase shared preprocessing | ✅ Complete |
 | Orchestrator services | ✅ Complete |
 | CLI runner | ✅ Complete |
 | Streamlit UI (3 views) | ✅ Complete |
 | PDF report generation | ✅ Complete |
 | Live progress indicators | ✅ Complete |
-| Test suite (~100 tests) | ✅ Complete |
+| Test suite | ✅ Complete |
 | Async execution (Celery + Redis) | ✅ Complete |
 | Docker containerization | ✅ Complete |
