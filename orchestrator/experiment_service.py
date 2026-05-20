@@ -18,12 +18,23 @@ from orchestrator.dataset_parser import parse_dataset
 from database.db import (
     create_experiment, set_running, set_finished, set_failed,
     cancel_experiment as db_cancel_experiment,
-    get_experiment, init_db,
+    get_experiment, init_db, set_task_id,
 )
 from utils.hashing import sha256_file
 from utils.timestamps import now_iso
 from utils.artifact_saver import save_all_artifacts
 from utils.error_sanitizer import sanitize_error
+
+# [DIAG] In-process diagnostic stash for UI consumption.
+# Keyed by experiment_id, stores resolved USE_ASYNC, chosen branch,
+# task_id, and dispatch timestamp. Lives for the life of the Streamlit
+# process. Keeps orchestrator free of any Streamlit import (layer rule).
+_DIAG_DISPATCH: dict[str, dict] = {}
+
+
+def get_diag(experiment_id: str) -> dict:
+    """[DIAG] Return the dispatch diagnostic for an experiment, or {} if absent."""
+    return _DIAG_DISPATCH.get(experiment_id, {})
 
 
 def validate_dataset_for_ui(dataset_type: str, dataset_path: str) -> dict:
@@ -87,12 +98,31 @@ def create_and_run_experiment(
                 )
 
             from workers.celery_worker import run_pipeline_task
-            run_pipeline_task.delay(
+            logger.info("[DIAG] USE_ASYNC=%s branch=async", USE_ASYNC)
+            async_result = run_pipeline_task.delay(
                 experiment_id=experiment_id,
                 dataset_type=dataset_type,
                 dataset_path=dataset_path,
                 pipeline_id=pipeline_id,
             )
+            # [DIAG] Stash dispatch facts for the UI diagnostic block.
+            _DIAG_DISPATCH[experiment_id] = {
+                "USE_ASYNC": USE_ASYNC,
+                "branch": "async",
+                "task_id": async_result.id,
+                "timestamp": now_iso(),
+            }
+            # Persist Celery task id so cancel_experiment can revoke the
+            # right task later. revoke() targets by Celery task id, NOT by
+            # our experiment uuid.
+            try:
+                set_task_id(experiment_id, async_result.id)
+            except Exception:
+                logger.exception(
+                    "Failed to persist Celery task_id for %s — cancellation "
+                    "of this experiment will be a no-op on the worker side",
+                    experiment_id,
+                )
             return {
                 "success": True,
                 "experiment_id": experiment_id,
@@ -106,7 +136,17 @@ def create_and_run_experiment(
         # --- Sync path ---
         set_running(experiment_id, started_at=now_iso())
         df = parse_dataset(dataset_path)
-        result = execute_pipeline(pipeline_id, df, dataset_type, dataset_path=dataset_path)
+        # Sync path has no progress reporter — UI shows static text.
+        # Async path supplies a Celery-backed callback (see celery_worker.py).
+        logger.info("[DIAG] USE_ASYNC=%s branch=sync", USE_ASYNC)
+        # [DIAG] Stash dispatch facts for the UI diagnostic block.
+        _DIAG_DISPATCH[experiment_id] = {
+            "USE_ASYNC": USE_ASYNC,
+            "branch": "sync",
+            "task_id": None,
+            "timestamp": now_iso(),
+        }
+        result = execute_pipeline(pipeline_id, df, dataset_type, dataset_path=dataset_path, progress=None)
 
         metrics_dict = {
             "accuracy": result.accuracy,
@@ -244,21 +284,50 @@ def get_experiment_status(experiment_id: str) -> dict | None:
     """
     Get current experiment status. Used for UI polling in async mode.
     Returns the full experiment dict from DB, or None if not found.
+
+    When USE_ASYNC is True, the experiment is RUNNING, and a task_id is
+    stored, also attempt a best-effort read of the Celery task's
+    PROGRESS meta from Redis and attach it as ``celery_stage`` for the
+    UI to display. Failures are silent (debug-logged) — the DB row is
+    still the authoritative status.
     """
-    return get_experiment(experiment_id)
+    exp = get_experiment(experiment_id)
+    if exp is None:
+        return None
+
+    if USE_ASYNC and exp.get("status") == "RUNNING" and exp.get("task_id"):
+        try:
+            from workers.celery_worker import app as celery_app
+            async_result = celery_app.AsyncResult(exp["task_id"])
+            info = async_result.info
+            if isinstance(info, dict):
+                stage = info.get("stage")
+                if stage:
+                    exp["celery_stage"] = stage
+        except Exception:
+            logger.debug(
+                "Could not read Celery PROGRESS meta for %s — omitting celery_stage",
+                experiment_id,
+                exc_info=True,
+            )
+
+    return exp
 
 
 def cancel_experiment(experiment_id: str) -> dict:
     """
     Cancel a QUEUED or RUNNING experiment.
 
-    Async mode: best-effort Celery task revoke (SIGTERM), then DB → FAILED.
-    Sync mode: DB → FAILED only (in-process pipeline cannot be interrupted mid-run).
+    Async mode: best-effort Celery task revoke (SIGTERM) using the stored
+    Celery task id, then DB -> FAILED.
+    Sync mode: DB -> FAILED only (in-process pipeline cannot be interrupted mid-run).
 
-    Note on Celery revocation: revoke() targets by Celery task ID, which differs
-    from experiment_id. The DB status is always updated regardless of whether the
-    revoke succeeds — the idempotency guard in the worker will skip the result even
-    if the task completes after cancellation.
+    Note on Celery revocation: revoke() targets by Celery task id, which differs
+    from experiment_id. We persist the AsyncResult.id at dispatch time
+    (see create_and_run_experiment) and look it up here. If task_id is NULL
+    (sync experiment, or async experiment whose set_task_id call failed)
+    the revoke is skipped — the idempotency guard in the worker will still
+    drop any late result after the DB is marked FAILED.
 
     Returns dict with: success, experiment_id, message
     """
@@ -278,11 +347,18 @@ def cancel_experiment(experiment_id: str) -> dict:
         }
 
     if USE_ASYNC:
-        try:
-            from workers.celery_worker import app as celery_app
-            celery_app.control.revoke(experiment_id, terminate=True, signal="SIGTERM")
-        except Exception as e:
-            logger.warning("Could not revoke Celery task for %s: %s", experiment_id, e)
+        task_id = exp.get("task_id")
+        if task_id:
+            try:
+                from workers.celery_worker import app as celery_app
+                celery_app.control.revoke(task_id, terminate=True, signal="SIGTERM")
+            except Exception as e:
+                logger.warning("Could not revoke Celery task %s for %s: %s", task_id, experiment_id, e)
+        else:
+            logger.debug(
+                "cancel_experiment: no task_id stored for %s — skipping Celery revoke",
+                experiment_id,
+            )
 
     updated = db_cancel_experiment(experiment_id, completed_at=now_iso())
     if updated:

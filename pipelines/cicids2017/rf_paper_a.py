@@ -4,6 +4,8 @@ Pipeline 1: Random Forest + RFE (Sharafaldin et al., ICISSP 2018).
 Standardised deviations from the original notebook are documented in SCOPE.md.
 No database imports. No UI imports. Fully deterministic at random_state=42.
 """
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import LabelEncoder, StandardScaler, label_binarize
@@ -16,15 +18,20 @@ from sklearn.metrics import (
 )
 
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, ProgressCallback
 
 _PROBLEMATIC_COLS = ["Flow Bytes/s", "Flow Packets/s"]
 
 
 class RFPaperAPipeline(BasePipeline):
 
-    def run(self, pipeline_input: PipelineInput) -> PipelineResult:
+    def run(
+        self,
+        pipeline_input: PipelineInput,
+        progress: Optional[ProgressCallback] = None,
+    ) -> PipelineResult:
         """Execute the full RF+RFE pipeline and return structured results."""
+        self._emit_progress(progress, "Preprocessing")
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
 
@@ -53,6 +60,7 @@ class RFPaperAPipeline(BasePipeline):
             X, y, test_size=0.2, random_state=42, stratify=y
         )
 
+        self._emit_progress(progress, "Scaling & RFE")
         # Step 6: StandardScaler — fit on train only
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
@@ -68,6 +76,7 @@ class RFPaperAPipeline(BasePipeline):
         X_test_rfe = rfe.transform(X_test_scaled)
         selected_features = [feature_col_names[i] for i, sel in enumerate(rfe.support_) if sel]
 
+        self._emit_progress(progress, "Training")
         # Step 8: Train final model
         clf = RandomForestClassifier(n_estimators=100, random_state=42)
         clf.fit(X_train_rfe, y_train)
@@ -128,6 +137,7 @@ class RFPaperAPipeline(BasePipeline):
         )
 
         # 10d: Learning curve (on already-selected features for speed and consistency)
+        self._emit_progress(progress, "Computing learning curve")
         try:
             train_sizes, train_scores, test_scores = learning_curve(
                 RandomForestClassifier(n_estimators=100, random_state=42),

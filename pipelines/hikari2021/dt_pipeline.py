@@ -1,4 +1,6 @@
 """Decision Tree pipeline for HIKARI2021."""
+from typing import Optional
+
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import train_test_split, learning_curve
 from sklearn.metrics import (
@@ -7,14 +9,19 @@ from sklearn.metrics import (
     classification_report,
 )
 
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, ProgressCallback
 from pipelines.hikari2021._common import common_preprocess, _LABEL_NAMES
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 
 
 class HikariDTPipeline(BasePipeline):
 
-    def run(self, pipeline_input: PipelineInput) -> PipelineResult:
+    def run(
+        self,
+        pipeline_input: PipelineInput,
+        progress: Optional[ProgressCallback] = None,
+    ) -> PipelineResult:
+        self._emit_progress(progress, "Preprocessing")
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
         random_state = pipeline_input.random_state
@@ -25,9 +32,11 @@ class HikariDTPipeline(BasePipeline):
             X, y, test_size=0.3, random_state=random_state, stratify=y
         )
 
+        self._emit_progress(progress, "Training")
         clf = DecisionTreeClassifier(random_state=random_state)
         clf.fit(X_train, y_train)
 
+        self._emit_progress(progress, "Evaluating")
         y_pred = clf.predict(X_test)
         accuracy = float(accuracy_score(y_test, y_pred))
         precision = float(precision_score(y_test, y_pred, average="weighted", zero_division=0))
@@ -58,6 +67,7 @@ class HikariDTPipeline(BasePipeline):
             zero_division=0,
         )
 
+        self._emit_progress(progress, "Computing learning curve")
         try:
             train_sizes, train_scores, val_scores = learning_curve(
                 estimator=DecisionTreeClassifier(random_state=random_state),

@@ -53,6 +53,27 @@ app.conf.update(
 )
 
 
+def _safe_update_state(task, stage: str) -> None:
+    """
+    Best-effort coarse progress reporter.
+
+    Emits a custom Celery state "PROGRESS" with a single ``stage`` string
+    in meta. Failures (broker down, serialization errors, etc.) are
+    logged and swallowed — progress reporting must NEVER cause an
+    experiment to fail.
+
+    The state name "PROGRESS" is deliberately distinct from Celery's
+    built-in states (PENDING/STARTED/SUCCESS/FAILURE/REVOKED/RETRY/REJECTED)
+    so we don't shadow them.
+    """
+    logger.info("[DIAG] _safe_update_state entry stage=%s", stage)
+    try:
+        task.update_state(state="PROGRESS", meta={"stage": stage})
+    except Exception:
+        logger.exception("[DIAG] _safe_update_state swallowed exception")
+        logger.exception("Progress update failed for stage=%r — continuing", stage)
+
+
 @app.task(
     bind=True,
     name='workers.run_pipeline_task',
@@ -77,6 +98,14 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
       6. Save artifacts (with orphan cleanup on DB failure)
       7. Set status FINISHED (or FAILED on error)
     """
+    # [DIAG] First statement in the task body — proves the worker actually
+    # picked up the task AND that update_state itself works, in one shot.
+    # The UI reads AsyncResult(task_id).info["stage"] back through the
+    # orchestrator's get_experiment_status() helper.
+    try:
+        self.update_state(state="PROGRESS", meta={"stage": "[DIAG] worker task entered"})
+    except Exception:
+        logger.exception("[DIAG] worker-entered update_state failed")
     try:
         # Idempotency guard: skip if already completed (handles Celery acks_late redelivery)
         exp = get_experiment(experiment_id)
@@ -98,7 +127,18 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
 
         df = parse_dataset(dataset_path)
 
-        result = execute_pipeline(pipeline_id, df, dataset_type, dataset_path=dataset_path)
+        _safe_update_state(self, "Executing pipeline...")
+        # Forward fine-grained pipeline stages to Celery PROGRESS state.
+        # _safe_update_state already swallows exceptions internally; the
+        # pipeline-side _emit_progress wrapper does so as well — a doubly
+        # safe path that cannot fail the experiment.
+        def _progress(stage: str) -> None:
+            logger.info("[DIAG] celery callback invoked stage=%s", stage)
+            _safe_update_state(self, stage)
+        result = execute_pipeline(
+            pipeline_id, df, dataset_type, dataset_path=dataset_path, progress=_progress,
+        )
+        _safe_update_state(self, "Saving results...")
 
         metrics_dict = {
             "accuracy": result.accuracy,

@@ -12,6 +12,8 @@ Fixed configuration:
   - No PCA (USE_PCA=False in original config)
   - No feature selection (all numeric features used)
 """
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -24,7 +26,7 @@ from sklearn.metrics import (
 )
 from imblearn.under_sampling import RandomUnderSampler
 
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, ProgressCallback
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 
 
@@ -40,8 +42,13 @@ _LABEL_NAMES = ["Benign", "Malicious"]
 
 class HikariRFCPipeline(BasePipeline):
 
-    def run(self, pipeline_input: PipelineInput) -> PipelineResult:
+    def run(
+        self,
+        pipeline_input: PipelineInput,
+        progress: Optional[ProgressCallback] = None,
+    ) -> PipelineResult:
         """Execute the full RFC pipeline for HIKARI2021 and return structured results."""
+        self._emit_progress(progress, "Preprocessing")
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
         random_state = pipeline_input.random_state
@@ -75,6 +82,7 @@ class HikariRFCPipeline(BasePipeline):
             stratify=y,
         )
 
+        self._emit_progress(progress, "Balancing & scaling")
         # Step 5: RandomUnderSampler on TRAIN only (corrected — balancing after split)
         rus = RandomUnderSampler(random_state=random_state)
         X_train_bal, y_train_bal = rus.fit_resample(X_train, y_train)
@@ -86,6 +94,7 @@ class HikariRFCPipeline(BasePipeline):
         X_train_scaled = scaler.fit_transform(X_train_bal)
         X_test_scaled = scaler.transform(X_test)
 
+        self._emit_progress(progress, "Training")
         # Step 7: Train model on balanced + scaled train data
         clf = RandomForestClassifier(
             n_estimators=100,
@@ -130,6 +139,7 @@ class HikariRFCPipeline(BasePipeline):
         )
 
         # 9d: Learning curve
+        self._emit_progress(progress, "Computing learning curve")
         try:
             train_sizes, train_scores, val_scores = learning_curve(
                 estimator=RandomForestClassifier(

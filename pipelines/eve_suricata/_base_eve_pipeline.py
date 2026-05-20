@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from abc import abstractmethod
+from typing import Optional
 
 from sklearn.metrics import (
     accuracy_score, classification_report, confusion_matrix,
@@ -20,7 +21,7 @@ from sklearn.metrics import (
 )
 
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, ProgressCallback
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,11 @@ class BaseEvePipeline(BasePipeline):
     Requires pipeline_input.dataset_path — the path to the EVE NDJSON file.
     """
 
-    def run(self, pipeline_input: PipelineInput) -> PipelineResult:
+    def run(
+        self,
+        pipeline_input: PipelineInput,
+        progress: Optional[ProgressCallback] = None,
+    ) -> PipelineResult:
         if not pipeline_input.dataset_path:
             raise ValueError(
                 "EVE/Suricata pipelines require dataset_path in PipelineInput. "
@@ -45,11 +50,13 @@ class BaseEvePipeline(BasePipeline):
         from pipelines.eve_suricata.phase_runner import run_phases_1_through_9
 
         rs = pipeline_input.random_state
+        self._emit_progress(progress, "Running phases 1-9 (preprocessing)")
         prep = run_phases_1_through_9(
             dataset_path=pipeline_input.dataset_path,
             random_state=rs,
         )
         try:
+            self._emit_progress(progress, "Training & evaluation")
             result = self._train_and_extract(prep, rs)
         finally:
             prep["cleanup"]()
