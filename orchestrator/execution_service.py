@@ -2,6 +2,8 @@
 Execution service — pipeline dispatch.
 No database access. Raises on errors (experiment_service catches).
 """
+from typing import Callable, Optional
+
 import pandas as pd
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 from contracts.dataset_schemas import get_schema
@@ -14,10 +16,16 @@ def execute_pipeline(
     df: pd.DataFrame,
     dataset_type: str,
     dataset_path: str = "",
+    progress: Optional[Callable[[str], None]] = None,
 ) -> PipelineResult:
     """
     Resolve pipeline, build input, execute, return result.
     Raises ValueError if pipeline or schema not found.
+
+    ``progress`` is an optional callback forwarded to the pipeline for
+    coarse stage reporting. Pipelines must run identically when
+    ``progress`` is None (default), which is the case for sync execution
+    and all tests.
     """
     instance = get_pipeline_instance(pipeline_id)
     if instance is None:
@@ -33,7 +41,7 @@ def execute_pipeline(
         dataset_type=dataset_type,
         dataset_path=dataset_path,
     )
-    return run_pipeline(instance, pipeline_input)
+    return run_pipeline(instance, pipeline_input, progress=progress)
 
 
 def get_pipeline_info(pipeline_id: str) -> dict | None:

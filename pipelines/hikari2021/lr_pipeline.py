@@ -1,4 +1,6 @@
 """Logistic Regression pipeline for HIKARI2021 (split-first, then StandardScaler + PCA on train only)."""
+from typing import Optional
+
 import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.decomposition import PCA
@@ -10,14 +12,19 @@ from sklearn.metrics import (
     classification_report,
 )
 
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, ProgressCallback
 from pipelines.hikari2021._common import common_preprocess, _LABEL_NAMES
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 
 
 class HikariLRPipeline(BasePipeline):
 
-    def run(self, pipeline_input: PipelineInput) -> PipelineResult:
+    def run(
+        self,
+        pipeline_input: PipelineInput,
+        progress: Optional[ProgressCallback] = None,
+    ) -> PipelineResult:
+        self._emit_progress(progress, "Preprocessing")
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
         random_state = pipeline_input.random_state
@@ -29,6 +36,7 @@ class HikariLRPipeline(BasePipeline):
             X, y, test_size=0.3, random_state=random_state, stratify=y,
         )
 
+        self._emit_progress(progress, "Scaling & PCA")
         # 6. StandardScaler — fit on TRAIN only (fixes leakage from original notebook)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train)
@@ -40,6 +48,7 @@ class HikariLRPipeline(BasePipeline):
         X_test_pca = pca.transform(X_test_scaled)
         pca_feature_names = [f"PC{i+1}" for i in range(X_train_pca.shape[1])]
 
+        self._emit_progress(progress, "Training")
         # 8. Train on PCA-transformed train data
         clf = LogisticRegression(max_iter=3000, random_state=random_state)
         clf.fit(X_train_pca, y_train)
@@ -75,6 +84,7 @@ class HikariLRPipeline(BasePipeline):
             zero_division=0,
         )
 
+        self._emit_progress(progress, "Computing learning curve")
         try:
             train_sizes, train_scores, val_scores = learning_curve(
                 LogisticRegression(max_iter=3000, random_state=random_state),
