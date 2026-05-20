@@ -1,4 +1,6 @@
 """K-Nearest Neighbors pipeline for HIKARI2021."""
+from typing import Optional
+
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, learning_curve
@@ -9,14 +11,19 @@ from sklearn.metrics import (
 )
 from imblearn.under_sampling import RandomUnderSampler
 
-from pipelines.base import BasePipeline
+from pipelines.base import BasePipeline, ProgressCallback
 from pipelines.hikari2021._common import common_preprocess, _LABEL_NAMES
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 
 
 class HikariKNNPipeline(BasePipeline):
 
-    def run(self, pipeline_input: PipelineInput) -> PipelineResult:
+    def run(
+        self,
+        pipeline_input: PipelineInput,
+        progress: Optional[ProgressCallback] = None,
+    ) -> PipelineResult:
+        self._emit_progress(progress, "Preprocessing")
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
         random_state = pipeline_input.random_state
@@ -27,6 +34,7 @@ class HikariKNNPipeline(BasePipeline):
             X, y, test_size=0.3, random_state=random_state, stratify=y
         )
 
+        self._emit_progress(progress, "Balancing & scaling")
         # Balance train set only (after split — no leakage of test distribution)
         rus = RandomUnderSampler(random_state=random_state)
         X_train_bal, y_train_bal = rus.fit_resample(X_train, y_train)
@@ -35,6 +43,7 @@ class HikariKNNPipeline(BasePipeline):
         X_train_scaled = scaler.fit_transform(X_train_bal)
         X_test_scaled = scaler.transform(X_test)
 
+        self._emit_progress(progress, "Training")
         clf = KNeighborsClassifier(n_neighbors=5, n_jobs=-1)
         clf.fit(X_train_scaled, y_train_bal)
 
@@ -61,6 +70,7 @@ class HikariKNNPipeline(BasePipeline):
             zero_division=0,
         )
 
+        self._emit_progress(progress, "Computing learning curve")
         try:
             train_sizes, train_scores, val_scores = learning_curve(
                 estimator=KNeighborsClassifier(n_neighbors=5, n_jobs=-1),

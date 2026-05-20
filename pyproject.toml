@@ -11,5 +11,5 @@ requires-python = ">=3.10"
 packages = [
     "config", "contracts", "database", "orchestrator",
     "pipelines", "pipelines.cicids2017", "pipelines.hikari2021",
-    "workers", "utils", "ui", "ui.views", "ui.pages",
+    "workers", "utils", "ui", "ui.views",
 ]

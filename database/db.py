@@ -205,6 +205,25 @@ def list_experiments_paginated(
 
 
 @_retry_on_locked()
+def set_task_id(experiment_id: str, task_id: str, db_path: str | None = None) -> None:
+    """Store the Celery AsyncResult.id for a dispatched async experiment.
+
+    Used by experiment_service so that cancel_experiment can later
+    revoke the correct Celery task (revoke targets by Celery task id,
+    not our experiment uuid).
+    """
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            "UPDATE experiments SET task_id = ? WHERE id = ?",
+            (task_id, experiment_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+@_retry_on_locked()
 def cancel_experiment(
     experiment_id: str,
     completed_at: str,

@@ -1,9 +1,12 @@
 """
 Run Experiment page — supports both sync and async execution.
 """
+import logging
 import time
 from pathlib import Path
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,6 +16,7 @@ matplotlib.use('Agg')
 from orchestrator.experiment_service import (
     validate_dataset_for_ui, create_and_run_experiment, get_experiment_status,
     cancel_experiment,
+    get_diag,  # [DIAG] dispatch diagnostic accessor
 )
 from orchestrator.execution_service import get_pipeline_info
 from orchestrator.validation_service import get_available_datasets
@@ -222,6 +226,7 @@ def render():
 def _poll_experiment(experiment_id: str):
     """Poll experiment status until FINISHED or FAILED, then trigger rerun."""
     status_data = get_experiment_status(experiment_id)
+    logger.info("[DIAG] poll tick status_data=%r", status_data)
 
     if status_data is None:
         st.error("Experiment not found.")
@@ -237,7 +242,13 @@ def _poll_experiment(experiment_id: str):
             if status == "QUEUED":
                 st.write("Waiting for worker to pick up the task...")
             else:
-                st.write("Pipeline is executing. This may take several minutes...")
+                # Show coarse celery stage if the worker reported one;
+                # fall back to the existing static text otherwise.
+                celery_stage = status_data.get("celery_stage")
+                if celery_stage:
+                    st.write(f"**Current step:** {celery_stage}")
+                else:
+                    st.write("Pipeline is executing. This may take several minutes...")
             st.write("This page auto-refreshes every 5 seconds.")
         if st.button("🛑 Cancel Experiment", key=f"cancel_poll_{experiment_id}"):
             r = cancel_experiment(experiment_id)
@@ -247,6 +258,11 @@ def _poll_experiment(experiment_id: str):
             else:
                 st.error(r["message"])
             st.rerun()
+
+        # [DIAG] Diagnostic block — visible on every poll tick. Removable
+        # in one grep pass (search for "[DIAG]"). No expander, no collapse.
+        _render_diag_block(experiment_id, status_data)
+
         pipeline_id = status_data.get("pipeline_id", "")
         interval = _get_poll_interval(pipeline_id)
         st.caption(f"Refreshing in {interval}s...")
@@ -273,6 +289,69 @@ def _poll_experiment(experiment_id: str):
             st.warning("⚠️ Experiment was cancelled.")
         else:
             st.error(f"❌ Experiment failed: {error_msg}")
+
+
+def _render_diag_block(experiment_id: str, status_data: dict) -> None:
+    """[DIAG] Render the diagnostic block on the Run Experiment page.
+
+    Shows everything needed to identify which link in the dispatch chain
+    is broken: env-var, orchestrator branch, task_id, DB status, worker
+    entered marker, raw AsyncResult.
+    """
+    import os
+    st.markdown("---")
+    st.write("### [DIAG] Diagnostic block")
+
+    # 1. What the Streamlit process sees in its own environment, RIGHT NOW.
+    env_use_async = os.environ.get("USE_ASYNC")
+
+    # 2. What config.celery_config bound at import time (frozen for life of process).
+    try:
+        from config.celery_config import USE_ASYNC as cfg_use_async
+    except Exception as e:  # defensive — should never fail
+        cfg_use_async = f"<import error: {e}>"
+
+    # 3. What the orchestrator stashed at dispatch.
+    diag = get_diag(experiment_id)
+    branch = diag.get("branch")
+    task_id = diag.get("task_id")
+    diag_use_async = diag.get("USE_ASYNC")
+
+    # 4. Raw AsyncResult — proves whether the worker has actually entered
+    # the task body. The `[DIAG] worker task entered` marker is written
+    # as the literal first statement of run_pipeline_task.
+    raw_state = None
+    raw_info = None
+    worker_entered = False
+    if task_id:
+        try:
+            from workers.celery_worker import app as celery_app
+            ar = celery_app.AsyncResult(task_id)
+            raw_state = ar.state
+            raw_info = ar.info
+            if isinstance(raw_info, dict):
+                stage = raw_info.get("stage", "")
+                # Any PROGRESS state at all proves the worker ran the
+                # first statement of the task body.
+                if "worker task entered" in str(stage) or raw_state == "PROGRESS":
+                    worker_entered = True
+            elif raw_state in ("STARTED", "SUCCESS", "PROGRESS"):
+                worker_entered = True
+        except Exception as e:
+            raw_info = f"<AsyncResult error: {e}>"
+
+    st.write(f"**os.environ.get('USE_ASYNC')** (Streamlit process env): `{env_use_async!r}`")
+    st.write(f"**config.celery_config.USE_ASYNC** (frozen at import): `{cfg_use_async!r}`")
+    st.write(f"**Dispatched branch** (from orchestrator stash): `{branch!r}`")
+    st.write(f"**Dispatch-time USE_ASYNC** (from orchestrator stash): `{diag_use_async!r}`")
+    st.write(f"**task_id**: `{task_id!r}`")
+    st.write(f"**DB status**: `{status_data.get('status')!r}`")
+    st.write(f"**worker task started**: `{'yes' if worker_entered else 'no'}`")
+    st.write(f"**raw AsyncResult.state**: `{raw_state!r}`")
+    st.write("**raw AsyncResult.info**:")
+    st.code(repr(raw_info), language="python")
+    st.write("**status_data** (full dict from get_experiment_status):")
+    st.json(status_data)
 
 
 def _display_results(result: dict):

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS experiments (
     f1_score          REAL,
     metrics_path      TEXT,
     model_path        TEXT,
-    error_message     TEXT
+    error_message     TEXT,
+    task_id           TEXT
 );
 """
 
