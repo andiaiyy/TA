@@ -10,12 +10,12 @@ from orchestrator.result_service import list_all_experiments
 
 
 def render():
-    st.title("⚙️ Environment Info")
+    st.title("Environment Info")
 
     env = get_environment_info()
 
     # --- System Info ---
-    with st.expander("🖥️ System", expanded=True):
+    with st.expander("System", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             st.markdown(f"**Python:** {env.get('python_version', 'N/A')}")
@@ -27,35 +27,35 @@ def render():
             st.markdown(f"**numpy:** {env.get('numpy_version', 'N/A')}")
 
     # --- Docker Status ---
-    with st.expander("🐳 Docker", expanded=True):
+    with st.expander("Docker", expanded=True):
         if env.get("is_docker"):
-            st.success("✅ Running inside Docker container")
+            st.success("Running inside Docker container")
             if env.get("docker_image_version"):
                 st.markdown(f"**Image Version:** `{env['docker_image_version']}`")
             st.markdown("Environment is isolated and reproducible.")
         else:
-            st.info("ℹ️ Running locally (not in Docker)")
+            st.info("ℹRunning locally (not in Docker)")
             st.markdown("For environment-level reproducibility, deploy with `docker-compose up`.")
 
     # --- Execution Mode ---
-    with st.expander("⚡ Execution Mode", expanded=True):
+    with st.expander("Execution Mode", expanded=True):
         from config.celery_config import USE_ASYNC, CELERY_BROKER_URL
         if USE_ASYNC:
-            st.success("✅ Async mode (Celery + Redis)")
+            st.success("Async mode (Celery + Redis)")
             st.markdown("Experiments are queued and executed by a background worker.")
             try:
                 import redis as _redis
                 r = _redis.Redis.from_url(CELERY_BROKER_URL)
                 r.ping()
-                st.markdown("**Redis:** 🟢 Connected")
+                st.markdown("**Redis:** Connected")
             except Exception:
-                st.markdown("**Redis:** 🔴 Not reachable")
+                st.markdown("**Redis:** Not reachable")
         else:
-            st.info("ℹ️ Sync mode (local worker)")
+            st.info("ℹSync mode (local worker)")
             st.markdown("Experiments run in the UI process. Set `USE_ASYNC=true` for background execution.")
 
     # --- Storage Paths ---
-    with st.expander("📁 Storage", expanded=True):
+    with st.expander("Storage", expanded=True):
         st.markdown(f"**Base:** `{BASE_DIR}`")
         st.markdown(f"**Datasets:** `{DATASETS_DIR}`")
         st.markdown(f"**Artifacts:** `{ARTIFACTS_DIR}`")
@@ -71,7 +71,7 @@ def render():
             st.markdown(f"**Experiments:** {len([d for d in ap.iterdir() if d.is_dir()])}")
 
     # --- Registered Pipelines ---
-    with st.expander("🔧 Pipelines", expanded=True):
+    with st.expander("Pipelines", expanded=True):
         pipelines = list_all_pipelines()
         datasets = get_available_datasets()
         st.markdown(f"**Total pipelines:** {len(pipelines)}")
@@ -84,7 +84,7 @@ def render():
                 st.json(detail["fixed_params"])
 
     # --- Database Stats ---
-    with st.expander("🗄️ Database", expanded=False):
+    with st.expander("Database", expanded=False):
         exps = list_all_experiments()
         c1, c2, c3 = st.columns(3)
         c1.metric("Total", len(exps))

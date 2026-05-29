@@ -139,6 +139,26 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
             pipeline_id, df, dataset_type, dataset_path=dataset_path, progress=_progress,
         )
         _safe_update_state(self, "Saving results...")
+        logger.error("[DIAG] SAVE ENTRY REACHED")
+
+        # [DIAG-PATH] Post-pipeline state snapshot — fires BEFORE artifact save.
+        # If a FileNotFoundError occurs between here and set_finished, the line
+        # below will be the last [DIAG-PATH] entry in the worker log, giving us
+        # the exact path values active at that moment.
+        try:
+            import os as _os
+            from config.settings import ARTIFACTS_DIR as _ART_DIR
+            logger.error(
+                "[DIAG-PATH] worker save-section entry: experiment_id=%r "
+                "dataset_path=%r ds_exists=%s ARTIFACTS_DIR=%r art_exists=%s "
+                "cwd=%r model_type=%r extra_info_keys=%r",
+                experiment_id, dataset_path, _os.path.exists(dataset_path),
+                str(_ART_DIR), _os.path.exists(str(_ART_DIR)),
+                _os.getcwd(), type(result.model).__name__,
+                list(result.extra_info.keys()) if result.extra_info else [],
+            )
+        except Exception:
+            logger.exception("[DIAG-PATH] pre-save snapshot itself raised")
 
         metrics_dict = {
             "accuracy": result.accuracy,
@@ -163,7 +183,17 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
         # Save artifacts — if this fails, nothing is on disk yet
         try:
             paths = save_all_artifacts(experiment_id, result.model, metrics_dict, metadata_dict)
+            # [DIAG-PATH] Confirm save returned and log the exact paths it produced.
+            logger.error(
+                "[DIAG-PATH] save_all_artifacts returned: model_path=%r metrics_path=%r metadata_path=%r",
+                paths.get("model_path"), paths.get("metrics_path"), paths.get("metadata_path"),
+            )
         except Exception as artifact_error:
+            # [DIAG-PATH] Log the UNSANITIZED traceback so we can see the real path.
+            logger.exception(
+                "[DIAG-PATH] save_all_artifacts raised — UNSANITIZED: type=%r repr=%r",
+                type(artifact_error).__name__, repr(artifact_error),
+            )
             logger.exception("Artifact saving failed for %s", experiment_id)
             set_failed(experiment_id, completed_at=now_iso(),
                        error_message=sanitize_error(f"Artifact save failed: {artifact_error}"))
@@ -182,6 +212,11 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
                 model_path=paths["model_path"],
             )
         except Exception as db_error:
+            # [DIAG-PATH] Log the UNSANITIZED error before cleanup re-raises it.
+            logger.exception(
+                "[DIAG-PATH] set_finished raised — UNSANITIZED: type=%r repr=%r",
+                type(db_error).__name__, repr(db_error),
+            )
             logger.exception(
                 "set_finished failed for %s after artifacts saved — cleaning up", experiment_id
             )
@@ -213,6 +248,13 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
         raise
 
     except Exception as e:
+        # [DIAG-PATH] Log the UNSANITIZED error and full traceback before sanitization
+        # strips the absolute path. This is the last-line catch-all so any FileNotFoundError
+        # that bypassed the inner save/set_finished try blocks will surface here.
+        logger.exception(
+            "[DIAG-PATH] outer except: type=%r repr=%r str=%r",
+            type(e).__name__, repr(e), str(e),
+        )
         try:
             set_failed(experiment_id, completed_at=now_iso(), error_message=sanitize_error(str(e)))
         except Exception:

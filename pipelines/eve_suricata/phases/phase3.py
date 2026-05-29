@@ -68,8 +68,15 @@ def phase3_computed_features(
     n_norm: int = 10,
     raw_suffix: str = RAW_SUFFIX,
     leak_cols: Iterable[str] = ("is_malicious",),
-    # IMPORTANT: default exclude leakage-prone cols (Target derived from alert/severity in Phase 1)
-    exclude_from_features: Iterable[str] = ("has_alert", "alert_severity", "alert_category"),
+    # IMPORTANT: default exclude leakage-prone cols (Target derived from alert/severity in Phase 1).
+    # pkt_src / app_proto / flow_id / proto are categorical Phase-1 outputs hash-encoded by Phase 2
+    # whose distributions differ systematically between alert-records and flow-records, so any
+    # interaction/norm/row-stat built from them leaks Target. Must be excluded here too — Phase 8/9
+    # drops them but only AFTER Phase 3 has already baked them into derived features.
+    exclude_from_features: Iterable[str] = (
+        "has_alert", "alert_severity", "alert_category", "event_type", "event_type_h",
+        "pkt_src", "app_proto", "flow_id", "proto",
+    ),
     thr_sample_rows: int = 50_000,
     seed: int = 42,
 ) -> tuple[pd.DataFrame, dict]:
@@ -332,7 +339,11 @@ def phase3_computed_features_sharded(
     n_norm: int = 10,
     raw_suffix: str = RAW_SUFFIX,
     leak_cols: Iterable[str] = ("is_malicious",),
-    exclude_from_features: Iterable[str] = ("has_alert", "alert_severity", "alert_category"),
+    # Same leak surface as the in-memory variant — see comment on phase3_computed_features.
+    exclude_from_features: Iterable[str] = (
+        "has_alert", "alert_severity", "alert_category", "event_type", "event_type_h",
+        "pkt_src", "app_proto", "flow_id", "proto",
+    ),
     seed: int = 42,
 ) -> tuple[pd.DataFrame, dict]:
     """

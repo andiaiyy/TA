@@ -1,4 +1,7 @@
-"""Experiment History page."""
+"""Experiment History page — AgGrid table with grouped columns, metric
+highlighting, status badges, relative timestamps, and row-click detail."""
+from datetime import datetime, timezone
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,92 +9,316 @@ import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
 
-from orchestrator.result_service import list_all_experiments, list_experiments_page, get_full_experiment
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
+
+from orchestrator.result_service import (
+    list_all_experiments, get_full_experiment, get_experiment_metrics,
+)
 from orchestrator.experiment_service import rerun_experiment, cancel_experiment
+from ui.views._artifact_browser import (
+    render_file_browser, make_json_loader, make_text_loader, make_bytes_reader,
+)
 
-_STATUS_LABEL = {
-    "FINISHED": "✅ FINISHED",
-    "FAILED": "❌ FAILED",
-    "RUNNING": "🔄 RUNNING",
-    "QUEUED": "⏳ QUEUED",
+
+# ─── Time helpers ──────────────────────────────────────────────────────────
+
+def _parse_iso(iso_str):
+    if not iso_str:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(iso_str).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except (ValueError, TypeError):
+        return None
+
+
+def _relative_time(iso_str):
+    dt = _parse_iso(iso_str)
+    if dt is None:
+        return "-"
+    secs = (datetime.now(timezone.utc) - dt).total_seconds()
+    if secs < 0:
+        secs = 0
+    if secs < 60:
+        return f"{int(secs)}s ago"
+    if secs < 3600:
+        return f"{int(secs // 60)}m ago"
+    if secs < 86400:
+        return f"{int(secs // 3600)}h ago"
+    days = secs / 86400
+    if days < 30:
+        return f"{int(days)}d ago"
+    if days < 365:
+        return f"{int(days // 30)}mo ago"
+    return f"{int(days // 365)}y ago"
+
+
+def _epoch(iso_str):
+    dt = _parse_iso(iso_str)
+    return dt.timestamp() if dt else 0.0
+
+
+def _duration(start, end):
+    s, e = _parse_iso(start), _parse_iso(end)
+    if s is None or e is None:
+        return "-"
+    secs = (e - s).total_seconds()
+    if secs < 0:
+        return "-"
+    if secs < 60:
+        return f"{secs:.0f}s"
+    return f"{secs / 60:.1f}min"
+
+
+def _build_artifact_files(experiment_id: str) -> dict:
+    """Read storage/artifacts/{experiment_id}/ dynamically and map each file
+    to a viewer spec. Path-guarded to the experiment's artifact directory."""
+    from pathlib import Path
+    from config.settings import ARTIFACTS_DIR
+
+    base = Path(ARTIFACTS_DIR).resolve()
+    art_dir = (base / experiment_id).resolve()
+    files: dict = {}
+    if not art_dir.is_relative_to(base) or not art_dir.exists():
+        return files
+
+    for entry in sorted(art_dir.iterdir()):
+        if not entry.is_file():
+            continue
+        rp = entry.resolve()
+        if not rp.is_relative_to(art_dir):
+            continue  # defensive: skip anything resolving outside the dir
+        name = entry.name
+        rel = f"storage/artifacts/{experiment_id}/{name}"
+        ext = entry.suffix.lower()
+        if ext == ".json":
+            files[name] = {"icon": "", "language": "json", "full_path": rel,
+                           "download_name": name, "loader": make_json_loader(rp)}
+        elif ext in (".log", ".txt"):
+            files[name] = {"icon": "", "language": "text", "full_path": rel,
+                           "download_name": name, "tail": ext == ".log",
+                           "loader": make_text_loader(rp)}
+        elif ext in (".pkl", ".joblib", ".bin"):
+            files[name] = {"icon": "", "binary": True, "full_path": rel,
+                           "size": rp.stat().st_size, "download_name": name,
+                           "read_bytes": make_bytes_reader(rp)}
+        else:
+            files[name] = {"icon": "", "binary": True, "full_path": rel,
+                           "size": rp.stat().st_size, "download_name": name,
+                           "read_bytes": make_bytes_reader(rp)}
+    return files
+
+
+@st.cache_data(show_spinner=False)
+def _roc_auc(experiment_id, completed_at):
+    """Load roc_auc from metrics.json. Cache key includes completed_at so it
+    invalidates only when the experiment actually finishes/changes."""
+    metrics = get_experiment_metrics(experiment_id)
+    if metrics and isinstance(metrics.get("roc_auc"), (int, float)):
+        return float(metrics["roc_auc"])
+    return None
+
+
+# ─── Grid data ─────────────────────────────────────────────────────────────
+
+def _build_grid_df(experiments: list[dict]) -> pd.DataFrame:
+    rows = []
+    for e in experiments:
+        finished = e.get("status") == "FINISHED"
+        roc = _roc_auc(e["id"], e.get("completed_at")) if finished else None
+        rows.append({
+            "ID": e["id"][:8],
+            "_full_id": e["id"],
+            "Start Time": _relative_time(e.get("created_at")),
+            "_created_epoch": _epoch(e.get("created_at")),
+            "_created_abs": (e.get("created_at") or "-")[:19],
+            "Duration": _duration(e.get("started_at"), e.get("completed_at")),
+            "Pipeline": e.get("pipeline_id", "-"),
+            "Dataset": e.get("dataset_type", "-"),
+            "Status": e.get("status", "-"),
+            "Accuracy": e.get("accuracy"),
+            "Precision": e.get("precision_score"),
+            "Recall": e.get("recall"),
+            "F1-score": e.get("f1_score"),
+            "ROC-AUC": roc,
+            "random_state": "42",
+            "test_split": "0.20",
+            "Hash": (e.get("dataset_hash") or "-")[:8],
+        })
+    df = pd.DataFrame(rows)
+
+    # Per-column max flags for highlighting (ignores None/NaN robustly).
+    for col, flag in [
+        ("Accuracy", "_hi_accuracy"), ("Precision", "_hi_precision"),
+        ("Recall", "_hi_recall"), ("F1-score", "_hi_f1"), ("ROC-AUC", "_hi_roc"),
+    ]:
+        numeric = pd.to_numeric(df[col], errors="coerce")
+        col_max = numeric.max()
+        if pd.notna(col_max):
+            df[flag] = [bool(pd.notna(v) and v == col_max) for v in numeric]
+        else:
+            df[flag] = False
+    return df
+
+
+_METRIC_FORMATTER = JsCode(
+    "function(p){ if(p.value===null||p.value===undefined||isNaN(p.value)){return '-';} "
+    "return Number(p.value).toFixed(4); }"
+)
+
+_START_COMPARATOR = JsCode(
+    "function(a,b,nodeA,nodeB){ const x=(nodeA.data&&nodeA.data._created_epoch)||0; "
+    "const y=(nodeB.data&&nodeB.data._created_epoch)||0; return x-y; }"
+)
+
+_STATUS_STYLE = JsCode("""
+function(params){
+    const colors = {
+        'FINISHED':'#d4edda','RUNNING':'#cce5ff','FAILED':'#f8d7da',
+        'CANCELLED':'#e2e3e5','QUEUED':'#fff3cd','PENDING':'#fff3cd'
+    };
+    const bg = colors[params.value];
+    if (bg) { return {'backgroundColor': bg, 'fontWeight': '600'}; }
+    return null;
 }
+""")
 
-PAGE_SIZE = 20
 
+def _hi_style(flag_field: str) -> JsCode:
+    return JsCode(
+        f"function(params){{ if(params.data && params.data.{flag_field}){{ "
+        f"return {{'backgroundColor':'#cce5ff','fontWeight':'600'}}; }} return null; }}"
+    )
+
+
+def _metric_col(header, field, hi_flag, group_open):
+    col = {
+        "headerName": header, "field": field, "width": 110,
+        "type": "numericColumn",
+        "valueFormatter": _METRIC_FORMATTER,
+        "cellStyle": _hi_style(hi_flag),
+    }
+    if group_open:
+        col["columnGroupShow"] = "open"
+    return col
+
+
+def _build_grid_options(df: pd.DataFrame) -> dict:
+    gb = GridOptionsBuilder.from_dataframe(df)
+    gb.configure_default_column(sortable=True, resizable=True, filterable=False)
+    gb.configure_selection(selection_mode="single", use_checkbox=False)
+    options = gb.build()
+
+    options["columnDefs"] = [
+        {"headerName": "Info", "children": [
+            {"headerName": "ID", "field": "ID", "width": 110, "pinned": "left"},
+            {"headerName": "Start Time", "field": "Start Time", "width": 120,
+             "tooltipField": "_created_abs", "comparator": _START_COMPARATOR,
+             "sort": "desc"},
+            {"headerName": "Duration", "field": "Duration", "width": 100},
+            {"headerName": "Pipeline", "field": "Pipeline", "width": 210},
+            {"headerName": "Dataset", "field": "Dataset", "width": 130},
+            {"headerName": "Status", "field": "Status", "width": 120,
+             "cellStyle": _STATUS_STYLE},
+        ]},
+        {"headerName": "Metrics", "children": [
+            # F1-score has no columnGroupShow → always visible (the column that
+            # survives when the Metrics group is collapsed). The rest are "open".
+            _metric_col("F1-score", "F1-score", "_hi_f1", group_open=False),
+            _metric_col("Accuracy", "Accuracy", "_hi_accuracy", group_open=True),
+            _metric_col("Precision", "Precision", "_hi_precision", group_open=True),
+            _metric_col("Recall", "Recall", "_hi_recall", group_open=True),
+            _metric_col("ROC-AUC", "ROC-AUC", "_hi_roc", group_open=True),
+        ]},
+        {"headerName": "Config", "children": [
+            # Hash stays visible when Config collapses; the rest are "open".
+            {"headerName": "Hash", "field": "Hash", "width": 110},
+            {"headerName": "random_state", "field": "random_state", "width": 120,
+             "columnGroupShow": "open"},
+            {"headerName": "test_split", "field": "test_split", "width": 110,
+             "columnGroupShow": "open"},
+        ]},
+    ]
+
+    options["suppressHorizontalScroll"] = False
+    options["enableBrowserTooltips"] = True
+    if len(df) > 20:
+        options["pagination"] = True
+        options["paginationPageSize"] = 20
+    return options
+
+
+# ─── Page ──────────────────────────────────────────────────────────────────
 
 def render():
-    st.title("📊 Experiment History")
+    st.title("Experiment History")
 
-    # --- Pagination state ---
-    if "history_page" not in st.session_state:
-        st.session_state["history_page"] = 0
-
-    page = st.session_state["history_page"]
-    offset = page * PAGE_SIZE
-    experiments, total = list_experiments_page(limit=PAGE_SIZE, offset=offset)
-    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-
-    if total == 0:
-        st.info("No experiments yet. Go to 'Run Experiment' to create one.")
+    experiments = list_all_experiments()
+    if not experiments:
+        st.info("Belum ada eksperimen. Buka halaman 'Run Experiment' untuk membuat satu.")
+        st.session_state.pop("selected_experiment_id", None)
         return
 
-    # Clamp page in case experiments were deleted
-    if page >= total_pages:
-        st.session_state["history_page"] = total_pages - 1
-        st.rerun()
+    st.caption(
+        f"{len(experiments)} eksperimen. Klik satu baris untuk membuka detail. "
+        "Grup Metrics dan Config dapat di-collapse lewat ikon di header grup."
+    )
 
-    st.caption(f"Showing {offset + 1}–{min(offset + PAGE_SIZE, total)} of {total} experiments")
+    df = _build_grid_df(experiments)
+    grid_options = _build_grid_options(df)
 
-    # Summary table
-    display = []
-    for e in experiments:
-        display.append({
-            "ID": e["id"][:8] + "...",
-            "Dataset": e["dataset_type"],
-            "Pipeline": e["pipeline_id"],
-            "Status": _STATUS_LABEL.get(e["status"], e["status"]),
-            "Accuracy": f"{e['accuracy']:.4f}" if e.get("accuracy") is not None else "—",
-            "F1": f"{e['f1_score']:.4f}" if e.get("f1_score") is not None else "—",
-            "Created": e["created_at"][:19] if e.get("created_at") else "—",
-        })
-    st.dataframe(pd.DataFrame(display), use_container_width=True, hide_index=True)
+    grid_response = AgGrid(
+        df,
+        gridOptions=grid_options,
+        allow_unsafe_jscode=True,
+        theme="streamlit",
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        fit_columns_on_grid_load=False,
+        height=440,
+        key="experiment_history_grid",
+    )
 
-    # Pagination controls
-    col_prev, col_info, col_next = st.columns([1, 2, 1])
-    with col_prev:
-        if st.button("← Previous", disabled=(page == 0)):
-            st.session_state["history_page"] = page - 1
-            st.rerun()
-    with col_info:
-        st.markdown(
-            f"<div style='text-align:center;padding-top:6px'>Page {page + 1} of {total_pages}</div>",
-            unsafe_allow_html=True,
-        )
-    with col_next:
-        if st.button("Next →", disabled=(page >= total_pages - 1)):
-            st.session_state["history_page"] = page + 1
-            st.rerun()
+    # Resolve selection. AgGrid may return a DataFrame or a list depending on
+    # version; handle both. Persist in session_state so the detail panel stays
+    # visible across reruns triggered by detail-panel buttons.
+    selected_id = None
+    sel = grid_response.get("selected_rows")
+    if isinstance(sel, pd.DataFrame):
+        if not sel.empty and "_full_id" in sel.columns:
+            selected_id = sel.iloc[0]["_full_id"]
+    elif isinstance(sel, list) and sel:
+        selected_id = sel[0].get("_full_id")
 
-    # Detail view — fetch from all experiments for the selectbox
-    all_experiments = list_all_experiments()
-    st.subheader("Experiment Detail")
-    exp_map = {
-        f"{e['id'][:8]}... | {e['pipeline_id']} | {e['status']}": e["id"]
-        for e in all_experiments
-    }
-    selected_label = st.selectbox("Select experiment:", list(exp_map.keys()))
-    selected_id = exp_map[selected_label]
+    if selected_id:
+        st.session_state["selected_experiment_id"] = selected_id
+    selected_id = st.session_state.get("selected_experiment_id")
 
+    if not selected_id:
+        st.info("Pilih satu eksperimen pada tabel di atas untuk melihat detailnya.")
+        return
+
+    st.markdown("---")
+    _render_detail(selected_id)
+
+
+def _render_detail(selected_id: str):
+    """Render full detail for one experiment. Logic preserved from the prior
+    selectbox-based version; only the selection source changed."""
     full = get_full_experiment(selected_id)
     if not full:
-        st.error("Not found.")
+        st.error("Eksperimen tidak ditemukan.")
+        st.session_state.pop("selected_experiment_id", None)
         return
 
     exp = full["experiment"]
     metrics = full.get("metrics")
     metadata = full.get("metadata")
 
-    with st.expander("📋 Metadata", expanded=True):
+    st.subheader(f"Experiment Detail — {exp['id'][:8]}")
+
+    with st.expander("Metadata", expanded=True):
         c1, c2 = st.columns(2)
         with c1:
             st.markdown(f"**ID:** `{exp['id']}`")
@@ -107,7 +334,7 @@ def render():
                 st.markdown(f"**Features:** {', '.join(metadata['feature_names'])}")
 
     if exp["status"] == "FINISHED" and metrics:
-        with st.expander("📈 Metrics", expanded=True):
+        with st.expander("Metrics", expanded=True):
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Accuracy", f"{metrics.get('accuracy', 0):.4f}")
             c2.metric("Precision", f"{metrics.get('precision', 0):.4f}")
@@ -159,9 +386,14 @@ def render():
                 st.pyplot(fig)
                 plt.close(fig)
 
+        # Process Log — captured pipeline stdout, persisted in metrics.json
+        if "process_log" in metrics and metrics["process_log"]:
+            with st.expander("Process Log", expanded=False):
+                st.code(metrics["process_log"], language=None)
+
     elif exp["status"] in ("QUEUED", "RUNNING"):
-        st.info(f"⏳ Experiment is {exp['status'].lower()}. Refresh to see updates.")
-        if st.button("🛑 Cancel Experiment", key=f"cancel_{selected_id}"):
+        st.info(f"Experiment is {exp['status'].lower()}. Refresh to see updates.")
+        if st.button("Cancel Experiment", key=f"cancel_{selected_id}"):
             r = cancel_experiment(selected_id)
             if r["success"]:
                 st.warning("Experiment cancelled.")
@@ -172,7 +404,7 @@ def render():
     elif exp["status"] == "FAILED":
         error_msg = exp.get("error_message", "Unknown")
         if error_msg == "Cancelled by user":
-            st.warning("⚠️ Experiment was cancelled by user.")
+            st.warning("Experiment was cancelled by user.")
         else:
             st.error(f"Failed: {error_msg}")
 
@@ -197,18 +429,30 @@ def render():
         )
 
         st.download_button(
-            label="📄 Download PDF Report",
+            label="Download PDF Report",
             data=pdf_bytes,
             file_name=f"experiment_report_{exp['id'][:8]}.pdf",
             mime="application/pdf",
             key=f"pdf_{selected_id}",
         )
 
+    # === Artifact Viewer ===
     st.markdown("---")
-    if st.button("🔁 Re-run", key=f"rerun_{selected_id}"):
+    st.subheader("Artifact Viewer")
+    if exp["status"] == "FINISHED":
+        artifact_files = _build_artifact_files(exp["id"])
+        if artifact_files:
+            render_file_browser(artifact_files, state_key="selected_file_artifact_view")
+        else:
+            st.info("Artefak belum tersedia atau direktori artefak kosong.")
+    else:
+        st.info(f"Artefak belum tersedia. Eksperimen berstatus {exp['status']}.")
+
+    st.markdown("---")
+    if st.button("Re-run", key=f"rerun_{selected_id}"):
         with st.spinner("Re-running..."):
             r = rerun_experiment(selected_id)
             if r["success"]:
-                st.success(f"✅ New: `{r['experiment_id'][:8]}...` — refresh to see.")
+                st.success(f"New: `{r['experiment_id'][:8]}...` — refresh to see.")
             else:
                 st.error(r["error"])

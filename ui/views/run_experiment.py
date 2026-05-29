@@ -22,6 +22,7 @@ from orchestrator.execution_service import get_pipeline_info
 from orchestrator.validation_service import get_available_datasets
 from orchestrator.result_service import get_experiment_metrics, get_full_experiment, get_experiment_metadata
 from config.settings import DATASETS_DIR
+from ui.views._artifact_browser import render_file_browser
 
 _EXT_MAP = {"EVE_SURICATA": ".json"}
 
@@ -44,10 +45,144 @@ def _get_poll_interval(pipeline_id: str) -> int:
             return seconds
     return _DEFAULT_POLL_INTERVAL
 
+
+# ── Pipeline Config Viewer support ─────────────────────────────────────────
+
+def _yaml_scalar(v) -> str:
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return str(v)
+    s = str(v)
+    if s == "" or s.strip() != s or any(c in s for c in (":", "#", "\n", '"')):
+        return '"' + s.replace('"', '\\"') + '"'
+    return s
+
+
+def _dict_to_yaml(obj, indent: int = 0) -> str:
+    """Minimal YAML renderer for get_info() output. Avoids a PyYAML
+    dependency; handles the nested dict/list/scalar shapes get_info returns.
+    Display-only, not intended to round-trip through a YAML parser."""
+    pad = "  " * indent
+    out = []
+    if isinstance(obj, dict):
+        for k, val in obj.items():
+            if isinstance(val, (dict, list)) and val:
+                out.append(f"{pad}{k}:")
+                out.append(_dict_to_yaml(val, indent + 1))
+            else:
+                out.append(f"{pad}{k}: {_yaml_scalar(val)}")
+    elif isinstance(obj, list):
+        for item in obj:
+            if isinstance(item, (dict, list)) and item:
+                out.append(f"{pad}-")
+                out.append(_dict_to_yaml(item, indent + 1))
+            else:
+                out.append(f"{pad}- {_yaml_scalar(item)}")
+    else:
+        return f"{pad}{_yaml_scalar(obj)}"
+    return "\n".join(out)
+
+
+def _type_name(t) -> str:
+    if isinstance(t, str):
+        return t
+    return getattr(t, "__name__", str(t))
+
+
+def _build_pipeline_config_files(pipeline_id: str) -> dict:
+    """Build the four virtual files for the Pipeline Config Viewer.
+
+    Each value is a lazy loader so only the selected file is materialized.
+    Source reading is path-guarded to the pipelines/ directory; no user
+    input reaches the filesystem (selection is from the registry only)."""
+    import inspect
+    import json
+    import dataclasses
+    from config.pipeline_registry import get_pipeline
+    from config.settings import BASE_DIR
+    from contracts.pipeline_contracts import PipelineInput, PipelineResult
+
+    entry = get_pipeline(pipeline_id)
+    if entry is None:
+        return {}
+    cls = entry.get("class")
+
+    def _load_info() -> str:
+        info = get_pipeline_info(pipeline_id) or {}
+        return _dict_to_yaml(info)
+
+    def _load_source() -> str:
+        if cls is None:
+            return "Source code tidak tersedia untuk pipeline ini."
+        try:
+            src_file = inspect.getsourcefile(cls)
+            if src_file:
+                p = Path(src_file).resolve()
+                pipelines_root = (Path(BASE_DIR) / "pipelines").resolve()
+                if not p.is_relative_to(pipelines_root):
+                    return "Source code tidak tersedia (berkas di luar direktori pipelines/)."
+                return p.read_text(encoding="utf-8")
+            return inspect.getsource(cls)
+        except Exception:
+            try:
+                return inspect.getsource(cls)
+            except Exception:
+                return "Source code tidak tersedia untuk pipeline ini."
+
+    def _source_path() -> str:
+        try:
+            src_file = inspect.getsourcefile(cls)
+            if src_file:
+                return str(Path(src_file).resolve().relative_to(Path(BASE_DIR).resolve()))
+        except Exception:
+            pass
+        return f"pipelines/<{pipeline_id}>.py"
+
+    def _load_registry() -> str:
+        e = {"pipeline_id": pipeline_id}
+        for k, val in entry.items():
+            e[k] = val.__name__ if (k == "class" and hasattr(val, "__name__")) else val
+        return json.dumps(e, indent=2, default=str)
+
+    def _load_contract() -> str:
+        lines = ["# Kontrak data antara orchestrator dan pipeline", "",
+                 "PipelineInput (orchestrator -> pipeline):"]
+        for f in dataclasses.fields(PipelineInput):
+            lines.append(f"    {f.name}: {_type_name(f.type)}")
+        lines += ["", "PipelineResult (pipeline -> orchestrator):"]
+        for f in dataclasses.fields(PipelineResult):
+            lines.append(f"    {f.name}: {_type_name(f.type)}")
+        return "\n".join(lines)
+
+    return {
+        "info.yaml": {
+            "icon": "", "language": "yaml", "loader": _load_info,
+            "full_path": f"<virtual>/{pipeline_id}/info.yaml",
+            "download_name": "info.yaml",
+        },
+        "pipeline_source.py": {
+            "icon": "", "language": "python", "loader": _load_source,
+            "full_path": _source_path(), "download_name": "pipeline_source.py",
+        },
+        "registry_entry.json": {
+            "icon": "", "language": "json", "loader": _load_registry,
+            "full_path": "config/pipeline_registry.py (entry)",
+            "download_name": "registry_entry.json",
+        },
+        "contract.txt": {
+            "icon": "", "language": "text", "loader": _load_contract,
+            "full_path": "contracts/pipeline_contracts.py (summary)",
+            "download_name": "contract.txt",
+        },
+    }
+
 _TYPE_META = {
-    "CICIDS2017":   {"icon": "🌐", "desc": "Network traffic · 78 features · CSV"},
-    "HIKARI2021":   {"icon": "🔷", "desc": "Network traffic · 88 features · CSV"},
-    "EVE_SURICATA": {"icon": "🛡️", "desc": "Suricata IDS logs · EVE JSON"},
+    "CICIDS2017":   {"icon": "", "desc": "Network traffic · 78 features · CSV"},
+    "HIKARI2021":   {"icon": "", "desc": "Network traffic · 88 features · CSV"},
+    "EVE_SURICATA": {"icon": "", "desc": "Suricata IDS logs · EVE JSON"},
 }
 
 
@@ -59,10 +194,10 @@ def _list_dataset_files(dataset_type: str) -> list[str]:
     return sorted(str(f) for f in d.glob(f"*{ext}") if f.is_file())
 
 
-@st.dialog("📂 Select Dataset File")
+@st.dialog("Select Dataset File")
 def _file_dialog(dataset_type: str):
     meta = _TYPE_META.get(dataset_type, {})
-    st.markdown(f"### {meta.get('icon', '')} {dataset_type}")
+    st.markdown(f"### {dataset_type}")
     st.caption(meta.get("desc", ""))
     st.markdown("---")
 
@@ -85,7 +220,7 @@ def _file_dialog(dataset_type: str):
     st.markdown("")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("✅ Confirm", type="primary", disabled=(selected_file is None), use_container_width=True):
+        if st.button("Confirm", type="primary", disabled=(selected_file is None), use_container_width=True):
             st.session_state["dataset_type"] = dataset_type
             st.session_state["dataset_path"] = selected_file
             st.session_state.pop("pending_dtype", None)
@@ -99,7 +234,7 @@ def _file_dialog(dataset_type: str):
 
 
 def render():
-    st.title("🧪 Run Experiment")
+    st.title("Run Experiment")
 
     # Open file dialog if a type card was just clicked
     pending = st.session_state.get("pending_dtype")
@@ -117,11 +252,11 @@ def render():
         c1, c2, c3 = st.columns([3, 4, 1])
         with c1:
             meta = _TYPE_META.get(dataset_type, {})
-            st.markdown(f"**Type:** {meta.get('icon', '')} `{dataset_type}`")
+            st.markdown(f"**Type:** `{dataset_type}`")
         with c2:
             st.markdown(f"**File:** `{Path(dataset_path).name}`")
         with c3:
-            if st.button("🔄 Change"):
+            if st.button("Change"):
                 # Clear current selection — type cards re-appear
                 for key in ("dataset_type", "dataset_path", "validation", "last_result", "polling_experiment_id"):
                     st.session_state.pop(key, None)
@@ -134,7 +269,7 @@ def render():
             meta = _TYPE_META.get(dtype, {})
             with col:
                 if st.button(
-                    f"{meta.get('icon', '')} **{dtype}**\n\n{meta.get('desc', '')}",
+                    f"**{dtype}**\n\n{meta.get('desc', '')}",
                     use_container_width=True,
                     key=f"dtype_btn_{dtype}",
                 ):
@@ -143,7 +278,7 @@ def render():
         return  # nothing else to render until a dataset is selected
 
     # Validate button
-    if st.button("🔍 Validate Dataset", type="primary"):
+    if st.button("Validate Dataset", type="primary"):
         with st.spinner("Validating..."):
             st.session_state["validation"] = validate_dataset_for_ui(dataset_type, dataset_path)
             st.session_state.pop("last_result", None)
@@ -154,17 +289,23 @@ def render():
 
     v = st.session_state["validation"]
     if not v["success"]:
-        st.error(f"❌ {v['error']}")
+        st.error(f"{v['error']}")
         return
 
-    st.success("✅ Dataset is valid!")
+    st.success("Dataset is valid!")
     c1, c2, c3 = st.columns(3)
     c1.metric("Rows", f"{v['row_count']:,}")
     c2.metric("Columns", v["column_count"])
-    c3.metric("Classes", len(v["unique_labels"]))
+    # EVE-style datasets have no labels in the raw file — Phase 1 synthesizes
+    # them. Show a placeholder instead of a meaningless count.
+    if v["unique_labels"]:
+        c3.metric("Classes", len(v["unique_labels"]))
+    else:
+        c3.metric("Classes", "pipeline-generated")
     if v.get("dataset_hash"):
         st.code(f"SHA-256: {v['dataset_hash']}", language=None)
-    st.markdown(f"**Labels:** {', '.join(str(lbl) for lbl in v['unique_labels'])}")
+    if v["unique_labels"]:
+        st.markdown(f"**Labels:** {', '.join(str(lbl) for lbl in v['unique_labels'])}")
 
     # === SECTION 2: Pipeline Selection ===
     st.header("2. Pipeline Selection")
@@ -180,7 +321,7 @@ def render():
     if selected:
         info = get_pipeline_info(selected)
         if info:
-            with st.expander("📄 Pipeline Detail (Read-Only)"):
+            with st.expander("Pipeline Detail (Read-Only)"):
                 st.markdown(f"**Paper:** {info.get('paper')}")
                 st.markdown(f"**Algorithm:** {info.get('algorithm')}")
                 if info.get("preprocessing_steps"):
@@ -194,7 +335,13 @@ def render():
                     st.json(info["fixed_params"])
                 if info.get("runtime_warning"):
                     st.warning(info["runtime_warning"])
-                st.info("⚠️ All parameters locked per paper.")
+                st.info("All parameters locked per paper.")
+
+        with st.expander("Pipeline Config Viewer (info.yaml · source · registry · contract)"):
+            render_file_browser(
+                _build_pipeline_config_files(selected),
+                state_key="selected_file_pipeline_view",
+            )
 
     # === SECTION 3: Execute ===
     st.header("3. Execute")
@@ -203,24 +350,69 @@ def render():
         _poll_experiment(st.session_state["polling_experiment_id"])
         return
 
-    if st.button("🚀 Run Experiment", type="primary"):
-        result = create_and_run_experiment(dataset_type, dataset_path, selected)
-
-        if not result["success"]:
-            st.error(f"❌ {result['error']}")
-            return
-
-        if result.get("async_mode"):
-            st.session_state["polling_experiment_id"] = result["experiment_id"]
-            st.info(f"⏳ Experiment queued: `{result['experiment_id'][:8]}...`")
-            st.rerun()
-        else:
-            st.session_state["last_result"] = result
-            st.rerun()
+    if st.button("Run Experiment", type="primary"):
+        _run_with_status(dataset_type, dataset_path, selected)
 
     # === SECTION 4: Results (sync path) ===
     if "last_result" in st.session_state and st.session_state["last_result"].get("success"):
         _display_results(st.session_state["last_result"])
+
+
+_EVE_PHASE_LINES = [
+    "Phase 1 — Load & Label",
+    "Phase 2 — Feature Engineering",
+    "Phase 3 — Computed Features",
+    "Phase 4 — Aggressive Cleaning",
+    "Phase 7 — Correlation Analysis",
+    "Phase 8 — Train/Test Split",
+    "Phase 9 — Feature Selection (MI + RFE + PCA)",
+    "Phase 10 — Model Training & Evaluation",
+]
+
+
+def _phase_checklist(icon: str) -> str:
+    return "\n".join(f"- {icon} {p}" for p in _EVE_PHASE_LINES)
+
+
+def _run_with_status(dataset_type: str, dataset_path: str, pipeline_id: str) -> None:
+    """Dispatch the experiment with a live status block.
+
+    Sync mode (USE_ASYNC=false): create_and_run_experiment blocks until the
+    pipeline finishes, so the checklist sits on during the run and flips
+    to when the call returns.
+
+    Async mode: the call returns immediately after dispatching the Celery
+    task. We transition to the polling view, which handles its own UI.
+    """
+    with st.status("Running pipeline...", expanded=True) as status_box:
+        st.write("Initializing experiment...")
+        st.write("Parsing and validating dataset...")
+        st.write("")
+        st.write("**Phases will execute in sequence:**")
+        phase_placeholder = st.empty()
+        phase_placeholder.markdown(_phase_checklist("[ ]"))
+        st.write("")
+        st.info("Full process log will appear in results after completion.")
+
+        result = create_and_run_experiment(dataset_type, dataset_path, pipeline_id)
+
+        if not result["success"]:
+            status_box.update(label="Pipeline failed", state="error")
+            st.error(f"{result['error']}")
+            return
+
+        if result.get("async_mode"):
+            status_box.update(label="Dispatched to worker", state="running")
+            st.session_state["polling_experiment_id"] = result["experiment_id"]
+            st.info(f"Experiment queued: `{result['experiment_id'][:8]}...`")
+            st.rerun()
+            return
+
+        # Sync path completed successfully
+        phase_placeholder.markdown(_phase_checklist("[x]"))
+        status_box.update(label="Pipeline complete!", state="complete")
+        st.session_state["last_result"] = result
+        st.rerun()
 
 
 def _poll_experiment(experiment_id: str):
@@ -250,7 +442,7 @@ def _poll_experiment(experiment_id: str):
                 else:
                     st.write("Pipeline is executing. This may take several minutes...")
             st.write("This page auto-refreshes every 5 seconds.")
-        if st.button("🛑 Cancel Experiment", key=f"cancel_poll_{experiment_id}"):
+        if st.button("Cancel Experiment", key=f"cancel_poll_{experiment_id}"):
             r = cancel_experiment(experiment_id)
             if r["success"]:
                 st.session_state.pop("polling_experiment_id", None)
@@ -286,9 +478,9 @@ def _poll_experiment(experiment_id: str):
         st.session_state.pop("polling_experiment_id", None)
         error_msg = status_data.get("error_message", "Unknown error")
         if error_msg == "Cancelled by user":
-            st.warning("⚠️ Experiment was cancelled.")
+            st.warning("Experiment was cancelled.")
         else:
-            st.error(f"❌ Experiment failed: {error_msg}")
+            st.error(f"Experiment failed: {error_msg}")
 
 
 def _render_diag_block(experiment_id: str, status_data: dict) -> None:
@@ -474,9 +666,14 @@ def _display_results(result: dict):
         st.pyplot(fig)
         plt.close(fig)
 
+    # Process Log (captured stdout from local_worker / Celery worker)
+    if "process_log" in full and full["process_log"]:
+        with st.expander("Process Log", expanded=False):
+            st.code(full["process_log"], language=None)
+
     # PDF Download
     st.markdown("---")
-    st.subheader("📥 Download Report")
+    st.subheader("Download Report")
     try:
         from utils.report_generator import generate_report
         pipe_info = get_pipeline_info(st.session_state.get("selected_pipeline", "")) or {}
@@ -495,7 +692,7 @@ def _display_results(result: dict):
             feature_names=result.get("feature_names"),
         )
         st.download_button(
-            label="📄 Download PDF Report",
+            label="Download PDF Report",
             data=pdf_bytes,
             file_name=f"experiment_report_{eid[:8]}.pdf",
             mime="application/pdf",

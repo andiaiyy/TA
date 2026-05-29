@@ -68,10 +68,17 @@ class Phase8Config:
     seed: int = 42
 
     # === STRATEGY: DROP FOR MODELING HAPPENS HERE (Phase 8) ===
+    # pkt_src / app_proto / proto / flow_id are categorical fields that Phase 2
+    # hash-encodes in place. In Suricata, alert-records and flow-records have
+    # systematically different values for pkt_src ("wire/pcap" vs "stream") and
+    # app_proto distributions, which means their hashed forms are near-perfect
+    # proxies for Target (Target is derived from alert presence in Phase 1).
+    # Leaving them in produced 1.00 metrics on every EVE pipeline.
     drop_leak_cols: Tuple[str, ...] = (
         "is_malicious",
         "event_type", "event_type_h",
         "has_alert", "alert_category", "alert_severity",
+        "pkt_src", "app_proto", "proto", "flow_id",
     )
 
     phase7_drop_json: Optional[Path] = None

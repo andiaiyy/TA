@@ -58,9 +58,14 @@ def test_load_metrics_not_found(mock_artifacts_dir):
     assert load_metrics("nonexistent") is None
 
 
-def test_returns_relative_path(mock_artifacts_dir):
+def test_returns_absolute_path(mock_artifacts_dir):
+    """Saved paths must be absolute so consumers in any CWD can open the file.
+
+    Previously returned a relative path, which broke when UI process and
+    Celery worker had different working directories.
+    """
     from sklearn.ensemble import RandomForestClassifier
     m = RandomForestClassifier(n_estimators=10, random_state=42)
     m.fit([[1, 2], [3, 4]], [0, 1])
     path = save_model("test-001", m)
-    assert not Path(path).is_absolute()
+    assert Path(path).is_absolute()
