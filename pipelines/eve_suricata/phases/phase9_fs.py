@@ -43,6 +43,10 @@ class Phase9Config:
         "event_type_h",
         "has_alert",
         "alert_severity",
+        # pkt_src / app_proto / flow_id: hash-encoded by Phase 2; alert-records
+        # and flow-records have systematically different values, so the hashes
+        # leak Target. Phase 8 already drops them — this is a defensive backstop.
+        "pkt_src", "app_proto", "flow_id",
     )
 
     # outputs (small artifacts only; not used as cache)
