@@ -71,6 +71,16 @@ def create_and_run_experiment(
     """
     experiment_id = str(uuid.uuid4())
 
+    # [DIAG-PATH] Unsanitized entry log — prints what the orchestrator received
+    # from the UI BEFORE any sanitizer touches it. Lets us correlate the
+    # experiment_id with the raw dataset_path and existence check.
+    import os
+    logger.error(
+        "[DIAG-PATH] create_and_run_experiment received: "
+        "dataset_type=%r dataset_path=%r exists=%s USE_ASYNC=%s pipeline_id=%r",
+        dataset_type, dataset_path, os.path.exists(dataset_path), USE_ASYNC, pipeline_id,
+    )
+
     try:
         dataset_hash = sha256_file(dataset_path)
 
@@ -148,6 +158,24 @@ def create_and_run_experiment(
         }
         result = execute_pipeline(pipeline_id, df, dataset_type, dataset_path=dataset_path, progress=None)
 
+        # [DIAG-PATH] Sync-path post-pipeline state snapshot — mirrors the worker
+        # snapshot in celery_worker.py so the failure-point trail is identical
+        # whichever execution mode the user is running.
+        try:
+            import os as _os
+            from config.settings import ARTIFACTS_DIR as _ART_DIR
+            logger.error(
+                "[DIAG-PATH] sync save-section entry: experiment_id=%r "
+                "dataset_path=%r ds_exists=%s ARTIFACTS_DIR=%r art_exists=%s "
+                "cwd=%r model_type=%r extra_info_keys=%r",
+                experiment_id, dataset_path, _os.path.exists(dataset_path),
+                str(_ART_DIR), _os.path.exists(str(_ART_DIR)),
+                _os.getcwd(), type(result.model).__name__,
+                list(result.extra_info.keys()) if result.extra_info else [],
+            )
+        except Exception:
+            logger.exception("[DIAG-PATH] sync pre-save snapshot itself raised")
+
         metrics_dict = {
             "accuracy": result.accuracy,
             "precision": result.precision,
@@ -170,7 +198,15 @@ def create_and_run_experiment(
         # Save artifacts — if this fails, nothing is on disk yet
         try:
             paths = save_all_artifacts(experiment_id, result.model, metrics_dict, metadata_dict)
+            logger.error(
+                "[DIAG-PATH] sync save_all_artifacts returned: model_path=%r metrics_path=%r metadata_path=%r",
+                paths.get("model_path"), paths.get("metrics_path"), paths.get("metadata_path"),
+            )
         except Exception as artifact_error:
+            logger.exception(
+                "[DIAG-PATH] sync save_all_artifacts raised — UNSANITIZED: type=%r repr=%r",
+                type(artifact_error).__name__, repr(artifact_error),
+            )
             logger.exception("Artifact saving failed for %s", experiment_id)
             set_failed(experiment_id, completed_at=now_iso(),
                        error_message=sanitize_error(f"Artifact save failed: {artifact_error}"))
@@ -197,6 +233,10 @@ def create_and_run_experiment(
                 model_path=paths["model_path"],
             )
         except Exception as db_error:
+            logger.exception(
+                "[DIAG-PATH] sync set_finished raised — UNSANITIZED: type=%r repr=%r",
+                type(db_error).__name__, repr(db_error),
+            )
             logger.exception(
                 "set_finished failed for %s after artifacts were saved — cleaning up", experiment_id
             )

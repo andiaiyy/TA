@@ -30,9 +30,9 @@ def _startup_cleanup():
 
 _startup_cleanup()
 
-st.set_page_config(page_title="IDS Research Pipeline System", page_icon="🔬", layout="wide")
+st.set_page_config(page_title="IDS Research Pipeline System", page_icon="", layout="wide")
 
-st.sidebar.title("🔬 IDS Research Platform")
+st.sidebar.title("IDS Research Platform")
 st.sidebar.markdown("---")
 
 page = st.sidebar.radio("Navigation", ["Run Experiment", "Experiment History", "Environment Info"])

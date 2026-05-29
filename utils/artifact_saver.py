@@ -6,7 +6,8 @@ Saves to storage/artifacts/{experiment_id}/:
   - metrics.json (accuracy, precision, recall, f1, confusion_matrix, extra_info)
   - metadata.json (dataset_hash, pipeline_id, timestamps, etc.)
 
-Rules: No database access. No UI imports. Returns RELATIVE paths (not absolute).
+Rules: No database access. No UI imports. Returns ABSOLUTE paths so consumers
+(UI process, Celery worker, PDF generator) can open the files regardless of CWD.
 """
 import json
 import joblib
@@ -22,29 +23,29 @@ def get_artifact_dir(experiment_id: str) -> Path:
 
 
 def save_model(experiment_id: str, model: object) -> str:
-    """Save model using joblib serialization as model.pkl. Returns relative path."""
+    """Save model using joblib serialization as model.pkl. Returns absolute path."""
     d = get_artifact_dir(experiment_id)
     path = d / "model.pkl"
     joblib.dump(model, path)
-    return str(Path("artifacts") / experiment_id / "model.pkl")
+    return str(path.resolve())
 
 
 def save_metrics(experiment_id: str, metrics: dict) -> str:
-    """Save metrics as JSON. Returns relative path."""
+    """Save metrics as JSON. Returns absolute path."""
     d = get_artifact_dir(experiment_id)
     path = d / "metrics.json"
     with open(path, "w") as f:
         json.dump(metrics, f, indent=2, default=str)
-    return str(Path("artifacts") / experiment_id / "metrics.json")
+    return str(path.resolve())
 
 
 def save_metadata(experiment_id: str, metadata: dict) -> str:
-    """Save metadata as JSON. Returns relative path."""
+    """Save metadata as JSON. Returns absolute path."""
     d = get_artifact_dir(experiment_id)
     path = d / "metadata.json"
     with open(path, "w") as f:
         json.dump(metadata, f, indent=2, default=str)
-    return str(Path("artifacts") / experiment_id / "metadata.json")
+    return str(path.resolve())
 
 
 def save_all_artifacts(experiment_id: str, model: object, metrics: dict, metadata: dict) -> dict:
