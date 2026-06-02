@@ -146,7 +146,7 @@ class RFPaperAPipeline(BasePipeline):
                 train_sizes=[0.2, 0.4, 0.6, 0.8, 1.0],
                 cv=5,
                 scoring="f1_weighted",
-                n_jobs=-1,
+                n_jobs=2,
                 random_state=42,
             )
             extra_info["learning_curve"] = {

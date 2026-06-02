@@ -34,7 +34,7 @@ class EveKNNPipeline(BaseEvePipeline):
         X_train = scaler.fit_transform(X_train)
         X_test = scaler.transform(X_test)
 
-        clf = KNeighborsClassifier(n_neighbors=5, n_jobs=-1)
+        clf = KNeighborsClassifier(n_neighbors=5, n_jobs=2)
         clf.fit(X_train, y_train)
 
         extra = {"phase_summaries": prep["phase_summaries"]}
@@ -57,7 +57,7 @@ class EveKNNPipeline(BaseEvePipeline):
             "feature_selection": "Phase 9: MI top-25",
             "fixed_params": {
                 "n_neighbors": 5,
-                "n_jobs": -1,
+                "n_jobs": 2,
                 "scaler": "StandardScaler",
                 "feature_method": "MI",
             },

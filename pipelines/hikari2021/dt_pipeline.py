@@ -73,7 +73,7 @@ class HikariDTPipeline(BasePipeline):
                 estimator=DecisionTreeClassifier(random_state=random_state),
                 X=X_train, y=y_train,
                 train_sizes=[0.2, 0.4, 0.6, 0.8, 1.0],
-                cv=5, scoring="f1_weighted", n_jobs=-1, random_state=random_state,
+                cv=5, scoring="f1_weighted", n_jobs=2, random_state=random_state,
             )
             extra_info["learning_curve"] = {
                 "train_sizes": train_sizes.tolist(),

@@ -87,7 +87,18 @@
       "PowerShell(\"All containers:\")",
       "PowerShell(docker exec ids_worker ls -la /app/storage/datasets/ 2>&1; \"---\"; docker exec ids_worker test -f /app/storage/datasets/eve_100k_fixed.json; \"exit=$LASTEXITCODE\"; \"---\"; docker exec ids_worker python -c \"from pathlib import Path; p = Path\\('/app/storage/datasets/eve_100k_fixed.json'\\); print\\('exists=', p.exists\\(\\), 'is_file=', p.is_file\\(\\), 'size=', p.stat\\(\\).st_size if p.exists\\(\\) else None\\)\" 2>&1)",
       "Bash(grep -cF '```python' bab3_implementasi_sistem.md)",
-      "Bash(grep -cF '```' bab3_implementasi_sistem.md)"
+      "Bash(grep -cF '```' bab3_implementasi_sistem.md)",
+      "PowerShell(python -m pytest tests/ -q --tb=short 2>&1)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -m pytest tests/ -q --tb=short 2>&1)",
+      "Bash(docker compose *)",
+      "Bash(findstr /I \"CELERY USE_ASYNC DB_PATH REDIS HOSTNAME\")",
+      "PowerShell(Write-Host '=== Local celery processes on host ==='; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -match 'celery' } | Select-Object ProcessId, CommandLine | Format-List; Write-Host '=== Python processes with TA in path ==='; Get-CimInstance Win32_Process -Filter \"Name like 'python%'\" | Select-Object ProcessId, CommandLine | Where-Object { $_.CommandLine -match 'TA|celery' } | Format-List)",
+      "Bash(docker exec *)",
+      "Bash(findstr /I \"CELERY REDIS\")",
+      "Bash(docker info *)",
+      "Bash(findstr /I \"Memory CPUs Operating Kernel\")",
+      "Bash(docker stats *)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -m pytest tests/ --collect-only -q 2>&1)"
     ]
   }
 }
