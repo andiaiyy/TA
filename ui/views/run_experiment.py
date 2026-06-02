@@ -22,7 +22,12 @@ from orchestrator.execution_service import get_pipeline_info
 from orchestrator.validation_service import get_available_datasets
 from orchestrator.result_service import get_experiment_metrics, get_full_experiment, get_experiment_metadata
 from config.settings import DATASETS_DIR
-from ui.views._artifact_browser import render_file_browser
+from ui.views._artifact_browser import render_file_browser, format_size
+from streamlit_option_menu import option_menu
+from contracts.dataset_schemas import get_schema
+
+# Accent color shared with the sidebar (kept in sync intentionally).
+_ACCENT = "#2563eb"
 
 _EXT_MAP = {"EVE_SURICATA": ".json"}
 
@@ -194,52 +199,110 @@ def _list_dataset_files(dataset_type: str) -> list[str]:
     return sorted(str(f) for f in d.glob(f"*{ext}") if f.is_file())
 
 
-@st.dialog("Select Dataset File")
-def _file_dialog(dataset_type: str):
-    meta = _TYPE_META.get(dataset_type, {})
-    st.markdown(f"### {dataset_type}")
-    st.caption(meta.get("desc", ""))
-    st.markdown("---")
+def _type_icon(dtype: str) -> str:
+    """Pick a Bootstrap icon for the type tab from the schema's file format.
+    Schema-derived to stay consistent if a JSON-format type is added later."""
+    s = get_schema(dtype) or {}
+    if s.get("file_format") in ("json", "json_or_csv") or s.get("expected_top_level_keys"):
+        return "braces"
+    return "table"
 
-    files = _list_dataset_files(dataset_type)
-    ext = _EXT_MAP.get(dataset_type, ".csv")
 
-    if files:
-        selected_file = st.selectbox(
-            f"Available `{ext}` files in `storage/datasets/`",
-            options=files,
-            format_func=lambda p: Path(p).name,
-        )
+def _render_type_characteristics(dtype: str) -> None:
+    """Show type characteristics from contracts/dataset_schemas.py.
+    Uses _TYPE_META only for the human-readable one-liner; everything else
+    is read from the schema so this stays accurate if schemas change."""
+    schema = get_schema(dtype) or {}
+    meta = _TYPE_META.get(dtype, {})
+
+    fmt_raw = schema.get("file_format")
+    if fmt_raw == "json_or_csv":
+        fmt = "NDJSON / CSV"
+    elif fmt_raw == "json":
+        fmt = "NDJSON"
     else:
-        st.warning(
-            f"No `{ext}` files found in `storage/datasets/`.\n\n"
-            "Place your dataset file there and try again."
-        )
-        selected_file = None
+        fmt = "CSV"
 
-    st.markdown("")
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Confirm", type="primary", disabled=(selected_file is None), use_container_width=True):
-            st.session_state["dataset_type"] = dataset_type
-            st.session_state["dataset_path"] = selected_file
-            st.session_state.pop("pending_dtype", None)
-            for key in ("validation", "last_result", "polling_experiment_id"):
-                st.session_state.pop(key, None)
-            st.rerun()
-    with col2:
-        if st.button("Cancel", use_container_width=True):
-            st.session_state.pop("pending_dtype", None)
-            st.rerun()
+    label_col = schema.get("label_column", "(tidak ada)")
+    expected_cols = schema.get("expected_columns") or []
+    n_cols = len(expected_cols)
+    n_cols_text = str(n_cols) if n_cols > 0 else "(diturunkan oleh pipeline)"
+
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Format", fmt)
+    c2.metric("Label column", label_col)
+    c3.metric("Feature columns", n_cols_text)
+
+    if meta.get("desc"):
+        st.caption(meta["desc"])
+
+    top_keys = schema.get("expected_top_level_keys") or []
+    if top_keys:
+        st.caption("Kunci NDJSON yang diharapkan: " + ", ".join(f"`{k}`" for k in top_keys))
+
+
+def _render_file_picker(dtype: str) -> None:
+    """List files of this type from storage/datasets/, let the user pick one,
+    and confirm via a Use button that hands off to the existing flow.
+
+    Mapping mechanism: file extension only, via _EXT_MAP — identical to the
+    pre-existing _list_dataset_files behaviour. CSV files appear under both
+    CICIDS2017 and HIKARI2021 because the platform does not discriminate by
+    content at list time; schema validation runs later on the chosen file.
+    """
+    ext = _EXT_MAP.get(dtype, ".csv")
+    try:
+        files = _list_dataset_files(dtype)
+    except Exception as e:
+        st.error(f"Gagal memindai folder `storage/datasets/`: {e}")
+        return
+
+    if not files:
+        st.info(
+            f"Belum ada berkas dataset bertype **{dtype}** (`*{ext}`) di "
+            f"`storage/datasets/`. Tambahkan berkas ke folder tersebut untuk memulai."
+        )
+        return
+
+    # Build labels with size; skip any file whose stat fails so a single bad
+    # file does not break the whole picker.
+    options: list[str] = []
+    labels: dict[str, str] = {}
+    for f in files:
+        try:
+            size = format_size(Path(f).stat().st_size)
+        except Exception:
+            size = "ukuran tidak diketahui"
+        options.append(f)
+        labels[f] = f"{Path(f).name}  ({size})"
+
+    radio_key = f"selected_dataset_file__{dtype}"
+    # Default the radio to the previously-chosen file for this type, if any.
+    default_idx = 0
+    prior = st.session_state.get(radio_key)
+    if prior in options:
+        default_idx = options.index(prior)
+
+    chosen = st.radio(
+        f"Berkas yang cocok di `storage/datasets/` (filter: `*{ext}`):",
+        options=options,
+        format_func=lambda p: labels[p],
+        index=default_idx,
+        key=radio_key,
+    )
+
+    if st.button("Use this dataset", type="primary", use_container_width=False):
+        st.session_state["dataset_type"] = dtype
+        st.session_state["dataset_path"] = chosen
+        # Clear downstream state so a stale validation/result does not bleed
+        # through after the user picks a fresh file.
+        for key in ("validation", "last_result", "polling_experiment_id"):
+            st.session_state.pop(key, None)
+        st.rerun()
 
 
 def render():
     st.title("Run Experiment")
-
-    # Open file dialog if a type card was just clicked
-    pending = st.session_state.get("pending_dtype")
-    if pending:
-        _file_dialog(pending)
 
     # === SECTION 1: Dataset Selection ===
     st.header("1. Dataset Selection")
@@ -262,19 +325,55 @@ def render():
                     st.session_state.pop(key, None)
                 st.rerun()
     else:
-        # Show dataset type tiles — clicking one opens the file dialog
-        st.markdown("Select a dataset type to get started:")
-        cols = st.columns(len(get_available_datasets()))
-        for col, dtype in zip(cols, get_available_datasets()):
-            meta = _TYPE_META.get(dtype, {})
-            with col:
-                if st.button(
-                    f"**{dtype}**\n\n{meta.get('desc', '')}",
-                    use_container_width=True,
-                    key=f"dtype_btn_{dtype}",
-                ):
-                    st.session_state["pending_dtype"] = dtype
-                    st.rerun()
+        # Horizontal type filter — replaces the previous static tiles.
+        # Type list is sourced dynamically from contracts/dataset_schemas.py
+        # via orchestrator.validation_service.get_available_datasets(); adding
+        # a new schema there automatically adds a tab here.
+        st.markdown("Pilih type dataset, lalu pilih berkas:")
+        types = list(get_available_datasets())
+
+        # Stable default_index from session_state so the menu does not jump
+        # back to the first item on every Streamlit rerun.
+        current_type = st.session_state.get("selected_dataset_type")
+        default_idx = types.index(current_type) if current_type in types else 0
+
+        selected_type = option_menu(
+            menu_title=None,
+            options=types,
+            icons=[_type_icon(t) for t in types],
+            orientation="horizontal",
+            default_index=default_idx,
+            key="dataset_type_filter",
+            styles={
+                "container": {"padding": "0", "background-color": "transparent"},
+                "icon": {"font-size": "14px"},
+                "nav-link": {
+                    "font-size": "14px",
+                    "margin": "0 4px",
+                    "padding": "8px 14px",
+                    "border-radius": "6px",
+                    "--hover-color": "#eef2ff",
+                },
+                "nav-link-selected": {
+                    "background-color": _ACCENT,
+                    "color": "white",
+                    "font-weight": "600",
+                },
+            },
+        )
+
+        # Reset per-type radio selections when the active type changes, so a
+        # stale file pick from a different type cannot be confirmed.
+        prev_type = st.session_state.get("selected_dataset_type")
+        if prev_type is not None and prev_type != selected_type:
+            for k in list(st.session_state.keys()):
+                if k.startswith("selected_dataset_file__"):
+                    st.session_state.pop(k, None)
+        st.session_state["selected_dataset_type"] = selected_type
+
+        _render_type_characteristics(selected_type)
+        st.markdown("")
+        _render_file_picker(selected_type)
         return  # nothing else to render until a dataset is selected
 
     # Validate button

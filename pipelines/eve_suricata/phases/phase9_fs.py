@@ -79,7 +79,7 @@ def _to_numeric_frame(X: pd.DataFrame) -> pd.DataFrame:
 
 def _safe_mutual_info(X: np.ndarray, y: np.ndarray, seed: int) -> np.ndarray:
     try:
-        return mutual_info_classif(X, y, random_state=seed, n_jobs=-1)
+        return mutual_info_classif(X, y, random_state=seed, n_jobs=2)
     except TypeError:
         return mutual_info_classif(X, y, random_state=seed)
 
@@ -215,7 +215,7 @@ def phase9_feature_selection(df_train: pd.DataFrame, cfg: Phase9Config) -> dict:
         base_rf = RandomForestClassifier(
             n_estimators=80,
             random_state=cfg.seed,
-            n_jobs=-1,
+            n_jobs=2,
             class_weight=None,
         )
         step = max(1, min(5, X.shape[1] // 10))
@@ -232,7 +232,7 @@ def phase9_feature_selection(df_train: pd.DataFrame, cfg: Phase9Config) -> dict:
         print(f"   ✓ RFE done. selected={len(rfe_selected)}")
     except Exception as e:
         print(f"   ⚠️ RFE failed ({e}). Fallback: RF importance.")
-        rf = RandomForestClassifier(n_estimators=120, random_state=cfg.seed, n_jobs=-1)
+        rf = RandomForestClassifier(n_estimators=120, random_state=cfg.seed, n_jobs=2)
         take = min(20_000, len(X_rfe))
         rf.fit(X_rfe.head(take), y_rfe.head(take))
         imp = pd.Series(rf.feature_importances_, index=X.columns).sort_values(ascending=False)

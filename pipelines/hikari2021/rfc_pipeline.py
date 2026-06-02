@@ -99,7 +99,7 @@ class HikariRFCPipeline(BasePipeline):
         clf = RandomForestClassifier(
             n_estimators=100,
             random_state=random_state,
-            n_jobs=-1,
+            n_jobs=2,
         )
         clf.fit(X_train_scaled, y_train_bal)
 
@@ -143,14 +143,14 @@ class HikariRFCPipeline(BasePipeline):
         try:
             train_sizes, train_scores, val_scores = learning_curve(
                 estimator=RandomForestClassifier(
-                    n_estimators=100, random_state=random_state, n_jobs=-1
+                    n_estimators=100, random_state=random_state, n_jobs=2
                 ),
                 X=X_train_scaled,
                 y=y_train_bal,
                 train_sizes=[0.2, 0.4, 0.6, 0.8, 1.0],
                 cv=5,
                 scoring="f1_weighted",
-                n_jobs=-1,
+                n_jobs=2,
                 random_state=random_state,
             )
             extra_info["learning_curve"] = {
@@ -191,7 +191,7 @@ class HikariRFCPipeline(BasePipeline):
             "fixed_params": {
                 "n_estimators": 100,
                 "random_state": 42,
-                "n_jobs": -1,
+                "n_jobs": 2,
                 "balancing": "RandomUnderSampler",
                 "scaler": "StandardScaler",
                 "pca": False,

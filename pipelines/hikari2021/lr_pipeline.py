@@ -90,7 +90,7 @@ class HikariLRPipeline(BasePipeline):
                 LogisticRegression(max_iter=3000, random_state=random_state),
                 X_train_pca, y_train,
                 train_sizes=[0.2, 0.4, 0.6, 0.8, 1.0],
-                cv=5, scoring="f1_weighted", n_jobs=-1, random_state=random_state,
+                cv=5, scoring="f1_weighted", n_jobs=2, random_state=random_state,
             )
             extra_info["learning_curve"] = {
                 "train_sizes": train_sizes.tolist(),

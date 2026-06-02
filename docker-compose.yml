@@ -14,8 +14,6 @@
 #   - storage/experiments.db → mounted from host (SQLite DB persists)
 # ============================================================
 
-version: '3.8'
-
 services:
   # --- Redis (message broker for Celery) ---
   redis:
