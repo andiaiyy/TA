@@ -1,294 +1,398 @@
 # IDS Research Pipeline Execution System
 
-A controlled, reproducible platform for running fixed machine learning pipelines on cybersecurity intrusion detection datasets. Built for thesis research — every pipeline is locked to its paper's exact configuration so results are directly comparable.
+> A web-based, on-premise platform for **reproducible** machine learning experiments on Intrusion Detection System (IDS) datasets.
+
+[![Python](https://img.shields.io/badge/python-3.11-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/UI-Streamlit-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Docker](https://img.shields.io/badge/runtime-Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
+[![Celery](https://img.shields.io/badge/async-Celery%20%2B%20Redis-37814A?logo=celery&logoColor=white)](https://docs.celeryq.dev/)
+[![scikit-learn](https://img.shields.io/badge/ML-scikit--learn-F7931E?logo=scikit-learn&logoColor=white)](https://scikit-learn.org/)
+[![tests](https://img.shields.io/badge/tests-196%20collected-success)](#testing)
+[![status](https://img.shields.io/badge/status-research%20%2F%20academic-orange)](#academic-context)
+[![license](https://img.shields.io/badge/license-TBD-lightgrey)](#license)
 
 ---
 
-## What It Does
+## Overview
 
-Given a CSV dataset and a pipeline selection, the system:
+The IDS Research Pipeline Execution System is a **research platform** for running fixed, paper-faithful machine learning pipelines on intrusion detection datasets. It is designed primarily for a single researcher running thesis-grade experiments and was built around one engineering goal: **bit-identical reproducibility** of every reported metric.
 
-1. Validates the CSV against a known schema
-2. Trains the ML model using the paper's exact hyperparameters
-3. Evaluates: accuracy, precision, recall, F1, ROC-AUC, confusion matrix, per-class report
-4. Saves the trained model + all metrics as artifacts
-5. Records everything in a local SQLite database
-6. Renders results in a Streamlit UI with charts and a PDF download
+Given a CSV/NDJSON dataset and a pipeline selection, the system:
 
-No user-configurable hyperparameters — every parameter is locked per paper.
+1. Validates the file against a known schema and computes its SHA-256 hash.
+2. Trains the model using **locked, hard-coded hyperparameters** (no user-configurable knobs).
+3. Evaluates with standard metrics (accuracy, precision, recall, F1, ROC-AUC, confusion matrix, per-class report) plus a learning curve.
+4. Persists the trained model, all metrics, and metadata to disk under a per-experiment artifact directory.
+5. Records the run in a local SQLite database, browsable through a Streamlit UI with downloadable PDF reports.
+
+This is not a production IDS, not a real-time detector, and not a multi-tenant service. It is research infrastructure for controlled, reproducible offline experiments. See [Known Limitations](#known-limitations) below.
+
+---
+
+## Key Features
+
+- **Locked pipelines, no UI hyperparameter tuning.** Every algorithm parameter is hard-coded in source. This is the platform's core methodological contribution.
+- **11 registered ML pipelines** across 3 dataset families (see [Pipelines](#pipelines)).
+- **Reproducibility by construction**: every stochastic step uses `random_state=42`, every split is `stratify=y`, every dataset is SHA-256 hashed and the hash is persisted to the experiment record.
+- **Dual execution modes**: synchronous (in-process) or asynchronous (Celery + Redis). Toggled via `USE_ASYNC` environment variable.
+- **Web UI (Streamlit)** with 4 pages: Tutorial, Run Experiment, Experiment History (AgGrid), Environment Info.
+- **PDF report generation** per experiment, including metric cards, confusion matrix, ROC curve, learning curve, feature importance, and classification report.
+- **Containerized deployment** via Docker Compose. Three services: `ids_ui`, `ids_worker`, `ids_redis`.
+- **Test suite** of 196 collected tests, including parametrized cross-pipeline reproducibility checks.
+- **Cross-environment path fallback** so an experiment dispatched from one OS resolves dataset files correctly on a worker running in another (e.g., Docker worker reading a Windows-style path).
 
 ---
 
 ## Architecture
 
+The codebase is organized into strict layers with one-way import boundaries:
+
 ```
-ui/                     ← Streamlit pages (only talks to orchestrator/)
-orchestrator/           ← Business logic: validation, execution, DB writes
-  ├─ experiment_service.py   (main facade — the only file that touches the DB)
-  ├─ execution_service.py    (pipeline dispatch, no DB access)
-  ├─ validation_service.py   (dataset validation for UI)
-  ├─ result_service.py       (read-only metrics retrieval)
-  └─ dataset_parser.py       (CSV loading)
-pipelines/              ← Pure ML: no DB imports, no UI imports
-  ├─ base.py                 (BasePipeline ABC)
-  ├─ cicids2017/
-  │   └─ rf_paper_a.py       (RF + RFE)
-  ├─ hikari2021/
-  │   ├─ _common.py          (shared preprocessing helper)
-  │   ├─ rfc_pipeline.py     (Random Forest + RandomUnderSampler)
-  │   ├─ dt_pipeline.py      (Decision Tree)
-  │   ├─ knn_pipeline.py     (KNN + RUS post-split)
-  │   ├─ svc_pipeline.py     (SVC, probability=True)
-  │   ├─ nbgc_pipeline.py    (Gaussian Naive Bayes)
-  │   └─ lr_pipeline.py      (Logistic Regression + PCA)
-  └─ eve_suricata/
-      ├─ phase_runner.py     (shared phases 1-9 for all EVE models)
-      ├─ eve_rfc_pipeline.py (Random Forest on RFE features)
-      ├─ eve_dt_pipeline.py  (Decision Tree on RFE features)
-      ├─ eve_lsvc_pipeline.py(Linear SVC on MI features, decision_function ROC)
-      └─ eve_xgb_pipeline.py (XGBoost on MI features, optional dependency)
-database/               ← SQLite CRUD + schema migrations
-contracts/              ← Shared data classes (no project-layer imports)
-config/                 ← Pipeline registry + Celery config
-utils/                  ← Artifact saving, hashing, PDF generation
-workers/                ← Pipeline runners (local + Celery async)
-  ├─ local_worker.py         (synchronous, wraps pipeline.run())
-  └─ celery_worker.py        (async task via Redis broker)
-docker/                 ← Dockerfiles for UI and Celery worker
-tests/                  ← Pytest suite (~100 tests)
-storage/                ← Datasets + saved artifacts (gitignored)
-run_pipeline.py         ← CLI runner
-docker-compose.yml      ← Full stack: UI + Celery worker + Redis
+ui/                ← Streamlit views; talks only to orchestrator/ + config/
+orchestrator/      ← Business logic; only DB-writing layer
+workers/           ← Sync (local) and async (Celery) executors
+pipelines/         ← Pure ML; no DB, no UI, no orchestrator imports
+contracts/         ← Cross-layer dataclasses (PipelineInput, PipelineResult)
+database/          ← SQLite CRUD + migrations
+config/            ← Paths, settings, pipeline registry, Celery config
+utils/             ← Hashing, artifact saving, PDF generator, logging, sanitizer
+storage/           ← Datasets (input) and artifacts (output); mounted as volume
+tests/             ← pytest suite
+docker/            ← UI and worker Dockerfiles
+run_pipeline.py    ← CLI runner (alternative to UI)
 ```
 
-**Import boundary rule:** `pipelines/` never imports from `database/`, `ui/`, or `orchestrator/`. `orchestrator/` is the only layer that touches the database.
+**Hard import rule:** `pipelines/` must never import from `database/`, `ui/`, `orchestrator/`, or `workers/`. `orchestrator/experiment_service.py` is the only file that writes to the database.
+
+### Component flow
+
+```mermaid
+flowchart LR
+    User[User] --> UI[Streamlit UI<br/>ids_ui]
+    UI --> Orch[Orchestrator<br/>experiment_service]
+    Orch -->|sync| LocalW[Local Worker]
+    Orch -->|async via Redis| Celery[Celery Worker<br/>ids_worker]
+    Redis[(Redis Broker<br/>ids_redis)] <--> Celery
+    LocalW --> Pipe[Pipeline<br/>pure ML]
+    Celery --> Pipe
+    Pipe --> Artifacts[(storage/artifacts/<br/>model.pkl<br/>metrics.json<br/>metadata.json)]
+    Orch --> DB[(SQLite<br/>experiments.db)]
+```
 
 ---
 
-## Supported Datasets & Pipelines
+## Pipelines
 
-### CICIDS2017
-Network traffic dataset — Canadian Institute for Cybersecurity, 2017. 78-column feature space. Labels are string class names (e.g. `BENIGN`, `DDoS`, `PortScan`).
+All pipelines are registered in [`config/pipeline_registry.py`](config/pipeline_registry.py) and follow the `PipelineResult` contract in [`contracts/pipeline_contracts.py`](contracts/pipeline_contracts.py).
 
-| Pipeline ID | Algorithm | Paper |
+### CICIDS2017 (1 pipeline)
+
+| Pipeline ID | Algorithm | Reference |
 |---|---|---|
-| `cicids2017.rf_paper_a` | Random Forest + RFE (10 features) | Sharafaldin et al., ICISSP 2018 |
+| `cicids2017.rf_paper_a` | Random Forest + RFE | Sharafaldin et al., ICISSP 2018 |
 
-### HIKARI2021
-Network traffic dataset — ALLFLOWMETER variant. 88-column feature space. Labels are integers (0 = Benign, 1 = Malicious). Class distribution: ~517K benign vs ~37K malicious.
+### HIKARI2021 (6 pipelines)
 
-| Pipeline ID | Algorithm | Preprocessing |
+All HIKARI2021 pipelines use a stratified 70/30 train/test split.
+
+| Pipeline ID | Algorithm | Preprocessing notes |
 |---|---|---|
-| `hikari2021.rfc_pipeline` | Random Forest | RUS before split, StandardScaler |
+| `hikari2021.rfc_pipeline` | Random Forest (100 trees) | RandomUnderSampler on train only; StandardScaler fit on balanced train |
 | `hikari2021.dt_pipeline` | Decision Tree | None |
-| `hikari2021.knn_pipeline` | K-Nearest Neighbors (k=5) | RUS post-split (train only), StandardScaler |
-| `hikari2021.svc_pipeline` | SVC (probability=True) | None |
+| `hikari2021.knn_pipeline` | K-Nearest Neighbors (k=5) | RandomUnderSampler on train only; StandardScaler fit on balanced train |
+| `hikari2021.svc_pipeline` | SVC (`probability=True`) | None — UI shows runtime warning (O(n²)); learning curve uses cv=3 |
 | `hikari2021.nbgc_pipeline` | Gaussian Naive Bayes | None |
-| `hikari2021.lr_pipeline` | Logistic Regression | StandardScaler + PCA(95% variance) on all data |
+| `hikari2021.lr_pipeline` | Logistic Regression | StandardScaler + PCA(95% variance), both **fit on train only** (no leakage) |
 
-All HIKARI2021 pipelines use 70/30 train/test split. The RFC pipeline uses 80/20.
+### EVE Suricata (4 pipelines)
 
-> **Note on LR:** The StandardScaler + PCA is fitted on the full dataset before splitting — intentionally faithful to the original notebook. This constitutes data leakage and is documented as such.
+All four EVE pipelines share an identical Phase 1–9 preprocessing chain (`pipelines/eve_suricata/phase_runner.py`); only `_train_and_extract()` differs per pipeline.
 
-> **Note on SVC:** SVC has O(n²) complexity. A runtime warning is logged when the dataset exceeds 50K rows. Consider using a subset for initial testing.
-
-### EVE_SURICATA
-Network traffic dataset from Suricata IDS in EVE JSON (NDJSON) format. Labels are binary: 0 = Benign, 1 = Attack (derived from alert severity). Unlike CICIDS2017 and HIKARI2021, input is a `.json` / `.log` file — not a CSV.
-
-All four EVE pipelines share an identical 11-phase preprocessing chain (Phases 1–9 implemented in `phase_runner.py`). Only the model differs between them.
-
-**Shared phase pipeline:**
-
-| Phase | Name | What it does |
+| Pipeline ID | Algorithm | Features used |
 |---|---|---|
-| 1 | Load & Label | 2-pass NDJSON ingestion, binary labeling, disk-backed sharding |
-| 2 | Feature Engineering | Hash encoding, flow/alert totals, categorical expansion |
-| 3 | Computed Features | Interaction terms, row-level stats, normalization |
-| 4 | Aggressive Cleaning | NaN/Inf elimination, constant-column removal |
-| 7 | Correlation Analysis | Leakage detection — artifacts written but output not piped forward |
-| 8 | Train/Test Split | Stratified attack-aware split |
-| 9 | Feature Selection | MI + RFE (top 25) + PCA — returns three feature sets |
+| `eve_suricata.rfc` | Random Forest (100 trees) | RFE top-25 |
+| `eve_suricata.dt`  | Decision Tree | RFE top-25 |
+| `eve_suricata.knn` | K-Nearest Neighbors (k=5) + StandardScaler | MI top-25 |
+| `eve_suricata.xgb` | XGBoost (100 trees) | MI top-25 |
 
-**Pipelines:**
+**Shared phase chain (1–9):** Load & Label (NDJSON, 2-pass disk-backed) → Feature Engineering → Computed Features → Aggressive Cleaning → Correlation Analysis → Stratified Train/Test Split → Feature Selection (MI + RFE + PCA).
 
-| Pipeline ID | Algorithm | Features used | ROC method |
-|---|---|---|---|
-| `eve_suricata.rfc` | Random Forest (100 trees) | RFE top 25 | predict_proba |
-| `eve_suricata.dt` | Decision Tree | RFE top 25 | predict_proba |
-| `eve_suricata.lsvc` | Linear SVC + StandardScaler | MI top 25 | decision_function |
-| `eve_suricata.xgb` | XGBoost | MI top 25 | predict_proba |
-
-> **XGBoost is an optional dependency.** If `xgboost` is not installed, the pipeline raises a clear `ImportError` at run time. All other pipelines are unaffected.
+> XGBoost is a soft dependency. If the `xgboost` package is unavailable, only `eve_suricata.xgb` raises `ImportError`; other pipelines are unaffected.
 
 ---
 
-## Setup
+## Tech Stack
 
-### Option A — Local (Python venv)
+| Layer | Technology |
+|---|---|
+| UI | Streamlit, streamlit-option-menu, streamlit-aggrid |
+| ML | scikit-learn, imbalanced-learn, XGBoost (optional) |
+| Async execution | Celery + Redis (broker & result backend) |
+| Persistence | SQLite (stdlib `sqlite3`, WAL mode), filesystem artifacts |
+| Reporting | ReportLab (PDF), matplotlib |
+| Packaging | `pip install -e .` via `pyproject.toml`; Python ≥ 3.10 |
+| Container runtime | Docker + Docker Compose v2; Python 3.11-slim base image |
 
-**Requirements:** Python 3.10+
+Full dependency list lives in [`requirements.txt`](requirements.txt).
 
-```bash
-# 1. Clone / navigate to project
-cd d:/Program/TA
+---
 
-# 2. Create and activate virtual environment
+## Prerequisites
+
+- **Docker** (recommended) — Docker Desktop with Compose v2, or Docker Engine + Compose.
+- Sufficient memory available to the Docker backend. Recommended: **≥ 8 GB** for HIKARI2021 (ALLFLOWMETER variant is ~302 MB CSV and learning-curve fitting is memory-intensive). On WSL2, configure via `%USERPROFILE%\.wslconfig`.
+- Disk: ≥ 5 GB free for image build + artifact storage; more if you run many experiments.
+
+For local (non-Docker) development:
+
+- Python 3.10 or 3.11
+- Redis (only if running async mode locally)
+
+---
+
+## Getting Started (Docker — recommended)
+
+```powershell
+# 1. Clone
+git clone <your-repo-url>
+cd <repo>
+
+# 2. Place dataset files
+#    See "Preparing Datasets" below. storage/datasets/ is mounted into both containers.
+
+# 3. Build the images
+docker compose build
+
+# 4. Start the stack
+docker compose up -d --remove-orphans
+
+# 5. Open the UI
+#    Streamlit runs on http://localhost:8501
+```
+
+`--remove-orphans` is recommended on every start: it cleans up auto-named containers from previous runs that share the same image but have no Compose service binding.
+
+Useful follow-ups:
+
+```powershell
+# Tail worker logs
+docker compose logs -f worker
+
+# Inspect what env the worker process actually sees
+docker compose exec worker env | findstr CELERY
+
+# Stop everything
+docker compose down
+```
+
+After any code change, rebuild the images so the running containers pick up the change (Dockerfiles use `COPY . .`, source is baked at build time):
+
+```powershell
+docker compose down
+docker compose build --no-cache
+docker compose up -d --remove-orphans
+```
+
+---
+
+## Getting Started (Local — Python venv, no Docker)
+
+For developers iterating on UI or pipeline code locally:
+
+```powershell
 python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # Linux/macOS
-
-# 3. Install dependencies
+.\venv\Scripts\activate          # PowerShell on Windows
 pip install -r requirements.txt
+pip install -e .                  # makes the package importable everywhere
+
+streamlit run ui/app.py           # synchronous mode (USE_ASYNC unset / false)
 ```
 
-**`requirements.txt`**
-```
-streamlit>=1.30.0
-pandas>=2.0.0
-numpy>=1.24.0
-scikit-learn>=1.3.0
-joblib>=1.3.0
-matplotlib>=3.7.0
-pytest>=7.4.0
-reportlab>=4.0.0
-imbalanced-learn>=0.11.0
-celery>=5.3.0
-redis>=5.0.0
-xgboost>=2.0.0
-tqdm>=4.65.0
-```
-
-### Option B — Docker (full async stack)
-
-**Requirements:** Docker + Docker Compose
-
-```bash
-# Start all services (UI + Celery worker + Redis)
-docker-compose up --build
-
-# Start in background
-docker-compose up --build -d
-
-# Watch worker logs
-docker-compose logs -f worker
-
-# Shell into UI container
-docker-compose exec ui bash
-
-# Stop all services
-docker-compose down
-```
-
-The UI will be available at **http://localhost:8501**.
-
-**Data persistence:** mount points are pre-configured in `docker-compose.yml`:
-- `storage/datasets/` — place CSVs here **before** starting
-- `storage/artifacts/` — experiment outputs persist across restarts
-- `storage/experiments.db` — SQLite DB persists across restarts
-
-Set `USE_ASYNC=true` (default in Docker) to route pipeline execution through the Celery worker. Set `USE_ASYNC=false` to run synchronously in the UI process (local dev only).
+Async mode locally requires Redis on `localhost:6379`. The default broker URL in [`config/celery_config.py`](config/celery_config.py) is `redis://localhost:6379/0`, overridden in Docker by `CELERY_BROKER_URL=redis://redis:6379/0`.
 
 ---
 
-## Running the System
+## Preparing Datasets
 
-### Streamlit UI (primary)
+Datasets are read-only inputs at runtime — the UI does **not** include a file uploader. Place files directly in `storage/datasets/` before starting the stack:
 
-```bash
-streamlit run ui/app.py
+```
+storage/datasets/
+├── <your CICIDS2017 file>.csv
+├── ALLFLOWMETER_HIKARI2021.csv
+└── eve_100k.json                 # NDJSON (one JSON object per line)
 ```
 
-The app has three pages:
+Supported file formats per dataset type (from [`contracts/dataset_schemas.py`](contracts/dataset_schemas.py)):
 
-- **Run Experiment** — validate a dataset, select a pipeline, run training, view results, download PDF report
-- **Experiment History** — browse all past runs with metrics and re-run capability
-- **Environment Info** — Python version, installed packages, storage paths
+- **CICIDS2017** — `.csv`, 78 feature columns + `Label`.
+- **HIKARI2021** — `.csv` (ALLFLOWMETER variant), 88 columns including `traffic_category` and `Label`.
+- **EVE_SURICATA** — `.json` NDJSON (one JSON object per line). Required top-level keys: `timestamp`, `flow_id`, `event_type`, `src_ip`, `src_port`, `dest_ip`, `dest_port`, `proto`. Binary label `Target` is derived inside the pipeline from `alert.severity`.
 
-> Always start Streamlit from the project root with `streamlit run ui/app.py`. Do not navigate into `ui/` first — the `sys.path` setup in `app.py` depends on the file's location.
+Dataset files are **never written to** at runtime. They are hashed (SHA-256) and read into memory only.
 
-### Celery async worker (standalone)
+---
 
-```bash
-celery -A workers.celery_worker worker --loglevel=info --pool=solo
-```
+## Usage
 
-The worker handles the full pipeline lifecycle: parse → run → save artifacts → update DB. It reads `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` from the environment (defaults to `redis://localhost:6379`).
+### Via the Streamlit UI
 
-### CLI runner
+1. Open **http://localhost:8501**.
+2. Use the sidebar to navigate (Tutorial, Run Experiment, History, Environment Info).
+3. In **Run Experiment**: pick a dataset type, choose a file detected from `storage/datasets/`, click **Validate Dataset**, then pick a compatible pipeline and click **Run Experiment**.
+4. Watch the live progress panel; on completion, metrics, charts, and a **Download PDF Report** button appear.
+5. Browse past runs in **History** (AgGrid table with filtering and re-run).
 
-```bash
-# List all pipelines
+### Via the CLI runner
+
+```powershell
 python run_pipeline.py --list-pipelines
 
-# List pipelines for a specific dataset
-python run_pipeline.py --list-pipelines --dataset-type HIKARI2021
-
-# Run a pipeline
-python run_pipeline.py \
-  --dataset storage/datasets/your_file.csv \
-  --dataset-type HIKARI2021 \
+python run_pipeline.py `
+  --dataset storage/datasets/ALLFLOWMETER_HIKARI2021.csv `
+  --dataset-type HIKARI2021 `
   --pipeline hikari2021.rfc_pipeline
 ```
 
----
-
-## Running Experiments — Step by Step
-
-1. Place your CSV in `storage/datasets/`
-2. Open the Streamlit UI
-3. Select dataset type and enter the file path
-4. Click **Validate Dataset** — the system checks column count and names against the schema
-5. Select a pipeline from the dropdown
-6. Click **Run Experiment** — a live progress panel shows each stage:
-   - Computing SHA-256 hash
-   - Registering in database
-   - Parsing CSV
-   - Training model
-   - Saving artifacts
-   - Finalizing record
-7. Results appear below: metrics cards, confusion matrix, ROC curve, feature importance, per-class report
-8. Click **Download PDF Report** to export
+The CLI is synchronous (does not require Redis/Celery).
 
 ---
 
-## Artifacts
+## Reproducibility
 
-Each experiment saves three files under `storage/artifacts/{experiment_id}/`:
+This is the platform's design center. The following invariants are enforced project-wide:
 
-| File | Contents |
-|---|---|
-| `model.pkl` | Trained sklearn model object (joblib format) |
-| `metrics.json` | All numeric metrics + extra_info (ROC, feature importance, learning curve) |
-| `metadata.json` | Dataset path, hash, pipeline ID, label mapping, feature names, timestamps |
+1. **`random_state=42` everywhere** — splits, samplers, classifiers, and learning-curve calls.
+2. **`stratify=y` on every split** — critical for HIKARI2021's severe class imbalance.
+3. **No data leakage** — scalers, samplers, and PCA are fit on the training partition only. (One exception lived in the original LR notebook; the production LR pipeline corrects it — both StandardScaler and PCA are fit on `X_train` post-split.)
+4. **Locked hyperparameters** — hard-coded in each pipeline file; no UI controls, no config overrides, no function arguments expose them.
+5. **Dataset SHA-256 hash** — recorded in `experiments.dataset_hash` and `metadata.json` for every run. Lets you detect silent dataset edits between runs.
+6. **`PipelineResult` is a stable contract** — extras go in `extra_info: dict` so adding metrics never breaks downstream readers.
 
-The database (`storage/experiments.db`) stores summary metrics and paths to artifacts. Full metrics (including ROC curve arrays) live only in `metrics.json`.
+A "test it twice and compare" pattern is enforced in the test suite (`test_reproducibility` style cases) for each pipeline.
+
+### Computation parallelism note
+
+All `n_jobs` parameters across pipelines are pinned to `2` (not `-1`). This is a deliberate choice for memory safety on smaller dev/CI machines and consistent narrative across all runs. `n_jobs` is a computation knob, not a model hyperparameter; changing it does not affect the trained model or its metrics — only wall-clock time.
+
+---
+
+## Project Structure
+
+```
+.
+├── ui/                            Streamlit application
+│   ├── app.py                     Entry point (sidebar routing)
+│   └── views/
+│       ├── tutorial.py            Usage guide
+│       ├── run_experiment.py      Run + monitor experiments
+│       ├── view_results.py        History (AgGrid) + detail view
+│       ├── environment_info.py    Python, deps, paths
+│       └── _artifact_browser.py   Read-only artifact viewer
+├── orchestrator/                  Business logic
+│   ├── experiment_service.py      Only DB-writing facade
+│   ├── execution_service.py       Pipeline dispatch
+│   ├── validation_service.py      Schema validation
+│   ├── result_service.py          Read-only result retrieval
+│   ├── dataset_parser.py          CSV / NDJSON parsing
+│   └── validator.py               Column-set check
+├── workers/
+│   ├── local_worker.py            Synchronous executor
+│   └── celery_worker.py           Async Celery task
+├── pipelines/
+│   ├── base.py                    BasePipeline abstract class
+│   ├── cicids2017/
+│   ├── hikari2021/                6 paper-faithful pipelines
+│   └── eve_suricata/
+│       ├── phase_runner.py        Shared 11-phase chain
+│       ├── phases/                phase1..phase9 modules
+│       ├── rfc_pipeline.py
+│       ├── dt_pipeline.py
+│       ├── knn_pipeline.py
+│       └── xgb_pipeline.py
+├── database/
+│   ├── models.py                  Schema constants (one table: experiments)
+│   ├── db.py                      sqlite3 CRUD
+│   └── migration.py               Schema versioning
+├── contracts/
+│   ├── pipeline_contracts.py      PipelineInput / PipelineResult
+│   └── dataset_schemas.py
+├── config/
+│   ├── settings.py                Paths, env detection
+│   ├── pipeline_registry.py       Registry of all pipelines
+│   └── celery_config.py           Broker / backend / USE_ASYNC
+├── utils/
+│   ├── hashing.py                 SHA-256 with cross-env path fallback
+│   ├── artifact_saver.py          Write model + metrics + metadata
+│   ├── report_generator.py        Modular PDF report (9 sections)
+│   ├── error_sanitizer.py         Strip absolute paths from error strings
+│   ├── timestamps.py
+│   └── logging_config.py
+├── storage/
+│   ├── datasets/                  Input files (gitignored)
+│   ├── artifacts/{exp_id}/        model.pkl, metrics.json, metadata.json
+│   └── experiments.db             SQLite (WAL mode)
+├── tests/                         pytest suite (196 collected)
+├── docker/
+│   ├── Dockerfile                 UI image
+│   └── worker.Dockerfile          Celery worker image
+├── docker-compose.yml             Three-service stack
+├── requirements.txt
+├── pyproject.toml
+└── run_pipeline.py                CLI runner
+```
 
 ---
 
 ## Database Schema
 
-Single table: `experiments`
+A single table, `experiments`, defined in [`database/models.py`](database/models.py):
 
 | Column | Type | Notes |
 |---|---|---|
-| `experiment_id` | TEXT | UUID, primary key |
-| `dataset_type` | TEXT | `CICIDS2017`, `HIKARI2021`, or `EVE_SURICATA` |
-| `dataset_path` | TEXT | Path to source CSV |
-| `dataset_hash` | TEXT | SHA-256 of the CSV file |
+| `id` | TEXT | Experiment UUID, primary key |
+| `dataset_type` | TEXT | `CICIDS2017` \| `HIKARI2021` \| `EVE_SURICATA` |
+| `dataset_path` | TEXT | Path captured at submission time |
+| `dataset_hash` | TEXT | SHA-256 hex |
 | `pipeline_id` | TEXT | Registry key |
-| `status` | TEXT | `CREATED`, `RUNNING`, `FINISHED`, `FAILED` |
-| `created_at` | TEXT | ISO 8601 |
-| `started_at` | TEXT | Set when execution begins |
-| `completed_at` | TEXT | Set on finish or failure |
-| `accuracy` | REAL | |
-| `precision_score` | REAL | |
-| `recall` | REAL | |
-| `f1_score` | REAL | |
-| `metrics_path` | TEXT | Relative path to metrics.json |
-| `model_path` | TEXT | Relative path to model.pkl |
-| `error_message` | TEXT | Populated on FAILED status |
+| `status` | TEXT | `QUEUED` \| `RUNNING` \| `FINISHED` \| `FAILED` |
+| `created_at`, `started_at`, `completed_at` | TEXT | ISO 8601 |
+| `accuracy`, `precision_score`, `recall`, `f1_score` | REAL | Top-line metrics; full metrics live in `metrics.json` |
+| `metrics_path`, `model_path` | TEXT | Artifact paths |
+| `error_message` | TEXT | Sanitized error string on FAILED |
+| `task_id` | TEXT | Celery task id for async runs |
 
-Schema versioning is managed by `database/migration.py`. Migrations run automatically on `init_db()`.
+SQLite is opened in WAL mode for safer concurrent read-while-write.
+
+---
+
+## Testing
+
+```powershell
+# Full suite
+.\venv\Scripts\python.exe -m pytest tests/ -q
+
+# Focused subsets (examples)
+pytest tests/test_db.py tests/test_migration.py -v
+pytest tests/test_validator.py tests/test_parser.py -v
+pytest tests/test_pipeline_rf.py -v
+pytest tests/test_hikari_all_pipelines.py -v
+pytest tests/test_eve_pipeline.py -v
+pytest tests/test_experiment_service.py -v
+pytest tests/test_path_fallback.py -v
+```
+
+At the time of writing, `pytest --collect-only -q` reports **196 tests collected**. The suite covers:
+
+- Database CRUD + migrations (per-test isolated SQLite via `tmp_path`)
+- Schema validators and dataset parser
+- Each pipeline end-to-end on synthetic schema-conforming DataFrames (no real CSV needed)
+- A parametrized HIKARI2021 cross-pipeline test (multiple pipelines × multiple assertions)
+- Orchestrator services and execution service
+- Artifact saving + path-resolution fallback
+- Error sanitizer and Celery progress reporting
+
+No mocked ML models — pipelines run real `sklearn` fits on synthetic data.
 
 ---
 
@@ -301,24 +405,19 @@ from pipelines.base import BasePipeline
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 
 class YourPipeline(BasePipeline):
-    def run(self, pipeline_input: PipelineInput) -> PipelineResult:
+    def run(self, pipeline_input: PipelineInput, progress=None) -> PipelineResult:
         ...
-        return PipelineResult(accuracy=..., precision=..., recall=...,
-                              f1_score=..., confusion_matrix=...,
-                              model=..., feature_names=...,
-                              label_mapping=..., extra_info=...)
+        return PipelineResult(
+            accuracy=..., precision=..., recall=..., f1_score=...,
+            confusion_matrix=..., model=..., feature_names=...,
+            label_mapping=..., extra_info={...},
+        )
 
     def get_info(self) -> dict:
-        return {
-            "paper": "...",
-            "algorithm": "...",
-            "preprocessing_steps": [...],
-            "feature_selection": "...",
-            "fixed_params": {...},
-        }
+        return {"paper": "...", "algorithm": "...", "fixed_params": {...}}
 ```
 
-2. Add one entry to `config/pipeline_registry.py`:
+2. Register it in [`config/pipeline_registry.py`](config/pipeline_registry.py):
 
 ```python
 "yourdataset.your_pipeline": {
@@ -330,98 +429,65 @@ class YourPipeline(BasePipeline):
 },
 ```
 
-That's it. The UI and CLI pick it up automatically.
+3. Add a corresponding test file under `tests/`. New pipelines must include a reproducibility test (run twice, assert identical metrics).
+
+The UI and CLI pick up the new pipeline automatically.
 
 ---
 
 ## Adding a New Dataset
 
-1. Add a schema to `contracts/dataset_schemas.py`:
-
-```python
-YOURDATA_SCHEMA = {
-    "label_column": "Label",
-    "expected_columns": ["col1", "col2", ..., "Label"],
-}
-DATASET_SCHEMAS["YOURDATA"] = YOURDATA_SCHEMA
-```
-
-2. Add at least one pipeline for it (see above).
+1. Add a schema entry in [`contracts/dataset_schemas.py`](contracts/dataset_schemas.py).
+2. Add at least one pipeline that targets the new `dataset_type`.
+3. (Optional) Update the UI's dataset selection filter if it has hard-coded type metadata.
 
 ---
 
-## Tests
+## Known Limitations
 
-```bash
-# All tests
-pytest tests/ -v
+This is an honest list. The platform is intentionally scoped.
 
-# By layer
-pytest tests/test_db.py tests/test_migration.py -v          # database
-pytest tests/test_validator.py tests/test_parser.py -v      # dataset layer
-pytest tests/test_pipeline_rf.py -v                         # CICIDS2017 pipeline
-pytest tests/test_pipeline_hikari.py -v                     # HIKARI2021 RFC pipeline
-pytest tests/test_hikari_all_pipelines.py -v                # all 5 new HIKARI pipelines (50 tests)
-pytest tests/test_eve_pipeline.py -v                        # EVE/Suricata pipelines
-pytest tests/test_experiment_service.py -v                  # orchestrator integration
-pytest tests/test_execution_service.py -v                   # execution service
-pytest tests/test_artifact_saver.py -v                      # utils
-```
-
-**Test strategy:**
-- Database tests use `tmp_path` (isolated per-test SQLite files)
-- Pipeline tests use synthetic DataFrames generated from schema column lists — no real CSV required
-- `test_hikari_all_pipelines.py` is fully parametrized: 10 test functions × 5 pipeline classes = 50 tests
-- All random seeds fixed at 42; `test_reproducibility` verifies identical outputs on identical inputs
-- No mocked ML models — pipelines run end-to-end on synthetic data
+- **Memory ceiling.** Learning-curve computation on large CSV datasets (HIKARI ~300 MB) can dominate memory. Pipelines are configured with `n_jobs=2` and CV folds chosen conservatively (SVC at cv=3) to stay within ~8 GB. Smaller Docker backends may still OOM on the heavier pipelines. Mitigations in place: `task_reject_on_worker_lost=True` on the Celery worker prevents OOM-redelivery loops.
+- **Single-user, single-tenant.** No authentication, no per-user data isolation, no rate limiting. Intended for a single researcher on their own machine or a private VM.
+- **Batch-oriented, not real-time.** No streaming, no packet capture, no API for online inference. Each experiment is a one-shot offline run.
+- **Classical ML only.** No deep learning (LSTM, Transformer, GNN). The contracts and storage layer could be extended, but no DL pipeline currently exists.
+- **Pre-extracted features required.** Datasets must already be in CSV (CICIDS2017, HIKARI2021) or NDJSON (EVE Suricata) form. There is no pcap-to-feature extraction stage in this repo.
+- **EVE Suricata Phase 1 reads NDJSON only.** A CSV adapter is in progress (dotted-column → nested event reconstruction) but not yet wired end-to-end.
+- **Dataset files must be placed manually** in `storage/datasets/`. There is no file upload widget in the UI; this is a deliberate choice to keep dataset provenance traceable.
+- **No CI/CD.** Tests are run locally; there is no GitHub Actions / Jenkins / etc. pipeline configured at the time of writing.
+- **SQLite, not PostgreSQL.** Sufficient for a single-user research workload but not horizontally scalable.
 
 ---
 
-## Reproducibility
+## Troubleshooting
 
-Every pipeline fixes `random_state=42` for all stochastic components (train/test split, RandomUnderSampler, classifier). Given the same input CSV, the system always produces bit-identical metrics. This is verified by `test_reproducibility` tests in every pipeline test file.
-
-SHA-256 hashing of the input file provides an integrity check — the database records the hash alongside each experiment.
-
----
-
-## Key Design Decisions
-
-**Fixed hyperparameters.** No user tuning. Every parameter value is locked to what the paper specifies. This enforces fair comparison between runs.
-
-**Stratified splits everywhere.** All train/test splits use `stratify=y` to preserve class distribution, critical for the imbalanced HIKARI2021 dataset.
-
-**RUS placement for KNN.** RandomUnderSampler is applied *after* the train/test split (on train only), which is methodologically correct. The RFC pipeline applies RUS before splitting — this faithfully replicates the original notebook's approach, and the difference is documented.
-
-**`ui/views/` not `ui/pages/`.** Using `ui/pages/` would trigger Streamlit's multipage auto-discovery, adding unwanted sidebar entries. Views live in `ui/views/` and are routed manually via `st.sidebar.radio`.
-
-**`orchestrator/` as the sole DB gateway.** Only `orchestrator/experiment_service.py` imports from `database/`. Pipelines and utils have no database dependency, making them testable in isolation without any DB setup.
-
-**Celery idempotency guard.** The worker checks the experiment status before execution (`acks_late=True` can cause redelivery). If the experiment is already `FINISHED` or `FAILED`, the task is skipped safely.
-
-**EVE/Suricata phase isolation.** All four EVE models call the same `run_phases_1_through_9()` function. Intermediate files are written to a `tempfile.mkdtemp()` directory and cleaned up via a `cleanup()` callable in the `finally` block — even on failure. This keeps the pipeline stateless and prevents disk leaks across runs.
-
-**LinearSVC ROC without predict_proba.** `LinearSVC` has no `predict_proba`. The EVE LSVC pipeline uses `decision_function` scores instead, which are valid inputs for `roc_auc_score` and `roc_curve`.
-
-**XGBoost as a soft dependency.** `eve_xgb_pipeline.py` wraps the `xgboost` import in a `try/except` at module level. If XGBoost is not installed, the class still loads but `run()` raises a descriptive `ImportError`. This avoids breaking the registry import for users who don't need XGBoost.
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| UI shows old features after code change | Containers still running the previous image | `docker compose down && docker compose build --no-cache && docker compose up -d --remove-orphans` |
+| Worker logs say `Cannot connect to redis://localhost:6379/0` | Orphan worker container started outside Compose, missing env vars | `docker ps -a` → `docker rm -f <orphan>`. Always `up` with `--remove-orphans` |
+| Experiment fails immediately with `File not found: <path>` | Dataset path captured in one environment is being read by a worker in another | Already mitigated by [`utils/hashing.py`](utils/hashing.py) + [`orchestrator/dataset_parser.py`](orchestrator/dataset_parser.py) basename fallback. If still failing, verify file exists in `storage/datasets/` |
+| Pipeline gets stuck at "Computing learning curve" then container restarts | OOM kill | Reduce dataset size, or increase Docker memory allocation in `.wslconfig` / Docker Desktop settings |
 
 ---
 
-## Project Status
+## Academic Context
 
-| Layer | Status |
-|---|---|
-| Dataset schemas (CICIDS2017, HIKARI2021, EVE_SURICATA) | ✅ Complete |
-| Database (SQLite + migrations) | ✅ Complete |
-| CICIDS2017 pipelines (RF + RFE) | ✅ Complete |
-| HIKARI2021 pipelines (RFC, DT, KNN, SVC, NBGC, LR) | ✅ Complete |
-| EVE/Suricata pipelines (RFC, DT, LinearSVC, XGBoost) | ✅ Complete |
-| EVE/Suricata 11-phase shared preprocessing | ✅ Complete |
-| Orchestrator services | ✅ Complete |
-| CLI runner | ✅ Complete |
-| Streamlit UI (3 views) | ✅ Complete |
-| PDF report generation | ✅ Complete |
-| Live progress indicators | ✅ Complete |
-| Test suite | ✅ Complete |
-| Async execution (Celery + Redis) | ✅ Complete |
-| Docker containerization | ✅ Complete |
+This project is the engineering deliverable for the undergraduate thesis:
+
+> **"Pengembangan Platform Eksperimen IDS Berbasis Web On-Premise dengan Pipeline ML Terstandarisasi"**
+> Andi Siti Aisyah Amin · Teknik Informatika · Universitas Hasanuddin (UNHAS)
+
+The thesis claim is not a new algorithm — every pipeline is a faithful re-implementation of a published method. The contribution is the platform itself: a controlled, auditable, reproducible execution environment for IDS ML research.
+
+---
+
+## License
+
+License is not yet finalized. *[TBD — choose a license before making this repository public.]*
+
+---
+
+## Acknowledgements
+
+- Datasets: CICIDS2017 (Canadian Institute for Cybersecurity), HIKARI2021 (ALLFLOWMETER variant), EVE Suricata (Open Information Security Foundation).
+- Methods are paper-faithful re-implementations; original authors are credited in the per-pipeline `get_info()` output and (where applicable) in the table above.

@@ -43,7 +43,18 @@ def parse_dataset(file_path: str) -> pd.DataFrame:
     path = Path(file_path)
 
     if not path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
+        # Cross-environment fallback: when UI and worker run in different
+        # environments (e.g. UI in Docker emitting /app/... paths, worker on
+        # the Windows host, or vice versa), the absolute path from the other
+        # side won't resolve here. Retry against the local DATASETS_DIR using
+        # only the basename. The path-safety check below still constrains the
+        # resolved candidate to live under DATASETS_DIR / BASE_DIR.
+        from config.settings import DATASETS_DIR as _DATASETS_DIR
+        candidate = Path(_DATASETS_DIR) / path.name
+        if candidate.exists():
+            path = candidate
+        else:
+            raise FileNotFoundError(f"File not found: {file_path}")
 
     ext = path.suffix.lower()
     if ext not in (".csv", ".json"):

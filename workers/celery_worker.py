@@ -48,6 +48,11 @@ app.conf.update(
     accept_content=['json'],
     task_track_started=True,
     task_acks_late=True,
+    # Complements task_acks_late: if the worker process dies mid-task (OOM kill,
+    # SIGKILL, container restart), the broker marks the task as failed instead
+    # of redelivering it. Prevents OOM-loop when a task systematically kills its
+    # worker (e.g. learning_curve memory blowup on large datasets).
+    task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
     worker_concurrency=CELERY_CONCURRENCY,  # default 1 — prevents OOM on large datasets
 )

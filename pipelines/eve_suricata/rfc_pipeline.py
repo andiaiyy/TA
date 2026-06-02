@@ -28,7 +28,7 @@ class EveRFCPipeline(BaseEvePipeline):
         X_test = df_test[features].values if df_test is not None else X_train
         y_test = df_test[_TARGET].values if df_test is not None else y_train
 
-        clf = RandomForestClassifier(n_estimators=100, random_state=rs, n_jobs=-1)
+        clf = RandomForestClassifier(n_estimators=100, random_state=rs, n_jobs=2)
         clf.fit(X_train, y_train)
 
         extra = {"phase_summaries": prep["phase_summaries"]}
@@ -50,7 +50,7 @@ class EveRFCPipeline(BaseEvePipeline):
             "feature_selection": "Phase 9: RFE top-25",
             "fixed_params": {
                 "n_estimators": 100,
-                "n_jobs": -1,
+                "n_jobs": 2,
                 "feature_method": "RFE",
             },
             "train_test_split": {"method": "Phase 8 stratified split"},

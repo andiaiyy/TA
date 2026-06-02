@@ -43,7 +43,7 @@ class EveXGBPipeline(BaseEvePipeline):
             n_estimators=100,
             random_state=rs,
             eval_metric="logloss",
-            n_jobs=-1,
+            n_jobs=2,
         )
         clf.fit(X_train, y_train)
 
@@ -67,7 +67,7 @@ class EveXGBPipeline(BaseEvePipeline):
             "fixed_params": {
                 "n_estimators": 100,
                 "eval_metric": "logloss",
-                "n_jobs": -1,
+                "n_jobs": 2,
                 "feature_method": "MI",
             },
             "train_test_split": {"method": "Phase 8 stratified split"},

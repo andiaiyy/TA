@@ -44,7 +44,7 @@ class HikariKNNPipeline(BasePipeline):
         X_test_scaled = scaler.transform(X_test)
 
         self._emit_progress(progress, "Training")
-        clf = KNeighborsClassifier(n_neighbors=5, n_jobs=-1)
+        clf = KNeighborsClassifier(n_neighbors=5, n_jobs=2)
         clf.fit(X_train_scaled, y_train_bal)
 
         y_pred = clf.predict(X_test_scaled)
@@ -73,10 +73,10 @@ class HikariKNNPipeline(BasePipeline):
         self._emit_progress(progress, "Computing learning curve")
         try:
             train_sizes, train_scores, val_scores = learning_curve(
-                estimator=KNeighborsClassifier(n_neighbors=5, n_jobs=-1),
+                estimator=KNeighborsClassifier(n_neighbors=5, n_jobs=2),
                 X=X_train_scaled, y=y_train_bal,
                 train_sizes=[0.2, 0.4, 0.6, 0.8, 1.0],
-                cv=5, scoring="f1_weighted", n_jobs=-1, random_state=random_state,
+                cv=5, scoring="f1_weighted", n_jobs=2, random_state=random_state,
             )
             extra_info["learning_curve"] = {
                 "train_sizes": train_sizes.tolist(),

@@ -21,7 +21,18 @@ def sha256_file(file_path: str, chunk_size: int = 8192) -> str:
     """
     path = Path(file_path)
     if not path.exists():
-        raise FileNotFoundError(f"File not found: {file_path}")
+        # Cross-environment fallback: when UI and worker run in different
+        # environments (e.g. UI in Docker emitting /app/... paths, worker on
+        # the Windows host, or vice versa), the absolute path from the other
+        # side won't resolve here. Retry against the local DATASETS_DIR using
+        # only the basename. Datasets live as flat files in that directory,
+        # so basename lookup is unambiguous.
+        from config.settings import DATASETS_DIR
+        candidate = Path(DATASETS_DIR) / path.name
+        if candidate.exists():
+            path = candidate
+        else:
+            raise FileNotFoundError(f"File not found: {file_path}")
 
     h = hashlib.sha256()
     with open(path, "rb") as f:
