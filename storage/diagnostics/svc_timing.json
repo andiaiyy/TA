@@ -1,0 +1,39 @@
+{
+  "results": [
+    {
+      "n_total": 3000,
+      "n_train": 2100,
+      "wall_sec": 0.179,
+      "cpu_sec": 0.188,
+      "cpu_pct_of_one_core": 104.5
+    },
+    {
+      "n_total": 6000,
+      "n_train": 4200,
+      "wall_sec": 0.874,
+      "cpu_sec": 0.875,
+      "cpu_pct_of_one_core": 100.1
+    },
+    {
+      "n_total": 10000,
+      "n_train": 7000,
+      "wall_sec": 1.582,
+      "cpu_sec": 1.578,
+      "cpu_pct_of_one_core": 99.8
+    },
+    {
+      "n_total": 20000,
+      "n_train": 14000,
+      "wall_sec": 6.489,
+      "cpu_sec": 6.469,
+      "cpu_pct_of_one_core": 99.7
+    },
+    {
+      "n_total": 35000,
+      "n_train": 24500,
+      "wall_sec": 27.652,
+      "cpu_sec": 27.625,
+      "cpu_pct_of_one_core": 99.9
+    }
+  ]
+}

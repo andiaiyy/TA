@@ -98,7 +98,11 @@
       "Bash(docker info *)",
       "Bash(findstr /I \"Memory CPUs Operating Kernel\")",
       "Bash(docker stats *)",
-      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -m pytest tests/ --collect-only -q 2>&1)"
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -m pytest tests/ --collect-only -q 2>&1)",
+      "Bash(not exist *)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\svc_timing_diagnostic.py 2>&1)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_compute_eta.py)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_nb_extract.py)"
     ]
   }
 }
