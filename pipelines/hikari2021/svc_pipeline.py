@@ -2,6 +2,7 @@
 from typing import Optional
 
 from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split, learning_curve
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score,
@@ -42,13 +43,21 @@ class HikariSVCPipeline(BasePipeline):
             X, y, test_size=0.3, random_state=random_state, stratify=y
         )
 
+        self._emit_progress(progress, "Scaling")
+        # StandardScaler — fit on train only (anti-leakage). RBF SVC is highly
+        # sensitive to feature scale, and HIKARI features span many orders of
+        # magnitude. Consistent with knn/lr/rfc HIKARI pipelines.
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+
         self._emit_progress(progress, "Training (SVC — slow on large datasets)")
         # probability=True enables predict_proba for ROC-AUC
         clf = SVC(probability=True, random_state=random_state)
-        clf.fit(X_train, y_train)
+        clf.fit(X_train_scaled, y_train)
 
         self._emit_progress(progress, "Evaluating")
-        y_pred = clf.predict(X_test)
+        y_pred = clf.predict(X_test_scaled)
         accuracy = float(accuracy_score(y_test, y_pred))
         precision = float(precision_score(y_test, y_pred, average="weighted", zero_division=0))
         recall = float(recall_score(y_test, y_pred, average="weighted", zero_division=0))
@@ -57,7 +66,7 @@ class HikariSVCPipeline(BasePipeline):
 
         extra_info: dict = {}
 
-        y_prob = clf.predict_proba(X_test)[:, 1]
+        y_prob = clf.predict_proba(X_test_scaled)[:, 1]
         fpr, tpr, _ = roc_curve(y_test, y_prob)
         extra_info["roc_auc"] = float(roc_auc_score(y_test, y_prob))
         extra_info["roc_curve"] = {"fpr": fpr.tolist(), "tpr": tpr.tolist()}
@@ -76,7 +85,7 @@ class HikariSVCPipeline(BasePipeline):
         try:
             train_sizes, train_scores, val_scores = learning_curve(
                 estimator=SVC(probability=True, random_state=random_state),
-                X=X_train, y=y_train,
+                X=X_train_scaled, y=y_train,
                 train_sizes=[0.2, 0.4, 0.6, 0.8, 1.0],
                 cv=3, scoring="f1_weighted", n_jobs=2, random_state=random_state,
             )
@@ -112,13 +121,14 @@ class HikariSVCPipeline(BasePipeline):
                 "Drop non-numeric columns",
                 "Drop NaN rows",
                 "70/30 stratified train/test split",
+                "StandardScaler (fit on train only)",
             ],
             "feature_selection": "None — all numeric features used",
             "fixed_params": {
                 "probability": True,
                 "random_state": 42,
                 "balancing": "None",
-                "scaler": "None",
+                "scaler": "StandardScaler (train only)",
                 "pca": False,
                 "test_size": 0.3,
                 "stratify": True,

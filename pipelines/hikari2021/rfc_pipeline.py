@@ -52,7 +52,6 @@ class HikariRFCPipeline(BasePipeline):
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
         random_state = pipeline_input.random_state
-        test_size = pipeline_input.test_size
 
         # Step 1: Drop non-feature columns
         df.drop(columns=[c for c in _DROP_COLS if c in df.columns], inplace=True, errors="ignore")
@@ -75,9 +74,13 @@ class HikariRFCPipeline(BasePipeline):
         feature_names = X.columns.tolist()
 
         # Step 4: Train/Test Split FIRST (before balancing)
+        # Hardcoded 0.3 (70/30) for consistency with the other 5 HIKARI pipelines
+        # (knn, dt, svc, nbgc, lr all use 0.3). PipelineInput.test_size default
+        # (0.2) is intentionally ignored here to enforce HIKARI cross-pipeline
+        # uniformity.
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
-            test_size=test_size,
+            test_size=0.3,
             random_state=random_state,
             stratify=y,
         )
@@ -195,11 +198,11 @@ class HikariRFCPipeline(BasePipeline):
                 "balancing": "RandomUnderSampler",
                 "scaler": "StandardScaler",
                 "pca": False,
-                "test_size": 0.2,
+                "test_size": 0.3,
                 "stratify": True,
             },
             "train_test_split": {
-                "test_size": 0.2,
+                "test_size": 0.3,
                 "stratify": True,
                 "random_state": 42,
             },
