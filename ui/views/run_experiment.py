@@ -708,10 +708,12 @@ def _render_diag_block(experiment_id: str, status_data: dict) -> None:
     Shows everything needed to identify which link in the dispatch chain
     is broken: env-var, orchestrator branch, task_id, DB status, worker
     entered marker, raw AsyncResult.
+
+    Wrapped inside an expander (default closed) so the long dict dump does
+    not dominate the main view during polling. Information is preserved
+    in full; only the visual default changed.
     """
     import os
-    st.markdown("---")
-    st.write("### [DIAG] Diagnostic block")
 
     # 1. What the Streamlit process sees in its own environment, RIGHT NOW.
     env_use_async = os.environ.get("USE_ASYNC")
@@ -751,18 +753,20 @@ def _render_diag_block(experiment_id: str, status_data: dict) -> None:
         except Exception as e:
             raw_info = f"<AsyncResult error: {e}>"
 
-    st.write(f"**os.environ.get('USE_ASYNC')** (Streamlit process env): `{env_use_async!r}`")
-    st.write(f"**config.celery_config.USE_ASYNC** (frozen at import): `{cfg_use_async!r}`")
-    st.write(f"**Dispatched branch** (from orchestrator stash): `{branch!r}`")
-    st.write(f"**Dispatch-time USE_ASYNC** (from orchestrator stash): `{diag_use_async!r}`")
-    st.write(f"**task_id**: `{task_id!r}`")
-    st.write(f"**DB status**: `{status_data.get('status')!r}`")
-    st.write(f"**worker task started**: `{'yes' if worker_entered else 'no'}`")
-    st.write(f"**raw AsyncResult.state**: `{raw_state!r}`")
-    st.write("**raw AsyncResult.info**:")
-    st.code(repr(raw_info), language="python")
-    st.write("**status_data** (full dict from get_experiment_status):")
-    st.json(status_data)
+    st.markdown("---")
+    with st.expander("Detail diagnostik", expanded=False):
+        st.write(f"**os.environ.get('USE_ASYNC')** (Streamlit process env): `{env_use_async!r}`")
+        st.write(f"**config.celery_config.USE_ASYNC** (frozen at import): `{cfg_use_async!r}`")
+        st.write(f"**Dispatched branch** (from orchestrator stash): `{branch!r}`")
+        st.write(f"**Dispatch-time USE_ASYNC** (from orchestrator stash): `{diag_use_async!r}`")
+        st.write(f"**task_id**: `{task_id!r}`")
+        st.write(f"**DB status**: `{status_data.get('status')!r}`")
+        st.write(f"**worker task started**: `{'yes' if worker_entered else 'no'}`")
+        st.write(f"**raw AsyncResult.state**: `{raw_state!r}`")
+        st.write("**raw AsyncResult.info**:")
+        st.code(repr(raw_info), language="python")
+        st.write("**status_data** (full dict from get_experiment_status):")
+        st.json(status_data)
 
 
 def _display_results(result: dict):

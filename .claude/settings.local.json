@@ -117,7 +117,8 @@
       "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_cancel_stuck_eve.py 2>&1)",
       "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_eve_rerun_4_pipelines.py 2>&1)",
       "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -m pytest tests/test_parser.py -q --tb=short 2>&1)",
-      "Bash(xargs -n1 basename)"
+      "Bash(xargs -n1 basename)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_smoke_basename.py)"
     ]
   }
 }
