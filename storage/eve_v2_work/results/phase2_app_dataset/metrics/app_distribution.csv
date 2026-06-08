@@ -1,0 +1,6 @@
+application,rows,percentage_of_input_rows,shards,output_dir
+dns,4799,4.990640599001664,1,D:\Program\TA\storage\eve_v2_work\results\phase2_app_dataset\app=dns
+http,1799,1.8708402662229617,1,D:\Program\TA\storage\eve_v2_work\results\phase2_app_dataset\app=http
+tls,2451,2.5488768718801995,1,D:\Program\TA\storage\eve_v2_work\results\phase2_app_dataset\app=tls
+ssh,24905,25.899542429284526,1,D:\Program\TA\storage\eve_v2_work\results\phase2_app_dataset\app=ssh
+unmatched,62206,64.69009983361065,0,

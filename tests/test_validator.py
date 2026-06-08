@@ -2,7 +2,7 @@
 import pytest
 import pandas as pd
 
-from contracts.dataset_schemas import CICIDS2017_SCHEMA
+from contracts.dataset_schemas import HIKARI2021_SCHEMA
 from orchestrator.validator import validate_dataset
 
 
@@ -12,30 +12,31 @@ def _make_df(columns, n_rows=10):
     np.random.seed(42)
     data = {col: np.random.randn(n_rows) for col in columns if col != "Label"}
     if "Label" in columns:
-        data["Label"] = ["BENIGN"] * (n_rows // 2) + ["DDoS"] * (n_rows - n_rows // 2)
+        # HIKARI2021 labels are integer 0/1 (Benign / Malicious)
+        data["Label"] = [0] * (n_rows // 2) + [1] * (n_rows - n_rows // 2)
     return pd.DataFrame(data)
 
 
-def test_validate_valid_cicids2017():
-    df = _make_df(CICIDS2017_SCHEMA["expected_columns"])
-    result = validate_dataset(df, "CICIDS2017")
+def test_validate_valid_hikari2021():
+    df = _make_df(HIKARI2021_SCHEMA["expected_columns"])
+    result = validate_dataset(df, "HIKARI2021")
     assert result.is_valid is True
     assert result.missing_columns == []
-    assert "BENIGN" in result.unique_labels
+    assert 0 in result.unique_labels
 
 
 def test_validate_missing_columns():
-    cols = [c for c in CICIDS2017_SCHEMA["expected_columns"] if c not in ["Flow Duration", "Label"]]
+    cols = [c for c in HIKARI2021_SCHEMA["expected_columns"] if c not in ["flow_duration", "Label"]]
     df = _make_df(cols)
-    result = validate_dataset(df, "CICIDS2017")
+    result = validate_dataset(df, "HIKARI2021")
     assert result.is_valid is False
-    assert "Flow Duration" in result.missing_columns
+    assert "flow_duration" in result.missing_columns
 
 
 def test_validate_extra_columns_allowed():
-    cols = CICIDS2017_SCHEMA["expected_columns"] + ["bonus_col"]
+    cols = HIKARI2021_SCHEMA["expected_columns"] + ["bonus_col"]
     df = _make_df(cols)
-    result = validate_dataset(df, "CICIDS2017")
+    result = validate_dataset(df, "HIKARI2021")
     assert result.is_valid is True
     assert "bonus_col" in result.extra_columns
 
@@ -48,8 +49,8 @@ def test_validate_unknown_dataset_type():
 
 
 def test_validate_empty_dataframe():
-    cols = CICIDS2017_SCHEMA["expected_columns"]
+    cols = HIKARI2021_SCHEMA["expected_columns"]
     df = pd.DataFrame(columns=cols)
-    result = validate_dataset(df, "CICIDS2017")
+    result = validate_dataset(df, "HIKARI2021")
     assert result.is_valid is False
     assert any("empty" in e.lower() for e in result.errors)

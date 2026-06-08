@@ -1,0 +1,22 @@
+{
+  "App": "http",
+  "Method": "PCA",
+  "Model": "XGB",
+  "accuracy": 0.9936548223350254,
+  "accuracy_std": 0.0063451776649746106,
+  "precision_attack": 0.9924242424242424,
+  "recall_attack": 0.9949238578680203,
+  "f1_attack": 0.9936708860759493,
+  "auc": 0.998711639052797,
+  "cv_folds": 2,
+  "train_rows": 788,
+  "train_features": 62,
+  "holdout_accuracy": 1.0,
+  "holdout_precision_attack": 1.0,
+  "holdout_recall_attack": 1.0,
+  "holdout_f1_attack": 1.0,
+  "holdout_auc": 1.0,
+  "test_rows": 196,
+  "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=http\\checkpoints\\PCA\\XGB\\final_model.joblib",
+  "elapsed_seconds": 0.40432420000070124
+}

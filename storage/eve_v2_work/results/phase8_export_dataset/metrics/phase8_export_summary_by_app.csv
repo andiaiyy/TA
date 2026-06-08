@@ -1,0 +1,5 @@
+app,status,mode,rows_seen,shards_seen,input_gib,sample_rows_exported,export_mb,manifest_path,schema_path
+dns,completed,sample_csv,4799,1,0.00026626046746969223,4799,3.1511354446411133,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=dns\manifest.csv,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=dns\schema.json
+http,completed,sample_csv,1799,1,0.00021831411868333817,1799,1.221282958984375,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=http\manifest.csv,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=http\schema.json
+tls,completed,sample_csv,2451,1,0.00033789966255426407,2451,1.7791128158569336,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=tls\manifest.csv,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=tls\schema.json
+ssh,completed,sample_csv,24905,1,0.00246486347168684,24905,18.062623977661133,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=ssh\manifest.csv,D:\Program\TA\storage\eve_v2_work\results\phase8_export_dataset\app=ssh\schema.json

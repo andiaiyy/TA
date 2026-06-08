@@ -1,0 +1,252 @@
+[
+  {
+    "Feature": "proto",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 1513265002.0,
+    "Max": 1513265002.0
+  },
+  {
+    "Feature": "app_proto",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 751206353.0,
+    "Max": 751206353.0
+  },
+  {
+    "Feature": "has_flow",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 1.0,
+    "Max": 1.0
+  },
+  {
+    "Feature": "label_evidence_compromised_ip",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "application",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 278877467.0,
+    "Max": 278877467.0
+  },
+  {
+    "Feature": "app_filter_reason",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 1604476964.0,
+    "Max": 1604476964.0
+  },
+  {
+    "Feature": "evidence_compromised_ip",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "evidence_probe",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "probe_score",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "is_possible_probe",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "probe_reason",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 117540559.0,
+    "Max": 117540559.0
+  },
+  {
+    "Feature": "dport_is_http",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "dport_is_https",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "dport_is_ssh",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "ts_hour",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "ts_dow",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 3.0,
+    "Max": 3.0
+  },
+  {
+    "Feature": "ts_day",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 1.0,
+    "Max": 1.0
+  },
+  {
+    "Feature": "interact_0_8",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "interact_0_9",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "interact_0_10",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "row_min",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "norm_8",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "norm_9",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  },
+  {
+    "Feature": "has_high_values",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 1.0,
+    "Max": 1.0
+  },
+  {
+    "Feature": "is_sparse",
+    "Issue": "CONSTANT_OR_SINGLE",
+    "Null_Count": 0,
+    "Inf_Count": 0,
+    "Unique_Values": 1,
+    "Std_Dev": 0.0,
+    "Min": 0.0,
+    "Max": 0.0
+  }
+]

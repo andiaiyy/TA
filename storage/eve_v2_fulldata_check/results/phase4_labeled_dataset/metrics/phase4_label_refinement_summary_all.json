@@ -1,0 +1,372 @@
+{
+  "phase": 4,
+  "status": "completed",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase4_labeled_dataset",
+  "total_rows_written": 267056,
+  "total_output_bytes": 9518503,
+  "total_output_gib": 0.008864796720445156,
+  "apps": {
+    "dns": {
+      "phase": 4,
+      "app": "dns",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase2_app_dataset\\app=dns",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase4_labeled_dataset\\app=dns",
+      "phase3_input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing",
+      "has_probing_features": true,
+      "probing_feature_rows": 63,
+      "compromised_ip_file": null,
+      "compromised_ip_count": 0,
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "timestamp_col": "timestamp",
+      "window_minutes": 5,
+      "false_positive_alert_categories": [
+        "generic protocol decode"
+      ],
+      "require_alert_severity": true,
+      "use_probing_evidence": true,
+      "probe_score_threshold": 3.0,
+      "use_is_possible_probe_flag": true,
+      "use_compromised_ip_evidence": true,
+      "shards_read": 5,
+      "shards_written": 5,
+      "rows_read": 177654,
+      "rows_written": 177654,
+      "target_counts": {
+        "0": 177646,
+        "1": 8
+      },
+      "label_source_counts": {
+        "no_malicious_evidence": 177646,
+        "alert": 8
+      },
+      "evidence_counts": {
+        "alert": 8,
+        "compromised_ip": 0,
+        "probe": 0
+      },
+      "alert_severity_by_target": {
+        "0": {
+          "0": 177646,
+          "1": 0,
+          "2": 0
+        },
+        "1": {
+          "0": 0,
+          "1": 2,
+          "2": 6
+        }
+      },
+      "visualization_stats": {
+        "app": "dns",
+        "rows_after_phase4": 177654,
+        "target_counts": {
+          "0": 177646,
+          "1": 8
+        },
+        "label_source_counts": {
+          "no_malicious_evidence": 177646,
+          "alert": 8
+        },
+        "evidence_counts": {
+          "alert": 8,
+          "compromised_ip": 0,
+          "probe": 0
+        },
+        "alert_severity_by_target": {
+          "0": {
+            "0": 177646,
+            "1": 0,
+            "2": 0
+          },
+          "1": {
+            "0": 0,
+            "1": 2,
+            "2": 6
+          }
+        }
+      },
+      "output_format": "parquet",
+      "output_bytes": 5378794,
+      "output_gib": 0.005009392276406288,
+      "df_sample_shape": [
+        100000,
+        41
+      ],
+      "seconds": 3.178679,
+      "note": "Phase 4 is the first phase that finalizes Target. Earlier labels are treated as evidence/staging, not final ground truth."
+    },
+    "http": {
+      "phase": 4,
+      "app": "http",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase2_app_dataset\\app=http",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase4_labeled_dataset\\app=http",
+      "phase3_input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing",
+      "has_probing_features": true,
+      "probing_feature_rows": 278,
+      "compromised_ip_file": null,
+      "compromised_ip_count": 0,
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "timestamp_col": "timestamp",
+      "window_minutes": 5,
+      "false_positive_alert_categories": [
+        "generic protocol decode"
+      ],
+      "require_alert_severity": true,
+      "use_probing_evidence": true,
+      "probe_score_threshold": 3.0,
+      "use_is_possible_probe_flag": true,
+      "use_compromised_ip_evidence": true,
+      "shards_read": 5,
+      "shards_written": 5,
+      "rows_read": 14935,
+      "rows_written": 14935,
+      "target_counts": {
+        "0": 14727,
+        "1": 208
+      },
+      "label_source_counts": {
+        "no_malicious_evidence": 14727,
+        "alert": 208
+      },
+      "evidence_counts": {
+        "alert": 208,
+        "compromised_ip": 0,
+        "probe": 0
+      },
+      "alert_severity_by_target": {
+        "0": {
+          "0": 14727,
+          "3": 0
+        },
+        "1": {
+          "0": 0,
+          "3": 208
+        }
+      },
+      "visualization_stats": {
+        "app": "http",
+        "rows_after_phase4": 14935,
+        "target_counts": {
+          "0": 14727,
+          "1": 208
+        },
+        "label_source_counts": {
+          "no_malicious_evidence": 14727,
+          "alert": 208
+        },
+        "evidence_counts": {
+          "alert": 208,
+          "compromised_ip": 0,
+          "probe": 0
+        },
+        "alert_severity_by_target": {
+          "0": {
+            "0": 14727,
+            "3": 0
+          },
+          "1": {
+            "0": 0,
+            "3": 208
+          }
+        }
+      },
+      "output_format": "parquet",
+      "output_bytes": 752731,
+      "output_gib": 0.0007010353729128838,
+      "df_sample_shape": [
+        14935,
+        41
+      ],
+      "seconds": 0.538821,
+      "note": "Phase 4 is the first phase that finalizes Target. Earlier labels are treated as evidence/staging, not final ground truth."
+    },
+    "tls": {
+      "phase": 4,
+      "app": "tls",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase2_app_dataset\\app=tls",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase4_labeled_dataset\\app=tls",
+      "phase3_input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing",
+      "has_probing_features": true,
+      "probing_feature_rows": 296,
+      "compromised_ip_file": null,
+      "compromised_ip_count": 0,
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "timestamp_col": "timestamp",
+      "window_minutes": 5,
+      "false_positive_alert_categories": [
+        "generic protocol decode"
+      ],
+      "require_alert_severity": true,
+      "use_probing_evidence": true,
+      "probe_score_threshold": 3.0,
+      "use_is_possible_probe_flag": true,
+      "use_compromised_ip_evidence": true,
+      "shards_read": 5,
+      "shards_written": 5,
+      "rows_read": 69332,
+      "rows_written": 69332,
+      "target_counts": {
+        "0": 59128,
+        "1": 10204
+      },
+      "label_source_counts": {
+        "no_malicious_evidence": 59128,
+        "alert": 10204
+      },
+      "evidence_counts": {
+        "alert": 10204,
+        "compromised_ip": 0,
+        "probe": 0
+      },
+      "alert_severity_by_target": {
+        "0": {
+          "0": 59128,
+          "3": 0
+        },
+        "1": {
+          "0": 0,
+          "3": 10204
+        }
+      },
+      "visualization_stats": {
+        "app": "tls",
+        "rows_after_phase4": 69332,
+        "target_counts": {
+          "0": 59128,
+          "1": 10204
+        },
+        "label_source_counts": {
+          "no_malicious_evidence": 59128,
+          "alert": 10204
+        },
+        "evidence_counts": {
+          "alert": 10204,
+          "compromised_ip": 0,
+          "probe": 0
+        },
+        "alert_severity_by_target": {
+          "0": {
+            "0": 59128,
+            "3": 0
+          },
+          "1": {
+            "0": 0,
+            "3": 10204
+          }
+        }
+      },
+      "output_format": "parquet",
+      "output_bytes": 3046832,
+      "output_gib": 0.0028375834226608276,
+      "df_sample_shape": [
+        69332,
+        41
+      ],
+      "seconds": 1.423449,
+      "note": "Phase 4 is the first phase that finalizes Target. Earlier labels are treated as evidence/staging, not final ground truth."
+    },
+    "ssh": {
+      "phase": 4,
+      "app": "ssh",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase2_app_dataset\\app=ssh",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase4_labeled_dataset\\app=ssh",
+      "phase3_input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing",
+      "has_probing_features": true,
+      "probing_feature_rows": 311,
+      "compromised_ip_file": null,
+      "compromised_ip_count": 0,
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "timestamp_col": "timestamp",
+      "window_minutes": 5,
+      "false_positive_alert_categories": [
+        "generic protocol decode"
+      ],
+      "require_alert_severity": true,
+      "use_probing_evidence": true,
+      "probe_score_threshold": 3.0,
+      "use_is_possible_probe_flag": true,
+      "use_compromised_ip_evidence": true,
+      "shards_read": 5,
+      "shards_written": 5,
+      "rows_read": 5135,
+      "rows_written": 5135,
+      "target_counts": {
+        "0": 5135
+      },
+      "label_source_counts": {
+        "no_malicious_evidence": 5135
+      },
+      "evidence_counts": {
+        "alert": 0,
+        "compromised_ip": 0,
+        "probe": 0
+      },
+      "alert_severity_by_target": {
+        "0": {
+          "0": 5135
+        }
+      },
+      "visualization_stats": {
+        "app": "ssh",
+        "rows_after_phase4": 5135,
+        "target_counts": {
+          "0": 5135
+        },
+        "label_source_counts": {
+          "no_malicious_evidence": 5135
+        },
+        "evidence_counts": {
+          "alert": 0,
+          "compromised_ip": 0,
+          "probe": 0
+        },
+        "alert_severity_by_target": {
+          "0": {
+            "0": 5135
+          }
+        }
+      },
+      "output_format": "parquet",
+      "output_bytes": 340146,
+      "output_gib": 0.00031678564846515656,
+      "df_sample_shape": [
+        5135,
+        41
+      ],
+      "seconds": 0.360014,
+      "note": "Phase 4 is the first phase that finalizes Target. Earlier labels are treated as evidence/staging, not final ground truth."
+    }
+  },
+  "seconds": 5.520287,
+  "note": "Target is finalized per application using alert evidence, optional compromised IP evidence, and optional probing evidence from Phase 3."
+}

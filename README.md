@@ -32,7 +32,7 @@ This is not a production IDS, not a real-time detector, and not a multi-tenant s
 ## Key Features
 
 - **Locked pipelines, no UI hyperparameter tuning.** Every algorithm parameter is hard-coded in source. This is the platform's core methodological contribution.
-- **11 registered ML pipelines** across 3 dataset families (see [Pipelines](#pipelines)).
+- **10 registered ML pipelines** across 2 dataset families (see [Pipelines](#pipelines)).
 - **Reproducibility by construction**: every stochastic step uses `random_state=42`, every split is `stratify=y`, every dataset is SHA-256 hashed and the hash is persisted to the experiment record.
 - **Dual execution modes**: synchronous (in-process) or asynchronous (Celery + Redis). Toggled via `USE_ASYNC` environment variable.
 - **Web UI (Streamlit)** with 4 pages: Tutorial, Run Experiment, Experiment History (AgGrid), Environment Info.
@@ -84,12 +84,6 @@ flowchart LR
 ## Pipelines
 
 All pipelines are registered in [`config/pipeline_registry.py`](config/pipeline_registry.py) and follow the `PipelineResult` contract in [`contracts/pipeline_contracts.py`](contracts/pipeline_contracts.py).
-
-### CICIDS2017 (1 pipeline)
-
-| Pipeline ID | Algorithm | Reference |
-|---|---|---|
-| `cicids2017.rf_paper_a` | Random Forest + RFE | Sharafaldin et al., ICISSP 2018 |
 
 ### HIKARI2021 (6 pipelines)
 
@@ -218,14 +212,12 @@ Datasets are read-only inputs at runtime — the UI does **not** include a file 
 
 ```
 storage/datasets/
-├── <your CICIDS2017 file>.csv
 ├── ALLFLOWMETER_HIKARI2021.csv
 └── eve_100k.json                 # NDJSON (one JSON object per line)
 ```
 
 Supported file formats per dataset type (from [`contracts/dataset_schemas.py`](contracts/dataset_schemas.py)):
 
-- **CICIDS2017** — `.csv`, 78 feature columns + `Label`.
 - **HIKARI2021** — `.csv` (ALLFLOWMETER variant), 88 columns including `traffic_category` and `Label`.
 - **EVE_SURICATA** — `.json` NDJSON (one JSON object per line). Required top-level keys: `timestamp`, `flow_id`, `event_type`, `src_ip`, `src_port`, `dest_ip`, `dest_port`, `proto`. Binary label `Target` is derived inside the pipeline from `alert.severity`.
 
@@ -301,7 +293,6 @@ All `n_jobs` parameters across pipelines are pinned to `2` (not `-1`). This is a
 │   └── celery_worker.py           Async Celery task
 ├── pipelines/
 │   ├── base.py                    BasePipeline abstract class
-│   ├── cicids2017/
 │   ├── hikari2021/                6 paper-faithful pipelines
 │   └── eve_suricata/
 │       ├── phase_runner.py        Shared 11-phase chain
@@ -351,7 +342,7 @@ A single table, `experiments`, defined in [`database/models.py`](database/models
 | Column | Type | Notes |
 |---|---|---|
 | `id` | TEXT | Experiment UUID, primary key |
-| `dataset_type` | TEXT | `CICIDS2017` \| `HIKARI2021` \| `EVE_SURICATA` |
+| `dataset_type` | TEXT | `HIKARI2021` \| `EVE_SURICATA` |
 | `dataset_path` | TEXT | Path captured at submission time |
 | `dataset_hash` | TEXT | SHA-256 hex |
 | `pipeline_id` | TEXT | Registry key |
@@ -451,7 +442,7 @@ This is an honest list. The platform is intentionally scoped.
 - **Single-user, single-tenant.** No authentication, no per-user data isolation, no rate limiting. Intended for a single researcher on their own machine or a private VM.
 - **Batch-oriented, not real-time.** No streaming, no packet capture, no API for online inference. Each experiment is a one-shot offline run.
 - **Classical ML only.** No deep learning (LSTM, Transformer, GNN). The contracts and storage layer could be extended, but no DL pipeline currently exists.
-- **Pre-extracted features required.** Datasets must already be in CSV (CICIDS2017, HIKARI2021) or NDJSON (EVE Suricata) form. There is no pcap-to-feature extraction stage in this repo.
+- **Pre-extracted features required.** Datasets must already be in CSV (HIKARI2021) or NDJSON (EVE Suricata) form. There is no pcap-to-feature extraction stage in this repo.
 - **EVE Suricata Phase 1 reads NDJSON only.** A CSV adapter is in progress (dotted-column → nested event reconstruction) but not yet wired end-to-end.
 - **Dataset files must be placed manually** in `storage/datasets/`. There is no file upload widget in the UI; this is a deliberate choice to keep dataset provenance traceable.
 - **No CI/CD.** Tests are run locally; there is no GitHub Actions / Jenkins / etc. pipeline configured at the time of writing.
@@ -489,5 +480,5 @@ License is not yet finalized. *[TBD — choose a license before making this repo
 
 ## Acknowledgements
 
-- Datasets: CICIDS2017 (Canadian Institute for Cybersecurity), HIKARI2021 (ALLFLOWMETER variant), EVE Suricata (Open Information Security Foundation).
+- Datasets: HIKARI2021 (ALLFLOWMETER variant), EVE Suricata (Open Information Security Foundation).
 - Methods are paper-faithful re-implementations; original authors are credited in the per-pipeline `get_info()` output and (where applicable) in the table above.

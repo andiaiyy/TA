@@ -1,0 +1,51 @@
+{
+  "method": "PCA",
+  "model_name": "RFC",
+  "status": "completed",
+  "updated_at": "2026-06-05T15:37:20.970318",
+  "fold_metrics": {
+    "1": {
+      "accuracy": 1.0,
+      "precision_attack": 1.0,
+      "recall_attack": 1.0,
+      "f1_attack": 1.0,
+      "auc": 1.0
+    },
+    "2": {
+      "accuracy": 0.9898477157360406,
+      "precision_attack": 0.9800995024875622,
+      "recall_attack": 1.0,
+      "f1_attack": 0.9899497487437185,
+      "auc": 0.999974232781056
+    }
+  },
+  "holdout_metrics": {
+    "accuracy": 1.0,
+    "precision_attack": 1.0,
+    "recall_attack": 1.0,
+    "f1_attack": 1.0,
+    "auc": 1.0
+  },
+  "result_row": {
+    "App": "http",
+    "Method": "PCA",
+    "Model": "RFC",
+    "accuracy": 0.9949238578680203,
+    "accuracy_std": 0.005076142131979711,
+    "precision_attack": 0.9900497512437811,
+    "recall_attack": 1.0,
+    "f1_attack": 0.9949748743718593,
+    "auc": 0.9999871163905281,
+    "cv_folds": 2,
+    "train_rows": 788,
+    "train_features": 62,
+    "holdout_accuracy": 1.0,
+    "holdout_precision_attack": 1.0,
+    "holdout_recall_attack": 1.0,
+    "holdout_f1_attack": 1.0,
+    "holdout_auc": 1.0,
+    "test_rows": 196,
+    "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=http\\checkpoints\\PCA\\RFC\\final_model.joblib",
+    "elapsed_seconds": 0.7363148999975238
+  }
+}

@@ -22,7 +22,7 @@ def test_init_db_creates_table(tmp_db):
 
 
 def test_create_experiment(tmp_db):
-    create_experiment("exp-1", "CICIDS2017", "/data.csv", "abc123", "pipeline.rf", "2026-01-01T00:00:00Z", tmp_db)
+    create_experiment("exp-1", "HIKARI2021", "/data.csv", "abc123", "pipeline.rf", "2026-01-01T00:00:00Z", tmp_db)
     exp = get_experiment("exp-1", tmp_db)
     assert exp is not None
     assert exp["status"] == "QUEUED"
@@ -30,14 +30,14 @@ def test_create_experiment(tmp_db):
 
 
 def test_set_running(tmp_db):
-    create_experiment("exp-1", "CICIDS2017", "/data.csv", "abc", "p.rf", "2026-01-01T00:00:00Z", tmp_db)
+    create_experiment("exp-1", "HIKARI2021", "/data.csv", "abc", "p.rf", "2026-01-01T00:00:00Z", tmp_db)
     set_running("exp-1", "2026-01-01T00:01:00Z", tmp_db)
     exp = get_experiment("exp-1", tmp_db)
     assert exp["status"] == "RUNNING"
 
 
 def test_set_finished(tmp_db):
-    create_experiment("exp-1", "CICIDS2017", "/data.csv", "abc", "p.rf", "2026-01-01T00:00:00Z", tmp_db)
+    create_experiment("exp-1", "HIKARI2021", "/data.csv", "abc", "p.rf", "2026-01-01T00:00:00Z", tmp_db)
     set_running("exp-1", "2026-01-01T00:01:00Z", tmp_db)
     set_finished("exp-1", "2026-01-01T00:02:00Z", 0.95, 0.93, 0.91, 0.92, "metrics.json", "model.pkl", tmp_db)
     exp = get_experiment("exp-1", tmp_db)
@@ -46,7 +46,7 @@ def test_set_finished(tmp_db):
 
 
 def test_set_failed(tmp_db):
-    create_experiment("exp-1", "CICIDS2017", "/data.csv", "abc", "p.rf", "2026-01-01T00:00:00Z", tmp_db)
+    create_experiment("exp-1", "HIKARI2021", "/data.csv", "abc", "p.rf", "2026-01-01T00:00:00Z", tmp_db)
     set_failed("exp-1", "2026-01-01T00:02:00Z", "Something broke", tmp_db)
     exp = get_experiment("exp-1", tmp_db)
     assert exp["status"] == "FAILED"
@@ -55,7 +55,7 @@ def test_set_failed(tmp_db):
 
 def test_list_experiments_ordered(tmp_db):
     for i in range(3):
-        create_experiment(f"exp-{i}", "CICIDS2017", "/d.csv", "h", "p", f"2026-01-0{i+1}T00:00:00Z", tmp_db)
+        create_experiment(f"exp-{i}", "HIKARI2021", "/d.csv", "h", "p", f"2026-01-0{i+1}T00:00:00Z", tmp_db)
     results = list_experiments(tmp_db)
     assert len(results) == 3
     assert results[0]["id"] == "exp-2"

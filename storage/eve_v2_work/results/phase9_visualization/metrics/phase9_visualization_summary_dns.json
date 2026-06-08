@@ -1,0 +1,162 @@
+{
+  "phase": 9,
+  "app": "dns",
+  "status": "completed",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase9_visualization\\app=dns",
+  "overview_path": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase9_visualization\\app=dns\\visualization_overview_dns_run_n1000000.png",
+  "heatmap_path": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase9_visualization\\app=dns\\correlation_heatmap_dns_run_n100000.png",
+  "rows_seen": 4799,
+  "input_bytes": 285895,
+  "input_size": "279.19 KiB",
+  "shards_seen": 1,
+  "n_viz_requested": 1000000,
+  "n_viz_used": 4799,
+  "n_heatmap_requested": 100000,
+  "stratify_by_target": true,
+  "target_counts_input": {
+    "1": 287,
+    "0": 4512
+  },
+  "target_counts_sample": {
+    "0": 4512,
+    "1": 287
+  },
+  "event_type_top10_input": {
+    "flow": 4512,
+    "alert": 287
+  },
+  "proto_counts_input": {
+    "UDP": 4799
+  },
+  "app_proto_top10_input": {
+    "failed": 4799
+  },
+  "dest_port_top10_input": {
+    "53": 4660,
+    "47822": 2,
+    "39242": 2,
+    "38180": 1,
+    "58916": 1,
+    "36710": 1,
+    "36182": 1,
+    "34266": 1,
+    "35720": 1,
+    "44784": 1
+  },
+  "row_count_source": "phase7_summary",
+  "target_count_source": "phase7_summary",
+  "distribution_note": "Target ratio is taken from Phase 7 summary when available; event/proto/port distributions are computed from the visualization sample.",
+  "sample_shape": [
+    4799,
+    103
+  ],
+  "schema_cols_count": 103,
+  "overview": {
+    "target_dist_sample": {
+      "0": 4512,
+      "1": 287
+    },
+    "event_type_source": "event_type_raw",
+    "proto_source": "proto_raw",
+    "app_proto_source": "app_proto_raw",
+    "top_events_sample": {
+      "flow": 4512,
+      "alert": 287
+    },
+    "proto_counts_sample": {
+      "UDP": 4799
+    },
+    "app_proto_counts_sample": {
+      "failed": 4799
+    }
+  },
+  "heatmap": {
+    "n_heatmap_used": 4799,
+    "heatmap_cols_used": [
+      "Target",
+      "flow_id",
+      "timestamp",
+      "window_start",
+      "row_sum",
+      "pkt_src",
+      "ratio_max_to_min",
+      "row_max",
+      "label_source",
+      "event_type",
+      "label_reason",
+      "src_ip",
+      "alert_category",
+      "label_status",
+      "dest_ip",
+      "row_std",
+      "alert_signature",
+      "ratio_sum_to_count",
+      "label_status_final",
+      "row_mean",
+      "interact_0_6",
+      "alert_signature_id",
+      "src_port",
+      "dest_port",
+      "interact_0_2",
+      "interact_1_2",
+      "interact_0_4",
+      "interact_0_1",
+      "interact_1_4",
+      "interact_1_6",
+      "interact_0_11",
+      "interact_0_14",
+      "total_bytes",
+      "bytes_toclient",
+      "interact_0_7",
+      "interact_0_3",
+      "interact_0_13",
+      "interact_0_5",
+      "bytes_per_pkt",
+      "interact_0_12",
+      "interact_1_7",
+      "bytes_per_sec",
+      "interact_1_3",
+      "duration",
+      "interact_1_5",
+      "bytes_toserver",
+      "row_nonzero",
+      "Target_prelim",
+      "alert_severity",
+      "has_low_variance",
+      "total_pkts",
+      "pkts_toclient",
+      "log_total_bytes",
+      "evidence_alert",
+      "label_evidence_alert",
+      "has_alert",
+      "dport_is_dns",
+      "bytes_toclient_ratio",
+      "bytes_toserver_ratio",
+      "log_duration",
+      "pkts_toclient_ratio",
+      "pkts_toserver_ratio",
+      "norm_6",
+      "log_total_pkts",
+      "norm_2",
+      "norm_3",
+      "pkts_per_sec",
+      "norm_7",
+      "norm_5",
+      "norm_0",
+      "label_confidence",
+      "pkts_toserver",
+      "norm_1",
+      "norm_4",
+      "has_flow",
+      "app_filter_reason",
+      "application",
+      "label_evidence_compromised_ip",
+      "app_proto",
+      "proto"
+    ],
+    "heatmap_cols_count": 80
+  },
+  "seconds": 2.755438,
+  "note": "Phase 9 visualizes per-application clean datasets from Phase 7. The overview and heatmap are based on a bounded representative sample, not a full-data scan."
+}

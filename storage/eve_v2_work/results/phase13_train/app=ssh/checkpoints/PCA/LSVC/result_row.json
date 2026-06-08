@@ -1,0 +1,22 @@
+{
+  "App": "ssh",
+  "Method": "PCA",
+  "Model": "LSVC",
+  "accuracy": 0.9998410680228862,
+  "accuracy_std": 0.00015893197711380758,
+  "precision_attack": 0.9998410680228862,
+  "recall_attack": 0.9998410680228862,
+  "f1_attack": 0.9998410680228862,
+  "auc": 0.9996821865645191,
+  "cv_folds": 2,
+  "train_rows": 12584,
+  "train_features": 56,
+  "holdout_accuracy": 1.0,
+  "holdout_precision_attack": 1.0,
+  "holdout_recall_attack": 1.0,
+  "holdout_f1_attack": 1.0,
+  "holdout_auc": 1.0,
+  "test_rows": 3146,
+  "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=ssh\\checkpoints\\PCA\\LSVC\\final_model.joblib",
+  "elapsed_seconds": 0.2822550000018964
+}

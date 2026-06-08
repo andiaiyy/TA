@@ -31,21 +31,14 @@ Every pipeline uses the exact hyperparameters from its reference paper. This gua
 
 | Dataset | Format | Features | Label type | Status |
 |---|---|---|---|---|
-| CICIDS2017 | CSV | 78 | String (BENIGN, DDoS, PortScan, …) | ✅ Complete |
 | HIKARI2021 | CSV | 88 | Binary (0=Benign, 1=Malicious) | ✅ Complete |
 | EVE_SURICATA | NDJSON | Dynamic | Binary (derived from alert severity) | ✅ Complete |
 
-**Note on EVE_SURICATA:** Unlike the other two, input is a raw Suricata IDS `.json` log file — not a pre-processed CSV. The system does all feature engineering internally through an 11-phase shared pipeline.
+**Note on EVE_SURICATA:** Unlike HIKARI2021, input is a raw Suricata IDS `.json` log file — not a pre-processed CSV. The system does all feature engineering internally through an 11-phase shared pipeline.
 
 ---
 
-## 3. ML Pipelines Implemented — 11 Total
-
-### CICIDS2017 (1 pipeline)
-
-| ID | Algorithm | Reference |
-|---|---|---|
-| `cicids2017.rf_paper_a` | Random Forest + RFE (top 10 features) | Sharafaldin et al., ICISSP 2018 |
+## 3. ML Pipelines Implemented — 10 Total
 
 ### HIKARI2021 (6 pipelines)
 
@@ -135,7 +128,6 @@ pytest tests/ -v  →  133 passed, 7 skipped, 0 failed
 | `test_migration.py` | Schema versioning |
 | `test_parser.py` | CSV loading, path safety |
 | `test_validator.py` | Schema validation per dataset type |
-| `test_pipeline_rf.py` | CICIDS2017 pipeline end-to-end |
 | `test_pipeline_hikari.py` | HIKARI2021 RFC pipeline |
 | `test_hikari_all_pipelines.py` | All 6 HIKARI pipelines (50 parametrized tests) |
 | `test_eve_pipeline.py` | EVE schema + registry (integration tests skipped — need real file) |
@@ -171,7 +163,7 @@ pytest tests/ -v  →  133 passed, 7 skipped, 0 failed
 **Step-by-step demo flow:**
 
 1. Open `http://localhost:8501`
-2. **Run Experiment page** — click a dataset type tile (CICIDS2017, HIKARI2021, or EVE_SURICATA)
+2. **Run Experiment page** — click a dataset type tile (HIKARI2021 or EVE_SURICATA)
 3. Dialog pops up → select a file → Confirm
 4. Click **Validate Dataset** — shows row count, columns, class labels
 5. Select a pipeline from dropdown — expand Pipeline Detail to show locked params
@@ -190,7 +182,6 @@ Show the architecture diagram and walk through the code structure. The test suit
 
 | Item | Status |
 |---|---|
-| Run CICIDS2017 on real data, record results | ⏳ Pending |
 | Run HIKARI2021 (all 6 pipelines), record results | ⏳ Pending |
 | Run EVE_SURICATA (all 4 pipelines) on real log data | ⏳ Pending |
 | Cross-dataset comparison analysis | ⏳ Pending |

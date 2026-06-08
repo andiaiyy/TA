@@ -1,0 +1,350 @@
+{
+  "phase": 3,
+  "phase_name": "probing_analysis",
+  "application": "ssh",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase2_app_dataset",
+  "input_app_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase2_app_dataset\\app=ssh",
+  "output_app_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing\\app=ssh",
+  "metrics_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing\\metrics",
+  "window_minutes": 5,
+  "thresholds": {
+    "min_event_count": 50,
+    "min_unique_dest_ip": 10,
+    "min_unique_dest_port": 5,
+    "min_alert_count": 1,
+    "min_probe_score": 3.0
+  },
+  "score_weights": {
+    "event_weight": 1.0,
+    "dest_ip_weight": 1.25,
+    "dest_port_weight": 1.25,
+    "alert_weight": 1.0,
+    "prelim_malicious_weight": 0.75
+  },
+  "input_shards": 5,
+  "input_rows": 5135,
+  "usable_rows": 5135,
+  "dropped_no_timestamp": 0,
+  "dropped_no_src_ip": 0,
+  "shard_group_rows_before_merge": 541,
+  "feature_rows": 311,
+  "possible_probe_rows": 27,
+  "possible_probe_percentage_of_windows": 8.681672025723474,
+  "feature_path": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing\\app=ssh\\src_ip_window_features.parquet",
+  "candidates_path": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing\\app=ssh\\probing_candidates.csv",
+  "src_ip_summary_path": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing\\app=ssh\\src_ip_probing_summary.csv",
+  "top_event_type": {
+    "flow": 5135
+  },
+  "top_label_status": {
+    "no_alert_unknown": 5135
+  },
+  "top_src_ip_by_probe": [
+    {
+      "src_ip": "103.185.193.42",
+      "windows_seen": 3,
+      "total_events": 304,
+      "possible_probe_windows": 3,
+      "max_probe_score": 10.1,
+      "max_unique_dest_ip_window": 10,
+      "max_unique_dest_port_window": 130,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.144",
+      "windows_seen": 3,
+      "total_events": 229,
+      "possible_probe_windows": 3,
+      "max_probe_score": 9.655,
+      "max_unique_dest_ip_window": 9,
+      "max_unique_dest_port_window": 114,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.92",
+      "windows_seen": 3,
+      "total_events": 247,
+      "possible_probe_windows": 3,
+      "max_probe_score": 9.6,
+      "max_unique_dest_ip_window": 10,
+      "max_unique_dest_port_window": 105,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.48",
+      "windows_seen": 3,
+      "total_events": 224,
+      "possible_probe_windows": 2,
+      "max_probe_score": 9.855,
+      "max_unique_dest_ip_window": 13,
+      "max_unique_dest_port_window": 98,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.119",
+      "windows_seen": 3,
+      "total_events": 186,
+      "possible_probe_windows": 2,
+      "max_probe_score": 9.39,
+      "max_unique_dest_ip_window": 12,
+      "max_unique_dest_port_window": 82,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.95",
+      "windows_seen": 3,
+      "total_events": 177,
+      "possible_probe_windows": 2,
+      "max_probe_score": 8.7,
+      "max_unique_dest_ip_window": 6,
+      "max_unique_dest_port_window": 85,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.212",
+      "windows_seen": 3,
+      "total_events": 162,
+      "possible_probe_windows": 2,
+      "max_probe_score": 8.54,
+      "max_unique_dest_ip_window": 6,
+      "max_unique_dest_port_window": 77,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.43",
+      "windows_seen": 3,
+      "total_events": 145,
+      "possible_probe_windows": 2,
+      "max_probe_score": 8.54,
+      "max_unique_dest_ip_window": 6,
+      "max_unique_dest_port_window": 77,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.210",
+      "windows_seen": 3,
+      "total_events": 149,
+      "possible_probe_windows": 1,
+      "max_probe_score": 11.995000000000001,
+      "max_unique_dest_ip_window": 33,
+      "max_unique_dest_port_window": 81,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.39",
+      "windows_seen": 3,
+      "total_events": 119,
+      "possible_probe_windows": 1,
+      "max_probe_score": 11.395,
+      "max_unique_dest_ip_window": 33,
+      "max_unique_dest_port_window": 51,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.15",
+      "windows_seen": 3,
+      "total_events": 111,
+      "possible_probe_windows": 1,
+      "max_probe_score": 9.89,
+      "max_unique_dest_ip_window": 20,
+      "max_unique_dest_port_window": 54,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.63",
+      "windows_seen": 3,
+      "total_events": 149,
+      "possible_probe_windows": 1,
+      "max_probe_score": 8.985,
+      "max_unique_dest_ip_window": 11,
+      "max_unique_dest_port_window": 68,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.244",
+      "windows_seen": 3,
+      "total_events": 96,
+      "possible_probe_windows": 1,
+      "max_probe_score": 8.84,
+      "max_unique_dest_ip_window": 14,
+      "max_unique_dest_port_window": 50,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.236",
+      "windows_seen": 3,
+      "total_events": 137,
+      "possible_probe_windows": 1,
+      "max_probe_score": 8.805,
+      "max_unique_dest_ip_window": 11,
+      "max_unique_dest_port_window": 59,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.198",
+      "windows_seen": 3,
+      "total_events": 131,
+      "possible_probe_windows": 1,
+      "max_probe_score": 8.725,
+      "max_unique_dest_ip_window": 11,
+      "max_unique_dest_port_window": 55,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.52",
+      "windows_seen": 3,
+      "total_events": 119,
+      "possible_probe_windows": 1,
+      "max_probe_score": 8.665,
+      "max_unique_dest_ip_window": 11,
+      "max_unique_dest_port_window": 52,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.16",
+      "windows_seen": 3,
+      "total_events": 105,
+      "possible_probe_windows": 0,
+      "max_probe_score": 10.525,
+      "max_unique_dest_ip_window": 27,
+      "max_unique_dest_port_window": 45,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.34",
+      "windows_seen": 3,
+      "total_events": 76,
+      "possible_probe_windows": 0,
+      "max_probe_score": 9.885,
+      "max_unique_dest_ip_window": 23,
+      "max_unique_dest_port_window": 38,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.81",
+      "windows_seen": 3,
+      "total_events": 56,
+      "possible_probe_windows": 0,
+      "max_probe_score": 9.225,
+      "max_unique_dest_ip_window": 19,
+      "max_unique_dest_port_window": 30,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.94",
+      "windows_seen": 3,
+      "total_events": 56,
+      "possible_probe_windows": 0,
+      "max_probe_score": 9.08,
+      "max_unique_dest_ip_window": 18,
+      "max_unique_dest_port_window": 29,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.40",
+      "windows_seen": 3,
+      "total_events": 76,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.995000000000001,
+      "max_unique_dest_ip_window": 17,
+      "max_unique_dest_port_window": 31,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.6",
+      "windows_seen": 3,
+      "total_events": 70,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.915,
+      "max_unique_dest_ip_window": 17,
+      "max_unique_dest_port_window": 26,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.20",
+      "windows_seen": 3,
+      "total_events": 81,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.575,
+      "max_unique_dest_ip_window": 13,
+      "max_unique_dest_port_window": 35,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.11",
+      "windows_seen": 3,
+      "total_events": 58,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.46,
+      "max_unique_dest_ip_window": 18,
+      "max_unique_dest_port_window": 23,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.242",
+      "windows_seen": 3,
+      "total_events": 98,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.295,
+      "max_unique_dest_ip_window": 9,
+      "max_unique_dest_port_window": 46,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.5",
+      "windows_seen": 3,
+      "total_events": 43,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.22,
+      "max_unique_dest_ip_window": 10,
+      "max_unique_dest_port_window": 36,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.124",
+      "windows_seen": 3,
+      "total_events": 52,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.105,
+      "max_unique_dest_ip_window": 13,
+      "max_unique_dest_port_window": 24,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.75",
+      "windows_seen": 3,
+      "total_events": 118,
+      "possible_probe_windows": 0,
+      "max_probe_score": 8.065,
+      "max_unique_dest_ip_window": 7,
+      "max_unique_dest_port_window": 47,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.185.193.59",
+      "windows_seen": 3,
+      "total_events": 60,
+      "possible_probe_windows": 0,
+      "max_probe_score": 7.96,
+      "max_unique_dest_ip_window": 16,
+      "max_unique_dest_port_window": 23,
+      "total_alerts": 0
+    },
+    {
+      "src_ip": "103.195.142.171",
+      "windows_seen": 3,
+      "total_events": 56,
+      "possible_probe_windows": 0,
+      "max_probe_score": 7.77,
+      "max_unique_dest_ip_window": 8,
+      "max_unique_dest_port_window": 26,
+      "total_alerts": 0
+    }
+  ],
+  "unique_count_method": "sum_of_per_shard_nunique_estimate",
+  "note_target": "Phase 3 creates probing evidence only. Final Target must be created in Phase 4.",
+  "note_join_key": "Phase 4 should join these features using application + src_ip + window_start.",
+  "output_bytes": 36148,
+  "output_gib": 3.366544842720032e-05,
+  "seconds": 0.272249
+}

@@ -57,8 +57,10 @@ def parse_dataset(file_path: str) -> pd.DataFrame:
             raise FileNotFoundError(f"File not found: {file_path}")
 
     ext = path.suffix.lower()
-    if ext not in (".csv", ".json"):
-        raise ValueError(f"Unsupported file format: {path.suffix}. Supported: .csv, .json")
+    if ext not in (".csv", ".json", ".jsonl", ".ndjson"):
+        raise ValueError(
+            f"Unsupported file format: {path.suffix}. Supported: .csv, .json, .jsonl, .ndjson"
+        )
 
     # Path safety check — only allow files within the project directory.
     # Use is_relative_to (Python 3.9+) to avoid startswith substring confusion

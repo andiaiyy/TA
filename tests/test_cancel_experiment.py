@@ -17,10 +17,10 @@ def tmp_db(tmp_path):
 def _insert(db, exp_id, status="QUEUED"):
     create_experiment(
         experiment_id=exp_id,
-        dataset_type="CICIDS2017",
+        dataset_type="HIKARI2021",
         dataset_path="/fake/path.csv",
         dataset_hash="abc123",
-        pipeline_id="cicids2017.rfc",
+        pipeline_id="hikari2021.rfc_pipeline",
         created_at="2026-01-01T00:00:00Z",
         db_path=db,
     )

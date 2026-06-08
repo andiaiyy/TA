@@ -1,0 +1,22 @@
+{
+  "App": "dns",
+  "Method": "MI",
+  "Model": "DT",
+  "accuracy": 1.0,
+  "accuracy_std": 0.0,
+  "precision_attack": 1.0,
+  "recall_attack": 1.0,
+  "f1_attack": 1.0,
+  "auc": 1.0,
+  "cv_folds": 2,
+  "train_rows": 460,
+  "train_features": 25,
+  "holdout_accuracy": 1.0,
+  "holdout_precision_attack": 1.0,
+  "holdout_recall_attack": 1.0,
+  "holdout_f1_attack": 1.0,
+  "holdout_auc": 1.0,
+  "test_rows": 114,
+  "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=dns\\checkpoints\\MI\\DT\\final_model.joblib",
+  "elapsed_seconds": 0.25604089999978896
+}
