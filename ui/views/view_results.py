@@ -123,6 +123,22 @@ def _roc_auc(experiment_id, completed_at):
 
 # ─── Grid data ─────────────────────────────────────────────────────────────
 
+def _dataset_basename(path) -> str:
+    """Extract basename from a path that may use either '/' or '\\' separator.
+
+    Robust to mixed-environment history: rows written from Docker store
+    '/app/storage/datasets/foo.csv'; rows written from Windows host store
+    'D:\\Program\\TA\\storage\\datasets\\foo.csv'. ``Path(...).name`` on Linux
+    fails for the Windows form because backslash is not a separator there, so
+    we split on both. Returns "-" for empty/None.
+    """
+    if not path:
+        return "-"
+    import re
+    parts = re.split(r"[\\/]", str(path))
+    return parts[-1] or "-"
+
+
 def _build_grid_df(experiments: list[dict]) -> pd.DataFrame:
     rows = []
     for e in experiments:
@@ -137,6 +153,7 @@ def _build_grid_df(experiments: list[dict]) -> pd.DataFrame:
             "Duration": _duration(e.get("started_at"), e.get("completed_at")),
             "Pipeline": e.get("pipeline_id", "-"),
             "Dataset": e.get("dataset_type", "-"),
+            "File": _dataset_basename(e.get("dataset_path")),
             "Status": e.get("status", "-"),
             "Accuracy": e.get("accuracy"),
             "Precision": e.get("precision_score"),
@@ -220,6 +237,8 @@ def _build_grid_options(df: pd.DataFrame) -> dict:
             {"headerName": "Duration", "field": "Duration", "width": 100},
             {"headerName": "Pipeline", "field": "Pipeline", "width": 210},
             {"headerName": "Dataset", "field": "Dataset", "width": 130},
+            {"headerName": "File", "field": "File", "width": 200,
+             "tooltipField": "File"},
             {"headerName": "Status", "field": "Status", "width": 120,
              "cellStyle": _STATUS_STYLE},
         ]},
