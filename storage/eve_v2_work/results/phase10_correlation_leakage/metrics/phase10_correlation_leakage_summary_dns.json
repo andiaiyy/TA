@@ -1,0 +1,268 @@
+{
+  "phase": 10,
+  "app": "dns",
+  "status": "completed",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns",
+  "rows_seen": 4799,
+  "input_bytes": 285895,
+  "input_size": "279.19 KiB",
+  "sample_rows": 4799,
+  "sample_mode": "stratified_balanced",
+  "sample_seed": 42,
+  "target_counts_input": {
+    "1": 287,
+    "0": 4512
+  },
+  "target_counts_sample": {
+    "0": 4512,
+    "1": 287
+  },
+  "numeric_features_total_all": 98,
+  "numeric_features_total_noleak": 77,
+  "valid_features_all": 73,
+  "valid_features_noleak": 58,
+  "nan_issues_count": 25,
+  "leakage_present": [
+    "event_type",
+    "event_type_raw",
+    "has_alert",
+    "alert_category",
+    "alert_severity",
+    "alert_signature",
+    "alert_signature_id",
+    "Target_prelim",
+    "label_status",
+    "label_status_final",
+    "label_source",
+    "label_reason",
+    "label_confidence",
+    "evidence_alert",
+    "evidence_compromised_ip",
+    "evidence_probe",
+    "probe_score",
+    "is_possible_probe",
+    "probe_reason",
+    "window_start",
+    "label_evidence_alert",
+    "label_evidence_compromised_ip"
+  ],
+  "leakage_present_count": 22,
+  "features_to_drop_for_modeling": [
+    "event_type",
+    "event_type_raw",
+    "has_alert",
+    "alert_category",
+    "alert_severity",
+    "alert_signature",
+    "alert_signature_id",
+    "Target_prelim",
+    "label_status",
+    "label_status_final",
+    "label_source",
+    "label_reason",
+    "label_confidence",
+    "evidence_alert",
+    "evidence_compromised_ip",
+    "evidence_probe",
+    "probe_score",
+    "is_possible_probe",
+    "probe_reason",
+    "window_start",
+    "label_evidence_alert",
+    "label_evidence_compromised_ip",
+    "proto",
+    "app_proto",
+    "has_flow",
+    "application",
+    "app_filter_reason",
+    "dport_is_http",
+    "dport_is_https",
+    "dport_is_ssh",
+    "ts_hour",
+    "ts_dow",
+    "ts_day",
+    "interact_0_8",
+    "interact_0_9",
+    "interact_0_10",
+    "row_min",
+    "norm_8",
+    "norm_9",
+    "has_high_values",
+    "is_sparse"
+  ],
+  "features_to_drop_count": 41,
+  "leakage_policy": {
+    "strict_leakage_guard": true,
+    "drop_probe_direct_features": true,
+    "drop_label_explanation_features": true,
+    "drop_alert_derived_features": true,
+    "effective_leakage_cols_count": 32
+  },
+  "top_k": 15,
+  "topk_all": [
+    {
+      "Feature": "event_type",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "label_reason",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "evidence_alert",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "alert_severity",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "label_status",
+      "Correlation": -1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "label_source",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "label_evidence_alert",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "Target_prelim",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "has_alert",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "row_max",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "ratio_max_to_min",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "label_confidence",
+      "Correlation": 0.9999999999999981,
+      "Abs_Corr": 0.9999999999999981
+    },
+    {
+      "Feature": "label_status_final",
+      "Correlation": 0.9999999999999977,
+      "Abs_Corr": 0.9999999999999977
+    },
+    {
+      "Feature": "pkt_src",
+      "Correlation": 0.9999999999999966,
+      "Abs_Corr": 0.9999999999999966
+    },
+    {
+      "Feature": "row_std",
+      "Correlation": 0.9999999999996609,
+      "Abs_Corr": 0.9999999999996609
+    }
+  ],
+  "topk_noleak": [
+    {
+      "Feature": "row_max",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "ratio_max_to_min",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "pkt_src",
+      "Correlation": 0.9999999999999966,
+      "Abs_Corr": 0.9999999999999966
+    },
+    {
+      "Feature": "row_std",
+      "Correlation": 0.9999999999996609,
+      "Abs_Corr": 0.9999999999996609
+    },
+    {
+      "Feature": "row_sum",
+      "Correlation": 0.9999999997631225,
+      "Abs_Corr": 0.9999999997631225
+    },
+    {
+      "Feature": "row_mean",
+      "Correlation": 0.9999999997631125,
+      "Abs_Corr": 0.9999999997631125
+    },
+    {
+      "Feature": "ratio_sum_to_count",
+      "Correlation": 0.995537472978125,
+      "Abs_Corr": 0.995537472978125
+    },
+    {
+      "Feature": "interact_0_7",
+      "Correlation": -0.6857528702277376,
+      "Abs_Corr": 0.6857528702277376
+    },
+    {
+      "Feature": "norm_7",
+      "Correlation": -0.6847909921105028,
+      "Abs_Corr": 0.6847909921105028
+    },
+    {
+      "Feature": "dport_is_dns",
+      "Correlation": -0.6847909921105028,
+      "Abs_Corr": 0.6847909921105028
+    },
+    {
+      "Feature": "norm_6",
+      "Correlation": 0.6753542314076425,
+      "Abs_Corr": 0.6753542314076425
+    },
+    {
+      "Feature": "dest_port",
+      "Correlation": 0.675354231127582,
+      "Abs_Corr": 0.675354231127582
+    },
+    {
+      "Feature": "interact_0_6",
+      "Correlation": 0.6722125356394449,
+      "Abs_Corr": 0.6722125356394449
+    },
+    {
+      "Feature": "dest_ip",
+      "Correlation": 0.623774269209594,
+      "Abs_Corr": 0.623774269209594
+    },
+    {
+      "Feature": "row_nonzero",
+      "Correlation": -0.5118475764527745,
+      "Abs_Corr": 0.5118475764527745
+    }
+  ],
+  "corr_all_csv": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\corr_df_ALL_dns_run.csv",
+  "corr_noleak_csv": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\corr_df_NOLEAK_dns_run.csv",
+  "issues_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\nan_issues_dns_run.json",
+  "drop_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\features_to_drop_dns_run.json",
+  "top_all_png": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\top_features_correlation_ALL_dns_run.png",
+  "top_noleak_png": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\top_features_correlation_NOLEAK_dns_run.png",
+  "features_txt": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\features_phase10_dns_run.txt",
+  "features_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=dns\\features_phase10_dns_run.json",
+  "generated_at": "2026-06-05T15:36:57.119350",
+  "seconds": 0.921187,
+  "note": "Phase 10 diagnoses correlation and leakage per application. features_to_drop should be used by Phase 11/12 before modeling."
+}

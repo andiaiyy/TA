@@ -1,0 +1,265 @@
+{
+  "phase": 10,
+  "app": "ssh",
+  "status": "completed",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh",
+  "rows_seen": 24905,
+  "input_bytes": 2646627,
+  "input_size": "2.52 MiB",
+  "sample_rows": 24905,
+  "sample_mode": "stratified_balanced",
+  "sample_seed": 42,
+  "target_counts_input": {
+    "1": 7865,
+    "0": 17040
+  },
+  "target_counts_sample": {
+    "0": 17040,
+    "1": 7865
+  },
+  "numeric_features_total_all": 98,
+  "numeric_features_total_noleak": 77,
+  "valid_features_all": 76,
+  "valid_features_noleak": 61,
+  "nan_issues_count": 22,
+  "leakage_present": [
+    "event_type",
+    "event_type_raw",
+    "has_alert",
+    "alert_category",
+    "alert_severity",
+    "alert_signature",
+    "alert_signature_id",
+    "Target_prelim",
+    "label_status",
+    "label_status_final",
+    "label_source",
+    "label_reason",
+    "label_confidence",
+    "evidence_alert",
+    "evidence_compromised_ip",
+    "evidence_probe",
+    "probe_score",
+    "is_possible_probe",
+    "probe_reason",
+    "window_start",
+    "label_evidence_alert",
+    "label_evidence_compromised_ip"
+  ],
+  "leakage_present_count": 22,
+  "features_to_drop_for_modeling": [
+    "event_type",
+    "event_type_raw",
+    "has_alert",
+    "alert_category",
+    "alert_severity",
+    "alert_signature",
+    "alert_signature_id",
+    "Target_prelim",
+    "label_status",
+    "label_status_final",
+    "label_source",
+    "label_reason",
+    "label_confidence",
+    "evidence_alert",
+    "evidence_compromised_ip",
+    "evidence_probe",
+    "probe_score",
+    "is_possible_probe",
+    "probe_reason",
+    "window_start",
+    "label_evidence_alert",
+    "label_evidence_compromised_ip",
+    "proto",
+    "application",
+    "dport_is_dns",
+    "dport_is_http",
+    "dport_is_https",
+    "ts_hour",
+    "ts_dow",
+    "ts_day",
+    "interact_0_7",
+    "interact_0_8",
+    "interact_0_9",
+    "interact_1_7",
+    "row_min",
+    "norm_7",
+    "norm_8",
+    "norm_9"
+  ],
+  "features_to_drop_count": 38,
+  "leakage_policy": {
+    "strict_leakage_guard": true,
+    "drop_probe_direct_features": true,
+    "drop_label_explanation_features": true,
+    "drop_alert_derived_features": true,
+    "effective_leakage_cols_count": 32
+  },
+  "top_k": 15,
+  "topk_all": [
+    {
+      "Feature": "label_confidence",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "label_status_final",
+      "Correlation": 1.0,
+      "Abs_Corr": 1.0
+    },
+    {
+      "Feature": "has_alert",
+      "Correlation": 0.9999999999999999,
+      "Abs_Corr": 0.9999999999999999
+    },
+    {
+      "Feature": "label_evidence_alert",
+      "Correlation": 0.9999999999999999,
+      "Abs_Corr": 0.9999999999999999
+    },
+    {
+      "Feature": "Target_prelim",
+      "Correlation": 0.9999999999999999,
+      "Abs_Corr": 0.9999999999999999
+    },
+    {
+      "Feature": "evidence_alert",
+      "Correlation": 0.9999999999999999,
+      "Abs_Corr": 0.9999999999999999
+    },
+    {
+      "Feature": "label_reason",
+      "Correlation": 0.9999999999999997,
+      "Abs_Corr": 0.9999999999999997
+    },
+    {
+      "Feature": "label_source",
+      "Correlation": 0.999999999999999,
+      "Abs_Corr": 0.999999999999999
+    },
+    {
+      "Feature": "label_status",
+      "Correlation": -0.9999999999999981,
+      "Abs_Corr": 0.9999999999999981
+    },
+    {
+      "Feature": "alert_severity",
+      "Correlation": 0.9985456613787352,
+      "Abs_Corr": 0.9985456613787352
+    },
+    {
+      "Feature": "alert_signature_id",
+      "Correlation": 0.9978652491092229,
+      "Abs_Corr": 0.9978652491092229
+    },
+    {
+      "Feature": "alert_category",
+      "Correlation": -0.9467735344501444,
+      "Abs_Corr": 0.9467735344501444
+    },
+    {
+      "Feature": "event_type",
+      "Correlation": 0.8722741381995925,
+      "Abs_Corr": 0.8722741381995925
+    },
+    {
+      "Feature": "row_mean",
+      "Correlation": 0.8555339956407916,
+      "Abs_Corr": 0.8555339956407916
+    },
+    {
+      "Feature": "row_sum",
+      "Correlation": 0.8555339955497047,
+      "Abs_Corr": 0.8555339955497047
+    }
+  ],
+  "topk_noleak": [
+    {
+      "Feature": "row_mean",
+      "Correlation": 0.8555339956407916,
+      "Abs_Corr": 0.8555339956407916
+    },
+    {
+      "Feature": "row_sum",
+      "Correlation": 0.8555339955497047,
+      "Abs_Corr": 0.8555339955497047
+    },
+    {
+      "Feature": "pkt_src",
+      "Correlation": 0.8555253937292093,
+      "Abs_Corr": 0.8555253937292093
+    },
+    {
+      "Feature": "ratio_max_to_min",
+      "Correlation": 0.8555253851132377,
+      "Abs_Corr": 0.8555253851132377
+    },
+    {
+      "Feature": "row_max",
+      "Correlation": 0.8555253851132377,
+      "Abs_Corr": 0.8555253851132377
+    },
+    {
+      "Feature": "row_std",
+      "Correlation": 0.8555250661280603,
+      "Abs_Corr": 0.8555250661280603
+    },
+    {
+      "Feature": "has_high_values",
+      "Correlation": 0.7936570087429359,
+      "Abs_Corr": 0.7936570087429359
+    },
+    {
+      "Feature": "log_duration",
+      "Correlation": -0.6641490603539288,
+      "Abs_Corr": 0.6641490603539288
+    },
+    {
+      "Feature": "interact_0_13",
+      "Correlation": -0.6112319072340822,
+      "Abs_Corr": 0.6112319072340822
+    },
+    {
+      "Feature": "interact_1_6",
+      "Correlation": -0.5429311679716817,
+      "Abs_Corr": 0.5429311679716817
+    },
+    {
+      "Feature": "pkts_per_sec",
+      "Correlation": -0.42550294911255987,
+      "Abs_Corr": 0.42550294911255987
+    },
+    {
+      "Feature": "interact_1_3",
+      "Correlation": -0.412030559322312,
+      "Abs_Corr": 0.412030559322312
+    },
+    {
+      "Feature": "dest_ip",
+      "Correlation": -0.4094588468553789,
+      "Abs_Corr": 0.4094588468553789
+    },
+    {
+      "Feature": "bytes_toserver_ratio",
+      "Correlation": 0.40315702054152863,
+      "Abs_Corr": 0.40315702054152863
+    },
+    {
+      "Feature": "norm_5",
+      "Correlation": 0.4031570074595,
+      "Abs_Corr": 0.4031570074595
+    }
+  ],
+  "corr_all_csv": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\corr_df_ALL_ssh_run.csv",
+  "corr_noleak_csv": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\corr_df_NOLEAK_ssh_run.csv",
+  "issues_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\nan_issues_ssh_run.json",
+  "drop_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\features_to_drop_ssh_run.json",
+  "top_all_png": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\top_features_correlation_ALL_ssh_run.png",
+  "top_noleak_png": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\top_features_correlation_NOLEAK_ssh_run.png",
+  "features_txt": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\features_phase10_ssh_run.txt",
+  "features_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase10_correlation_leakage\\app=ssh\\features_phase10_ssh_run.json",
+  "generated_at": "2026-06-05T15:37:00.109707",
+  "seconds": 1.198442,
+  "note": "Phase 10 diagnoses correlation and leakage per application. features_to_drop should be used by Phase 11/12 before modeling."
+}

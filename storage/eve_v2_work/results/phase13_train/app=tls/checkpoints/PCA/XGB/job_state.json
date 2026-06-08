@@ -1,0 +1,51 @@
+{
+  "method": "PCA",
+  "model_name": "XGB",
+  "status": "completed",
+  "updated_at": "2026-06-05T15:37:27.167409",
+  "fold_metrics": {
+    "1": {
+      "accuracy": 0.9941176470588236,
+      "precision_attack": 1.0,
+      "recall_attack": 0.9882352941176471,
+      "f1_attack": 0.9940828402366864,
+      "auc": 1.0
+    },
+    "2": {
+      "accuracy": 0.9823529411764705,
+      "precision_attack": 0.9659090909090909,
+      "recall_attack": 1.0,
+      "f1_attack": 0.9826589595375722,
+      "auc": 0.9995847750865052
+    }
+  },
+  "holdout_metrics": {
+    "accuracy": 1.0,
+    "precision_attack": 1.0,
+    "recall_attack": 1.0,
+    "f1_attack": 1.0,
+    "auc": 1.0
+  },
+  "result_row": {
+    "App": "tls",
+    "Method": "PCA",
+    "Model": "XGB",
+    "accuracy": 0.9882352941176471,
+    "accuracy_std": 0.005882352941176505,
+    "precision_attack": 0.9829545454545454,
+    "recall_attack": 0.9941176470588236,
+    "f1_attack": 0.9883708998871292,
+    "auc": 0.9997923875432526,
+    "cv_folds": 2,
+    "train_rows": 340,
+    "train_features": 62,
+    "holdout_accuracy": 1.0,
+    "holdout_precision_attack": 1.0,
+    "holdout_recall_attack": 1.0,
+    "holdout_f1_attack": 1.0,
+    "holdout_auc": 1.0,
+    "test_rows": 86,
+    "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=tls\\checkpoints\\PCA\\XGB\\final_model.joblib",
+    "elapsed_seconds": 0.34210329999768874
+  }
+}

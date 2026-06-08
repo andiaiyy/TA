@@ -2,9 +2,9 @@
 CLI runner for pipeline execution. Development/testing tool.
 
 Usage:
-    python run_pipeline.py --dataset-type CICIDS2017 --dataset-path storage/datasets/file.csv --pipeline cicids2017.rf_paper_a
+    python run_pipeline.py --dataset-type HIKARI2021 --dataset-path storage/datasets/file.csv --pipeline hikari2021.rfc_pipeline
     python run_pipeline.py --list-pipelines
-    python run_pipeline.py --list-pipelines --dataset-type CICIDS2017
+    python run_pipeline.py --list-pipelines --dataset-type HIKARI2021
 """
 import argparse
 import uuid

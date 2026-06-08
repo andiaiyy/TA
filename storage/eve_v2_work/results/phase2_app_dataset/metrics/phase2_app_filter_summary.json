@@ -1,0 +1,249 @@
+{
+  "phase": 2,
+  "phase_name": "application_filtering",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase1_dataset",
+  "staging_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase1_dataset\\staging",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase2_app_dataset",
+  "metrics_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase2_app_dataset\\metrics",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "app_ports": {
+    "dns": [
+      53
+    ],
+    "http": [
+      80
+    ],
+    "tls": [
+      443
+    ],
+    "ssh": [
+      22
+    ]
+  },
+  "app_proto_aliases": {
+    "dns": [
+      "dns"
+    ],
+    "http": [
+      "http"
+    ],
+    "tls": [
+      "tls",
+      "ssl"
+    ],
+    "ssh": [
+      "ssh"
+    ]
+  },
+  "app_priority": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "match_src_port": true,
+  "allow_multi_app": false,
+  "input_shards": 1,
+  "rows_seen": 96160,
+  "rows_matched_any": 33954,
+  "unmatched_rows": 62206,
+  "unmatched_percentage": 64.69009983361065,
+  "output_rows_by_app": {
+    "dns": 4799,
+    "http": 1799,
+    "tls": 2451,
+    "ssh": 24905
+  },
+  "shards_by_app": {
+    "dns": 1,
+    "http": 1,
+    "tls": 1,
+    "ssh": 1
+  },
+  "reason_by_app": {
+    "dns": {
+      "port": 4799
+    },
+    "http": {
+      "app_proto": 936,
+      "port": 803,
+      "app_proto+port": 60
+    },
+    "tls": {
+      "app_proto": 1919,
+      "port": 324,
+      "app_proto+port": 208
+    },
+    "ssh": {
+      "app_proto": 17722,
+      "port": 3592,
+      "app_proto+port": 3591
+    }
+  },
+  "top_dest_ports_by_app": {
+    "dns": {
+      "53": 4660,
+      "47822": 2,
+      "39242": 2,
+      "42291": 1,
+      "40431": 1,
+      "55227": 1,
+      "36878": 1,
+      "43875": 1,
+      "46834": 1,
+      "56663": 1,
+      "59124": 1,
+      "34221": 1,
+      "49864": 1,
+      "45513": 1,
+      "35720": 1,
+      "49941": 1,
+      "57662": 1,
+      "43231": 1,
+      "38155": 1,
+      "43308": 1
+    },
+    "http": {
+      "80": 815,
+      "8080": 73,
+      "8888": 50,
+      "8000": 45,
+      "3398": 35,
+      "2375": 31,
+      "443": 31,
+      "8081": 29,
+      "631": 29,
+      "7777": 22,
+      "8001": 20,
+      "5960": 18,
+      "1337": 17,
+      "8090": 15,
+      "8008": 15,
+      "3128": 14,
+      "58651": 11,
+      "33454": 11,
+      "54881": 11,
+      "8002": 10
+    },
+    "tls": {
+      "443": 524,
+      "8443": 269,
+      "64297": 79,
+      "995": 70,
+      "8080": 32,
+      "993": 28,
+      "465": 23,
+      "143": 18,
+      "1337": 17,
+      "8000": 16,
+      "80": 16,
+      "20000": 13,
+      "110": 12,
+      "9443": 12,
+      "8888": 10,
+      "2375": 10,
+      "2078": 9,
+      "9200": 9,
+      "23443": 9,
+      "8015": 8
+    },
+    "ssh": {
+      "64295": 12836,
+      "22": 6991,
+      "35869": 191,
+      "22222": 50,
+      "20012": 42,
+      "17024": 37,
+      "38179": 36,
+      "18951": 36,
+      "61427": 36,
+      "32106": 35,
+      "46902": 35,
+      "29167": 35,
+      "45384": 35,
+      "1117": 35,
+      "13218": 34,
+      "20116": 34,
+      "4145": 33,
+      "14270": 33,
+      "5097": 33,
+      "30001": 32
+    }
+  },
+  "top_app_proto_by_app": {
+    "dns": {
+      "failed": 4799
+    },
+    "http": {
+      "http": 996,
+      "": 798,
+      "failed": 5
+    },
+    "tls": {
+      "tls": 2127,
+      "": 324
+    },
+    "ssh": {
+      "ssh": 21313,
+      "": 3590,
+      "failed": 2
+    }
+  },
+  "top_event_type_by_app": {
+    "dns": {
+      "flow": 4512,
+      "alert": 287
+    },
+    "http": {
+      "flow": 1192,
+      "alert": 492,
+      "fileinfo": 71,
+      "http": 30,
+      "anomaly": 12,
+      "tls": 2
+    },
+    "tls": {
+      "flow": 2053,
+      "alert": 213,
+      "tls": 172,
+      "http": 13
+    },
+    "ssh": {
+      "flow": 14373,
+      "alert": 7865,
+      "ssh": 2651,
+      "anomaly": 15,
+      "http": 1
+    }
+  },
+  "label_status_by_app": {
+    "dns": {
+      "no_alert_unknown": 4512,
+      "malicious_evidence": 287
+    },
+    "http": {
+      "no_alert_unknown": 1307,
+      "malicious_evidence": 492
+    },
+    "tls": {
+      "no_alert_unknown": 2238,
+      "malicious_evidence": 213
+    },
+    "ssh": {
+      "no_alert_unknown": 17040,
+      "malicious_evidence": 7865
+    }
+  },
+  "dataset_format": "parquet",
+  "output_bytes": 18208437,
+  "output_gib": 0.01695792842656374,
+  "unmatched_sample_path": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase2_app_dataset\\sample\\phase2_unmatched_sample.csv",
+  "seconds": 2.6742,
+  "note_target": "Phase 2 only filters by application. It preserves Phase 1 label evidence and does not create final Target.",
+  "note_filter_rule": "Application assignment uses app_proto aliases first, then port fallback. If allow_multi_app=False, each row is assigned to at most one app based on app_priority."
+}

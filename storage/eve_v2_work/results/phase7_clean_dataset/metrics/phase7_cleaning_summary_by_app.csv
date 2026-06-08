@@ -1,0 +1,5 @@
+app,status,rows_in,rows_out,target_0_benign,target_1_malicious,output_cols_min,output_cols_max,numeric_cols_count_min,numeric_cols_count_max,raw_cols_count_max,output_gib,shards_out
+dns,completed,4799,4799,4512,287,103,103,99,99,4,0.00026626046746969223,1
+http,completed,1799,1799,1307,492,103,103,99,99,4,0.00021831411868333817,1
+tls,completed,2451,2451,2238,213,103,103,99,99,4,0.00033789966255426407,1
+ssh,completed,24905,24905,17040,7865,103,103,99,99,4,0.00246486347168684,1

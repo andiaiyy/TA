@@ -1,0 +1,45 @@
+{
+  "phase": 8,
+  "app": "http",
+  "status": "completed",
+  "mode": "sample_csv",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=http",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "rows_seen": 1799,
+  "shards_seen": 1,
+  "input_bytes": 234413,
+  "input_gib": 0.00021831411868333817,
+  "manifest_path": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=http\\manifest.csv",
+  "schema_path": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=http\\schema.json",
+  "export_paths": [
+    "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=http\\sample\\eve_processed_http_NA_sample1799.csv"
+  ],
+  "export_bytes": 1280608,
+  "export_mb": 1.221282958984375,
+  "sample_rows_requested": 200000,
+  "sample_rows_exported": 1799,
+  "sample_shape": [
+    1799,
+    103
+  ],
+  "target_counts_input": {
+    "1": 492,
+    "0": 1307
+  },
+  "target_counts_sample": {
+    "0": 1307,
+    "1": 492
+  },
+  "stratify": true,
+  "stratify_col": "Target",
+  "seed": 42,
+  "include_columns": null,
+  "seconds": 0.225844,
+  "note": "Phase 8 exports manifest/schema and optional samples per application. The main full clean checkpoint remains Phase 7. Avoid copy_shards unless explicitly needed."
+}

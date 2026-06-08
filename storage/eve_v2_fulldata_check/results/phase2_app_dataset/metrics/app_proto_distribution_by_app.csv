@@ -1,0 +1,10 @@
+application,app_proto,count
+dns,,64001
+dns,dns,61378
+dns,failed,52219
+dns,quic,56
+http,,14935
+tls,,68114
+tls,quic,1157
+tls,tls,61
+ssh,,5135

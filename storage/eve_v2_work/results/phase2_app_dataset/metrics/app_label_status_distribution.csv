@@ -1,0 +1,9 @@
+application,label_status,count
+dns,no_alert_unknown,4512
+dns,malicious_evidence,287
+http,no_alert_unknown,1307
+http,malicious_evidence,492
+tls,no_alert_unknown,2238
+tls,malicious_evidence,213
+ssh,no_alert_unknown,17040
+ssh,malicious_evidence,7865

@@ -10,6 +10,6 @@ requires-python = ">=3.10"
 [tool.setuptools]
 packages = [
     "config", "contracts", "database", "orchestrator",
-    "pipelines", "pipelines.cicids2017", "pipelines.hikari2021",
+    "pipelines", "pipelines.hikari2021",
     "workers", "utils", "ui", "ui.views",
 ]

@@ -1,0 +1,5 @@
+app,status,rows_written,target_0_benign,target_1_malicious,evidence_alert,evidence_compromised_ip,evidence_probe,output_gib,shards_written
+dns,completed,4799,4512,287,287,0,0,0.00018851645290851593,1
+http,completed,1799,1307,492,492,0,0,9.738001972436905e-05,1
+tls,completed,2451,2238,213,213,0,0,0.00013733096420764923,1
+ssh,completed,24905,17040,7865,7865,0,0,0.000955597497522831,1
