@@ -42,19 +42,19 @@ class EveKNNPipeline(BaseEvePipeline):
 
     def get_info(self) -> dict:
         return {
-            "paper": "EVE Suricata IDS — 11-Phase Modular Pipeline",
+            "paper": "EVE Suricata IDS — 7-Phase Pipeline (selected from 11-file modular toolkit)",
             "algorithm": "K-Nearest Neighbors",
             "preprocessing_steps": [
-                "Phase 1: NDJSON ingestion + binary labeling (alert severity → Attack/Benign)",
-                "Phase 2: Advanced feature engineering (hash encoding, flow/alert aggregates)",
-                "Phase 3: Computed features (interactions, row statistics, normalization)",
-                "Phase 4: Aggressive cleaning (NaN/Inf removal, constant-column drop)",
-                "Phase 7: Correlation analysis (leakage detection, artifact removal)",
-                "Phase 8: Stratified train/test split (attack-aware balancing)",
-                "Phase 9: Feature selection — MI + RFE top-25 + PCA",
-                "StandardScaler: fit on train, applied to test",
+                "Step 1 of 7: NDJSON ingestion + binary labeling (alert severity → Attack/Benign)",
+                "Step 2 of 7: Advanced feature engineering (hash encoding, flow/alert aggregates)",
+                "Step 3 of 7: Computed features (interactions, row statistics, normalization)",
+                "Step 4 of 7: Aggressive cleaning (NaN/Inf removal, constant-column drop)",
+                "Step 5 of 7: Correlation analysis (leakage detection, artifact removal)",
+                "Step 6 of 7: Stratified train/test split (attack-aware balancing)",
+                "Step 7 of 7: Feature selection — MI top-25",
+                "Training-time: StandardScaler (fit on train, applied to test)",
             ],
-            "feature_selection": "Phase 9: MI top-25",
+            "feature_selection": "Step 7: MI top-25",
             "fixed_params": {
                 "n_neighbors": 5,
                 "n_jobs": 2,

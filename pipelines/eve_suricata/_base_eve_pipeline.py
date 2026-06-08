@@ -50,7 +50,7 @@ class BaseEvePipeline(BasePipeline):
         from pipelines.eve_suricata.phase_runner import run_phases_1_through_9
 
         rs = pipeline_input.random_state
-        self._emit_progress(progress, "Running phases 1-9 (preprocessing)")
+        self._emit_progress(progress, "Running 7 preprocessing phases")
         prep = run_phases_1_through_9(
             dataset_path=pipeline_input.dataset_path,
             random_state=rs,
