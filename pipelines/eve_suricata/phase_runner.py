@@ -41,7 +41,10 @@ def run_phases_1_through_9(
     artifacts_dir: str | None = None,
 ) -> dict[str, Any]:
     """
-    Execute phases 1-9 for an EVE Suricata NDJSON dataset.
+    Execute the 7 preprocessing phases (file IDs 1, 2, 3, 4, 7, 8, 9) for
+    an EVE Suricata NDJSON dataset. The numbering gap reflects the modular
+    toolkit layout in phases/, where files 5/6/10/11 exist as alternatives
+    but are not part of the active 7-phase chain wired into this runner.
 
     Args:
         dataset_path: Absolute path to EVE Suricata NDJSON file.
