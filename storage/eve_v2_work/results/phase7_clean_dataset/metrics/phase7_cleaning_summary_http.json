@@ -1,0 +1,164 @@
+{
+  "phase": 7,
+  "app": "http",
+  "status": "completed",
+  "mode": "app_aware_sharded",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase6_computed_features_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset\\app=http",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "write_format": "parquet",
+  "parquet_engine": "pyarrow",
+  "parquet_compression": "snappy",
+  "raw_suffix": "_raw",
+  "keep_strings_for_raw": true,
+  "coerce_non_raw_objects_to_string": true,
+  "compute_diagnostics": false,
+  "shards_in": 1,
+  "shards_out": 1,
+  "rows_in": 1799,
+  "rows_out": 1799,
+  "raw_cols_count_max": 4,
+  "numeric_cols_count_min": 99,
+  "numeric_cols_count_max": 99,
+  "output_cols_min": 103,
+  "output_cols_max": 103,
+  "target_counts": {
+    "1": 492,
+    "0": 1307
+  },
+  "visualization_stats": {
+    "app": "http",
+    "rows_after_phase7": 1799,
+    "target_counts": {
+      "1": 492,
+      "0": 1307
+    },
+    "numeric_quantiles_by_target": {
+      "total_pkts": {
+        "0": {
+          "count": 1307,
+          "min": 0.0,
+          "q1": 2.0,
+          "median": 4.0,
+          "q3": 7.0,
+          "max": 79.0,
+          "mean": 5.352716143840857,
+          "std": 5.45948406227504
+        },
+        "1": {
+          "count": 492,
+          "min": 1.0,
+          "q1": 6.0,
+          "median": 9.0,
+          "q3": 11.0,
+          "max": 28.0,
+          "mean": 9.004065040650406,
+          "std": 4.743843222124327
+        }
+      },
+      "total_bytes": {
+        "0": {
+          "count": 1307,
+          "min": 0.0,
+          "q1": 176.0,
+          "median": 250.0,
+          "q3": 639.0,
+          "max": 58238.0,
+          "mean": 700.583779648049,
+          "std": 2845.5851290255027
+        },
+        "1": {
+          "count": 492,
+          "min": 60.0,
+          "q1": 575.0,
+          "median": 732.0,
+          "q3": 884.25,
+          "max": 18012.0,
+          "mean": 1152.30081300813,
+          "std": 2380.7969866465633
+        }
+      },
+      "duration": {
+        "0": {
+          "count": 1307,
+          "min": 0.0,
+          "q1": 0.0,
+          "median": 0.0,
+          "q3": 1.0,
+          "max": 219.0,
+          "mean": 1.8905891180038452,
+          "std": 14.4981689453125
+        },
+        "1": {
+          "count": 492,
+          "min": 0.0,
+          "q1": 0.0,
+          "median": 0.0,
+          "q3": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "std": 0.0
+        }
+      },
+      "pkts_per_sec": {
+        "0": {
+          "count": 1307,
+          "min": 0.0,
+          "q1": 0.0,
+          "median": 0.0,
+          "q3": 5.0,
+          "max": 56.0,
+          "mean": 2.345185830027471,
+          "std": 4.383640319128803
+        },
+        "1": {
+          "count": 492,
+          "min": 0.0,
+          "q1": 0.0,
+          "median": 0.0,
+          "q3": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "std": 0.0
+        }
+      },
+      "bytes_per_sec": {
+        "0": {
+          "count": 1307,
+          "min": 0.0,
+          "q1": 0.0,
+          "median": 0.0,
+          "q3": 389.41666666666663,
+          "max": 42889.0,
+          "mean": 310.8859500567281,
+          "std": 1970.0598375450354
+        },
+        "1": {
+          "count": 492,
+          "min": 0.0,
+          "q1": 0.0,
+          "median": 0.0,
+          "q3": 0.0,
+          "max": 0.0,
+          "mean": 0.0,
+          "std": 0.0
+        }
+      }
+    },
+    "quantile_source": "df_sample",
+    "notes": "These statistics are intended for Phase 9 plots so visualization does not need to reread raw data. Heatmaps still require a bounded df_clean sample."
+  },
+  "df_sample_shape": [
+    1799,
+    103
+  ],
+  "output_bytes": 234413,
+  "output_gib": 0.00021831411868333817,
+  "seconds": 0.144104,
+  "note": "Phase 7 cleans per-application shards and preserves *_raw columns as strings. This is the main clean dataset checkpoint for visualization, leakage analysis, split, FS, training, and evaluation."
+}

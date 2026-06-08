@@ -50,6 +50,27 @@ def test_parse_wrong_extension(tmp_path):
         parse_dataset(str(f))
 
 
+def test_parse_jsonl_extension_accepted(tmp_path, allow_tmp_path):
+    """.jsonl files (Suricata native) must parse identically to .json (NDJSON)."""
+    f = tmp_path / "data.jsonl"
+    f.write_text(
+        '{"timestamp": "2026-01-01T00:00:00", "event_type": "dns", "src_ip": "1.1.1.1"}\n'
+        '{"timestamp": "2026-01-01T00:00:01", "event_type": "alert", "src_ip": "2.2.2.2"}\n'
+    )
+    df = parse_dataset(str(f))
+    assert len(df) == 2
+    assert "event_type" in df.columns
+    assert set(df["event_type"]) == {"dns", "alert"}
+
+
+def test_parse_ndjson_extension_accepted(tmp_path, allow_tmp_path):
+    """.ndjson files (alternate Suricata extension) must parse identically."""
+    f = tmp_path / "data.ndjson"
+    f.write_text('{"k": 1}\n{"k": 2}\n')
+    df = parse_dataset(str(f))
+    assert len(df) == 2
+
+
 def test_parse_path_traversal_blocked(tmp_path):
     """Path traversal attempts outside the project directory should be rejected."""
     evil_csv = tmp_path / "evil.csv"

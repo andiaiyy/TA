@@ -1,0 +1,1238 @@
+[
+  {
+    "column": "timestamp",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1022592731",
+      "900203487",
+      "33754071",
+      "1819458648",
+      "127198129"
+    ]
+  },
+  {
+    "column": "src_ip",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1394366460",
+      "1394366460",
+      "758478730",
+      "1394366460",
+      "758478730"
+    ]
+  },
+  {
+    "column": "dest_ip",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1583155010",
+      "758478730",
+      "1394366460",
+      "758478730",
+      "1394366460"
+    ]
+  },
+  {
+    "column": "src_port",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "49468",
+      "42356",
+      "443",
+      "42366",
+      "443"
+    ]
+  },
+  {
+    "column": "dest_port",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "443",
+      "443",
+      "42356",
+      "443",
+      "42366"
+    ]
+  },
+  {
+    "column": "proto",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "596599626",
+      "596599626",
+      "596599626",
+      "596599626",
+      "596599626"
+    ]
+  },
+  {
+    "column": "event_type",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1701431435",
+      "1701431435",
+      "1276104498",
+      "1701431435",
+      "1276104498"
+    ]
+  },
+  {
+    "column": "app_proto",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "117540559",
+      "117540559",
+      "1701431435",
+      "117540559",
+      "1701431435"
+    ]
+  },
+  {
+    "column": "flow_id",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1186519765348188.0",
+      "1609062938356381.0",
+      "1609062938356381.0",
+      "2050652969585612.8",
+      "2050652969585612.8"
+    ]
+  },
+  {
+    "column": "pkt_src",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1719715571",
+      "1719715571",
+      "1719715571",
+      "1719715571",
+      "1719715571"
+    ]
+  },
+  {
+    "column": "has_flow",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "1",
+      "0",
+      "1"
+    ]
+  },
+  {
+    "column": "pkts_toserver",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "318",
+      "0",
+      "331"
+    ]
+  },
+  {
+    "column": "pkts_toclient",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "520",
+      "0",
+      "478"
+    ]
+  },
+  {
+    "column": "bytes_toserver",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "22565",
+      "0",
+      "23424"
+    ]
+  },
+  {
+    "column": "bytes_toclient",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "1083200",
+      "0",
+      "1080429"
+    ]
+  },
+  {
+    "column": "duration",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "total_pkts",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "838",
+      "0",
+      "809"
+    ]
+  },
+  {
+    "column": "total_bytes",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "1105765",
+      "0",
+      "1103853"
+    ]
+  },
+  {
+    "column": "has_alert",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "1",
+      "0",
+      "1"
+    ]
+  },
+  {
+    "column": "alert_category",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "775555016",
+      "775555016",
+      "46191625",
+      "775555016",
+      "46191625"
+    ]
+  },
+  {
+    "column": "alert_severity",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "3",
+      "0",
+      "3"
+    ]
+  },
+  {
+    "column": "alert_signature",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "775555016",
+      "775555016",
+      "1113257099",
+      "775555016",
+      "1113257099"
+    ]
+  },
+  {
+    "column": "alert_signature_id",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "2210062",
+      "0",
+      "2210062"
+    ]
+  },
+  {
+    "column": "label_evidence_alert",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "1",
+      "0",
+      "1"
+    ]
+  },
+  {
+    "column": "label_evidence_compromised_ip",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "label_status",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1048083257",
+      "1048083257",
+      "672898201",
+      "1048083257",
+      "672898201"
+    ]
+  },
+  {
+    "column": "Target_prelim",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "-1",
+      "-1",
+      "1",
+      "-1",
+      "1"
+    ]
+  },
+  {
+    "column": "application",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1701431435",
+      "1701431435",
+      "1701431435",
+      "1701431435",
+      "1701431435"
+    ]
+  },
+  {
+    "column": "app_filter_reason",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1604476964",
+      "1604476964",
+      "1223523447",
+      "1604476964",
+      "1223523447"
+    ]
+  },
+  {
+    "column": "Target",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "1",
+      "0",
+      "1"
+    ]
+  },
+  {
+    "column": "label_status_final",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "99030684",
+      "99030684",
+      "169548621",
+      "99030684",
+      "169548621"
+    ]
+  },
+  {
+    "column": "label_source",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "271200706",
+      "271200706",
+      "1276104498",
+      "271200706",
+      "1276104498"
+    ]
+  },
+  {
+    "column": "label_reason",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "665515454",
+      "665515454",
+      "1284034053",
+      "665515454",
+      "1284034053"
+    ]
+  },
+  {
+    "column": "label_confidence",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.699999988079071",
+      "0.699999988079071",
+      "0.8999999761581421",
+      "0.699999988079071",
+      "0.8999999761581421"
+    ]
+  },
+  {
+    "column": "evidence_alert",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "1",
+      "0",
+      "1"
+    ]
+  },
+  {
+    "column": "evidence_compromised_ip",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "evidence_probe",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "probe_score",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "is_possible_probe",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "probe_reason",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "117540559",
+      "117540559",
+      "117540559",
+      "117540559",
+      "117540559"
+    ]
+  },
+  {
+    "column": "window_start",
+    "dtype": "int64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "2133457298",
+      "2133457298",
+      "2133457298",
+      "2133457298",
+      "2133457298"
+    ]
+  },
+  {
+    "column": "bytes_per_pkt",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "1319.5286396181384",
+      "0.0",
+      "1364.4660074165636"
+    ]
+  },
+  {
+    "column": "pkts_per_sec",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "bytes_per_sec",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "bytes_toserver_ratio",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.020406686773410246",
+      "0.0",
+      "0.02122021682234861"
+    ]
+  },
+  {
+    "column": "bytes_toclient_ratio",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.9795933132265889",
+      "0.0",
+      "0.9787797831776506"
+    ]
+  },
+  {
+    "column": "pkts_toserver_ratio",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.37947494033367607",
+      "0.0",
+      "0.4091470951787279"
+    ]
+  },
+  {
+    "column": "pkts_toclient_ratio",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.6205250596651306",
+      "0.0",
+      "0.590852904820036"
+    ]
+  },
+  {
+    "column": "log_total_bytes",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "13.916048865442752",
+      "0.0",
+      "13.914318250697043"
+    ]
+  },
+  {
+    "column": "log_total_pkts",
+    "dtype": "float64",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "6.732210706467206",
+      "0.0",
+      "6.697034247666484"
+    ]
+  },
+  {
+    "column": "log_duration",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "dport_is_dns",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "dport_is_http",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "dport_is_https",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1",
+      "1",
+      "0",
+      "1",
+      "0"
+    ]
+  },
+  {
+    "column": "dport_is_ssh",
+    "dtype": "int8",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "ts_hour",
+    "dtype": "int16",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "ts_dow",
+    "dtype": "int16",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "3",
+      "3",
+      "3",
+      "3",
+      "3"
+    ]
+  },
+  {
+    "column": "ts_day",
+    "dtype": "int16",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1",
+      "1",
+      "1",
+      "1",
+      "1"
+    ]
+  },
+  {
+    "column": "proto_raw",
+    "dtype": "str",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "TCP",
+      "TCP",
+      "TCP",
+      "TCP",
+      "TCP"
+    ]
+  },
+  {
+    "column": "event_type_raw",
+    "dtype": "str",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "tls",
+      "tls",
+      "alert",
+      "tls",
+      "alert"
+    ]
+  },
+  {
+    "column": "application_raw",
+    "dtype": "str",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "tls",
+      "tls",
+      "tls",
+      "tls",
+      "tls"
+    ]
+  },
+  {
+    "column": "app_proto_raw",
+    "dtype": "str",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "",
+      "",
+      "tls",
+      "",
+      "tls"
+    ]
+  },
+  {
+    "column": "interact_0_1",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_0_2",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "1429313536.0",
+      "0.0",
+      "1474208768.0"
+    ]
+  },
+  {
+    "column": "interact_0_3",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "1292.6015625",
+      "0.0",
+      "1335.5118408203125"
+    ]
+  },
+  {
+    "column": "interact_0_4",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "29775164.0",
+      "0.0",
+      "31961254.0"
+    ]
+  },
+  {
+    "column": "interact_0_5",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "26.927209854125977",
+      "0.0",
+      "28.954265594482422"
+    ]
+  },
+  {
+    "column": "interact_0_6",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "55889956.0",
+      "0.0",
+      "57806968.0"
+    ]
+  },
+  {
+    "column": "interact_0_7",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_0_8",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_0_9",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_0_10",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_0_11",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_0_12",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "1319.5286865234375",
+      "0.0",
+      "1364.466064453125"
+    ]
+  },
+  {
+    "column": "interact_0_13",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_0_14",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "18362.625",
+      "0.0",
+      "18985.615234375"
+    ]
+  },
+  {
+    "column": "interact_1_2",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_1_3",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_1_4",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_1_5",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_1_6",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "interact_1_7",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "row_mean",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "61420192.0",
+      "61419940.0",
+      "61499032.0",
+      "61419940.0",
+      "61498900.0"
+    ]
+  },
+  {
+    "column": "row_std",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "319139104.0",
+      "319139168.0",
+      "319124032.0",
+      "319139168.0",
+      "319124064.0"
+    ]
+  },
+  {
+    "column": "row_max",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1719715584.0",
+      "1719715584.0",
+      "1719715584.0",
+      "1719715584.0",
+      "1719715584.0"
+    ]
+  },
+  {
+    "column": "row_min",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "row_sum",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1719765376.0",
+      "1719758336.0",
+      "1721972864.0",
+      "1719758336.0",
+      "1721969152.0"
+    ]
+  },
+  {
+    "column": "row_nonzero",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "6",
+      "6",
+      "19",
+      "6",
+      "19"
+    ]
+  },
+  {
+    "column": "norm_0",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.5345688462257385",
+      "0.0",
+      "0.5527739524841309"
+    ]
+  },
+  {
+    "column": "norm_1",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "norm_2",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.06201770529150963",
+      "0.0",
+      "0.06185905262827873"
+    ]
+  },
+  {
+    "column": "norm_3",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.49217692017555237",
+      "0.0",
+      "0.49176815152168274"
+    ]
+  },
+  {
+    "column": "norm_4",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.04782260209321976",
+      "0.0",
+      "0.04964310675859451"
+    ]
+  },
+  {
+    "column": "norm_5",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.010203343816101551",
+      "0.0",
+      "0.010610108263790607"
+    ]
+  },
+  {
+    "column": "norm_6",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.006771319080144167",
+      "0.006771319080144167",
+      "0.6474175453186035",
+      "0.006771319080144167",
+      "0.6475704312324524"
+    ]
+  },
+  {
+    "column": "norm_7",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "norm_8",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0",
+      "0.0"
+    ]
+  },
+  {
+    "column": "norm_9",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0.5",
+      "0.5",
+      "0.0",
+      "0.5",
+      "0.0"
+    ]
+  },
+  {
+    "column": "ratio_max_to_min",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1719715584.0",
+      "1719715584.0",
+      "1719715584.0",
+      "1719715584.0",
+      "1719715584.0"
+    ]
+  },
+  {
+    "column": "ratio_sum_to_count",
+    "dtype": "float32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "286627552.0",
+      "286626400.0",
+      "90630152.0",
+      "286626400.0",
+      "90629952.0"
+    ]
+  },
+  {
+    "column": "has_high_values",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1",
+      "1",
+      "1",
+      "1",
+      "1"
+    ]
+  },
+  {
+    "column": "has_low_variance",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "0",
+      "0",
+      "0",
+      "0",
+      "0"
+    ]
+  },
+  {
+    "column": "is_sparse",
+    "dtype": "int32",
+    "non_null_sample_count": 1000,
+    "sample_values": [
+      "1",
+      "1",
+      "0",
+      "1",
+      "0"
+    ]
+  }
+]

@@ -3,7 +3,7 @@ import pytest
 import numpy as np
 import pandas as pd
 from unittest.mock import patch
-from contracts.dataset_schemas import CICIDS2017_SCHEMA
+from contracts.dataset_schemas import HIKARI2021_SCHEMA
 from database.db import init_db, get_experiment
 from orchestrator.experiment_service import (
     validate_dataset_for_ui, create_and_run_experiment, rerun_experiment,
@@ -20,9 +20,11 @@ def test_env(tmp_path):
     # Create minimal valid CSV
     np.random.seed(42)
     n = 100
-    feature_cols = [c for c in CICIDS2017_SCHEMA["expected_columns"] if c != "Label"]
+    feature_cols = [c for c in HIKARI2021_SCHEMA["expected_columns"] if c != "Label"]
+    # All features as random numerics; non-numeric / artifact columns named in
+    # _common._DROP_COLS will be dropped by the pipeline regardless of dtype.
     data = {col: np.random.randn(n) for col in feature_cols}
-    data["Label"] = ["BENIGN"] * 50 + ["DDoS"] * 50
+    data["Label"] = [0] * 50 + [1] * 50
     df = pd.DataFrame(data)
     csv_path = str(tmp_path / "test.csv")
     df.to_csv(csv_path, index=False)
@@ -42,12 +44,12 @@ def test_env(tmp_path):
 
 
 def test_validate_valid(test_env):
-    r = validate_dataset_for_ui("CICIDS2017", test_env["csv_path"])
+    r = validate_dataset_for_ui("HIKARI2021", test_env["csv_path"])
     assert r["success"] is True
 
 
 def test_validate_missing_file(test_env):
-    r = validate_dataset_for_ui("CICIDS2017", "/nonexistent.csv")
+    r = validate_dataset_for_ui("HIKARI2021", "/nonexistent.csv")
     assert r["success"] is False
 
 
@@ -57,31 +59,31 @@ def test_validate_unknown_type(test_env):
 
 
 def test_create_and_run(test_env):
-    r = create_and_run_experiment("CICIDS2017", test_env["csv_path"], "cicids2017.rf_paper_a")
+    r = create_and_run_experiment("HIKARI2021", test_env["csv_path"], "hikari2021.nbgc_pipeline")
     assert r["success"] is True
     assert r["metrics"]["accuracy"] >= 0.0
 
 
 def test_experiment_in_db(test_env):
-    r = create_and_run_experiment("CICIDS2017", test_env["csv_path"], "cicids2017.rf_paper_a")
+    r = create_and_run_experiment("HIKARI2021", test_env["csv_path"], "hikari2021.nbgc_pipeline")
     exp = get_experiment(r["experiment_id"], test_env["db_path"])
     assert exp["status"] == "FINISHED"
 
 
 def test_artifacts_saved(test_env):
-    r = create_and_run_experiment("CICIDS2017", test_env["csv_path"], "cicids2017.rf_paper_a")
+    r = create_and_run_experiment("HIKARI2021", test_env["csv_path"], "hikari2021.nbgc_pipeline")
     d = test_env["artifacts_dir"] / r["experiment_id"]
     assert (d / "model.pkl").exists()
     assert (d / "metrics.json").exists()
 
 
 def test_invalid_pipeline(test_env):
-    r = create_and_run_experiment("CICIDS2017", test_env["csv_path"], "fake.pipeline")
+    r = create_and_run_experiment("HIKARI2021", test_env["csv_path"], "fake.pipeline")
     assert r["success"] is False
 
 
 def test_rerun(test_env):
-    orig = create_and_run_experiment("CICIDS2017", test_env["csv_path"], "cicids2017.rf_paper_a")
+    orig = create_and_run_experiment("HIKARI2021", test_env["csv_path"], "hikari2021.nbgc_pipeline")
     rerun = rerun_experiment(orig["experiment_id"])
     assert rerun["success"] is True
     assert rerun["experiment_id"] != orig["experiment_id"]

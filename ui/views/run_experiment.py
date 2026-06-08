@@ -3,6 +3,7 @@ Run Experiment page — supports both sync and async execution.
 """
 import logging
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 import streamlit as st
 
@@ -29,7 +30,9 @@ from contracts.dataset_schemas import get_schema
 # Accent color shared with the sidebar (kept in sync intentionally).
 _ACCENT = "#2563eb"
 
-_EXT_MAP = {"EVE_SURICATA": ".json"}
+_EXT_MAP: dict[str, tuple[str, ...]] = {
+    "EVE_SURICATA": (".json", ".jsonl", ".ndjson"),
+}
 
 _POLL_INTERVALS = {
     "svc": 30,
@@ -49,6 +52,97 @@ def _get_poll_interval(pipeline_id: str) -> int:
         if key in pid_lower:
             return seconds
     return _DEFAULT_POLL_INTERVAL
+
+
+# Default within-stage time estimates used only to animate the progress bar.
+# These are cosmetic defaults; they do NOT influence pipeline computation, metrics,
+# runtime recording, or anything persisted. They control only how fast the bar
+# creeps within a single stage when no stage transition has occurred yet.
+_PB_TRAINING_ESTIMATE_SEC = 600.0   # for stages whose text contains "Training" or "Computing learning curve"
+_PB_DEFAULT_ESTIMATE_SEC = 30.0     # for short stages (Preprocessing, Scaling, Evaluating, ...)
+
+
+def _compute_progress_state(status_data: dict, stages: list, session_state, experiment_id: str) -> dict:
+    """Compute UI-only progress bar state.
+
+    Strictly cosmetic. The returned fraction/elapsed/hint are for st.progress
+    + caption only. They are NEVER written to metrics.json, metadata.json,
+    experiments.db, the runtime field, or any artifact. Reproducibility is
+    untouched; the underlying data (celery_stage, started_at) is read-only.
+
+    Args:
+        status_data: dict from get_experiment_status (DB row + optional celery_stage)
+        stages:      ordered list of stage strings for this pipeline_id (from registry)
+        session_state: Streamlit session state (used to track stage entry time)
+        experiment_id: scoping key so multiple experiments don't collide in state
+
+    Returns:
+        dict with keys: fraction (0.0..1.0), label, elapsed_text, hint
+    """
+    status = status_data.get("status", "")
+    celery_stage = status_data.get("celery_stage") or ""
+    started_at = status_data.get("started_at")
+    total = len(stages)
+
+    # Real elapsed time from the DB-recorded started_at — honest display.
+    # This is purely for the caption; it does NOT replace any runtime field.
+    elapsed_text = ""
+    try:
+        if started_at:
+            t0 = datetime.fromisoformat(started_at)
+            if t0.tzinfo is None:
+                t0 = t0.replace(tzinfo=timezone.utc)
+            elapsed_sec = max(0.0, (datetime.now(timezone.utc) - t0).total_seconds())
+            m, s = divmod(int(elapsed_sec), 60)
+            h, m = divmod(m, 60)
+            elapsed_text = f"{h}h {m:02d}m {s:02d}s" if h else f"{m}m {s:02d}s"
+    except Exception:
+        pass
+
+    # Terminal / pre-run states first
+    if status == "QUEUED":
+        return {"fraction": 0.0, "label": "Queued — waiting for worker", "elapsed_text": elapsed_text, "hint": ""}
+    if status == "FAILED":
+        return {"fraction": 0.0, "label": "Failed", "elapsed_text": elapsed_text, "hint": ""}
+    if status == "FINISHED":
+        return {"fraction": 1.0, "label": "Complete", "elapsed_text": elapsed_text, "hint": ""}
+
+    # Worker-injected wrapper stages (celery_worker._safe_update_state calls)
+    if celery_stage == "Executing pipeline...":
+        return {"fraction": 0.02, "label": "Starting pipeline...", "elapsed_text": elapsed_text, "hint": ""}
+    if celery_stage == "Saving results...":
+        # Pin at 98% — bar must NOT hit 100% until status is truly FINISHED in DB
+        return {"fraction": 0.98, "label": "Saving results...", "elapsed_text": elapsed_text, "hint": ""}
+
+    if total == 0:
+        return {"fraction": 0.05, "label": celery_stage or "Running...", "elapsed_text": elapsed_text, "hint": ""}
+
+    try:
+        idx = stages.index(celery_stage)
+    except ValueError:
+        # Unknown stage — never fabricate a position
+        return {"fraction": 0.05, "label": celery_stage or "Running...", "elapsed_text": elapsed_text, "hint": ""}
+
+    # Track stage entry time in session_state — cosmetic, never persisted.
+    start_key = f"_pb_stage_start_{experiment_id}"
+    prev_key = f"_pb_prev_stage_{experiment_id}"
+    now_ts = datetime.now(timezone.utc).timestamp()
+    if session_state.get(prev_key) != celery_stage:
+        session_state[start_key] = now_ts
+        session_state[prev_key] = celery_stage
+    in_stage_sec = max(0.0, now_ts - session_state.get(start_key, now_ts))
+
+    base = idx / total
+    is_training = ("Training" in celery_stage) or ("Computing learning curve" in celery_stage)
+    estimate_sec = _PB_TRAINING_ESTIMATE_SEC if is_training else _PB_DEFAULT_ESTIMATE_SEC
+    within = min(in_stage_sec / estimate_sec, 0.95)
+    # Hard cap at 95% of the slot allocated to this stage. The bar advances to
+    # the next stage's floor only when celery_stage actually transitions.
+    fraction = min(base + within / total, (idx + 0.95) / total)
+
+    label = f"Step {idx + 1}/{total}: {celery_stage}"
+    hint = "training step — within-step % is estimated" if is_training and in_stage_sec > 3 else ""
+    return {"fraction": fraction, "label": label, "elapsed_text": elapsed_text, "hint": hint}
 
 
 # ── Pipeline Config Viewer support ─────────────────────────────────────────
@@ -185,7 +279,6 @@ def _build_pipeline_config_files(pipeline_id: str) -> dict:
     }
 
 _TYPE_META = {
-    "CICIDS2017":   {"icon": "", "desc": "Network traffic · 78 features · CSV"},
     "HIKARI2021":   {"icon": "", "desc": "Network traffic · 88 features · CSV"},
     "EVE_SURICATA": {"icon": "", "desc": "Suricata IDS logs · EVE JSON"},
 }
@@ -195,8 +288,15 @@ def _list_dataset_files(dataset_type: str) -> list[str]:
     d = Path(DATASETS_DIR)
     if not d.exists():
         return []
-    ext = _EXT_MAP.get(dataset_type, ".csv")
-    return sorted(str(f) for f in d.glob(f"*{ext}") if f.is_file())
+    exts = _EXT_MAP.get(dataset_type, (".csv",))
+    if isinstance(exts, str):  # legacy/defensive
+        exts = (exts,)
+    found: set[str] = set()
+    for ext in exts:
+        for f in d.glob(f"*{ext}"):
+            if f.is_file():
+                found.add(str(f))
+    return sorted(found)
 
 
 def _type_icon(dtype: str) -> str:
@@ -246,11 +346,15 @@ def _render_file_picker(dtype: str) -> None:
     and confirm via a Use button that hands off to the existing flow.
 
     Mapping mechanism: file extension only, via _EXT_MAP — identical to the
-    pre-existing _list_dataset_files behaviour. CSV files appear under both
-    CICIDS2017 and HIKARI2021 because the platform does not discriminate by
-    content at list time; schema validation runs later on the chosen file.
+    pre-existing _list_dataset_files behaviour. CSV files appear under
+    HIKARI2021; NDJSON / JSON files appear under EVE_SURICATA. Platform does
+    not discriminate by content at list time; schema validation runs later on
+    the chosen file.
     """
-    ext = _EXT_MAP.get(dtype, ".csv")
+    exts = _EXT_MAP.get(dtype, (".csv",))
+    if isinstance(exts, str):
+        exts = (exts,)
+    ext_display = ", ".join(f"*{e}" for e in exts)
     try:
         files = _list_dataset_files(dtype)
     except Exception as e:
@@ -259,7 +363,7 @@ def _render_file_picker(dtype: str) -> None:
 
     if not files:
         st.info(
-            f"Belum ada berkas dataset bertype **{dtype}** (`*{ext}`) di "
+            f"Belum ada berkas dataset bertype **{dtype}** (`{ext_display}`) di "
             f"`storage/datasets/`. Tambahkan berkas ke folder tersebut untuk memulai."
         )
         return
@@ -284,7 +388,7 @@ def _render_file_picker(dtype: str) -> None:
         default_idx = options.index(prior)
 
     chosen = st.radio(
-        f"Berkas yang cocok di `storage/datasets/` (filter: `*{ext}`):",
+        f"Berkas yang cocok di `storage/datasets/` (filter: `{ext_display}`):",
         options=options,
         format_func=lambda p: labels[p],
         index=default_idx,
@@ -527,6 +631,22 @@ def _poll_experiment(experiment_id: str):
     status = status_data["status"]
 
     if status in ("QUEUED", "RUNNING"):
+        # Progress bar (UI-cosmetic only; nothing computed here is persisted).
+        # Stages list comes from config.pipeline_registry — UI may import config/.
+        from config.pipeline_registry import get_pipeline as _get_pipeline_entry
+        _reg_entry = _get_pipeline_entry(status_data.get("pipeline_id", "")) or {}
+        _stages_list = _reg_entry.get("stages", []) or []
+        _pb = _compute_progress_state(status_data, _stages_list, st.session_state, experiment_id)
+        st.progress(_pb["fraction"])
+        st.markdown(f"**{_pb['label']}**")
+        _bottom_parts = []
+        if _pb["elapsed_text"]:
+            _bottom_parts.append(f"Elapsed: {_pb['elapsed_text']}")
+        if _pb["hint"]:
+            _bottom_parts.append(_pb["hint"])
+        if _bottom_parts:
+            st.caption(" — ".join(_bottom_parts))
+
         with st.status(f"Experiment {status.lower()}...", expanded=True):
             st.write(f"**Experiment ID:** `{experiment_id[:8]}...`")
             st.write(f"**Status:** {status}")

@@ -1,0 +1,5 @@
+app,status,rows_seen_train,fs_sample_rows,numeric_features_total,top_k,mi_selected_n,rfe_selected_n,pca_n_components,pca_cumvar,feature_sets_json,meta_json,seconds
+dns,completed,460,460,51,25,25,25,25,1.0000000000000002,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=dns\phase12_feature_sets_dns_run.json,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=dns\phase12_meta_dns_run.json,4.907629
+http,completed,788,788,59,25,25,25,25,0.9993553598342801,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=http\phase12_feature_sets_http_run.json,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=http\phase12_meta_http_run.json,1.319621
+tls,completed,340,340,59,25,25,25,25,0.9998178932688351,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=tls\phase12_feature_sets_tls_run.json,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=tls\phase12_meta_tls_run.json,1.26204
+ssh,completed,12584,12584,53,25,25,25,25,0.9999010993172102,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=ssh\phase12_feature_sets_ssh_run.json,D:\Program\TA\storage\eve_v2_work\results\phase12_fs\app=ssh\phase12_meta_ssh_run.json,1.855184

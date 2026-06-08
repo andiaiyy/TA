@@ -18,7 +18,7 @@ def test_sanitize_unix_path():
 
 
 def test_sanitize_no_path():
-    msg = "ValueError: Unknown pipeline id: cicids2017.fake"
+    msg = "ValueError: Unknown pipeline id: hikari2021.fake"
     assert sanitize_error(msg) == msg
 
 

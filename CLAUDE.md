@@ -98,7 +98,6 @@ If a task seems to require violating any of these, **stop and ask before proceed
 
 | Dataset | Format | Status |
 |---------|--------|--------|
-| CICIDS2017 | CSV | Complete |
 | HIKARI2021 | CSV | Complete |
 | EVE_SURICATA | NDJSON (and CSV adapter in progress) | Integration in progress |
 
@@ -106,7 +105,6 @@ If a task seems to require violating any of these, **stop and ask before proceed
 
 | ID | Status |
 |----|--------|
-| `cicids2017.rf_paper_a` | Working, tested, reproducible |
 | `hikari2021.rfc_pipeline` | Working |
 | `hikari2021.dt_pipeline` | Working |
 | `hikari2021.knn_pipeline` | Working |

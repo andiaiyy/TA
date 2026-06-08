@@ -1,0 +1,22 @@
+{
+  "App": "dns",
+  "Method": "PCA",
+  "Model": "XGB",
+  "accuracy": 0.9934782608695653,
+  "accuracy_std": 0.0021739130434782483,
+  "precision_attack": 0.9871426466254052,
+  "recall_attack": 1.0,
+  "f1_attack": 0.9935251530079117,
+  "auc": 1.0,
+  "cv_folds": 2,
+  "train_rows": 460,
+  "train_features": 53,
+  "holdout_accuracy": 0.9912280701754386,
+  "holdout_precision_attack": 0.9827586206896551,
+  "holdout_recall_attack": 1.0,
+  "holdout_f1_attack": 0.991304347826087,
+  "holdout_auc": 1.0,
+  "test_rows": 114,
+  "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=dns\\checkpoints\\PCA\\XGB\\final_model.joblib",
+  "elapsed_seconds": 0.34190769999986514
+}

@@ -1,0 +1,65 @@
+{
+  "phase": 5,
+  "app": "dns",
+  "status": "completed",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase4_labeled_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase5_feature_engineered_dataset\\app=dns",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "write_format": "parquet",
+  "parquet_engine": "pyarrow",
+  "parquet_compression": "snappy",
+  "use_advanced_module": true,
+  "raw_keep_cols": [
+    "proto",
+    "event_type",
+    "application",
+    "app_proto"
+  ],
+  "raw_suffix": "_raw",
+  "keep_raw_columns_for_visualization": true,
+  "shards_in": 1,
+  "shards_out": 1,
+  "rows_in": 4799,
+  "rows_out": 4799,
+  "feature_count_min": 62,
+  "feature_count_max": 62,
+  "engineer_loaded_shards": 0,
+  "engineer_fail_counter_top5": {
+    "ImportError('Failed to import AdvancedFeatureEngineer. cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'cbr\\'\") | src.cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'src\\'\")')": 1
+  },
+  "target_counts": {
+    "1": 287,
+    "0": 4512
+  },
+  "unexpected_object_cols": [],
+  "df_sample_shape": [
+    4799,
+    62
+  ],
+  "output_bytes": 174535,
+  "output_gib": 0.00016254838556051254,
+  "seconds": 0.214485,
+  "leakage_audit_cols_present": [
+    "has_alert",
+    "alert_category",
+    "alert_severity",
+    "Target_prelim",
+    "label_status",
+    "label_status_final",
+    "label_source",
+    "label_reason",
+    "label_confidence",
+    "evidence_alert",
+    "evidence_compromised_ip",
+    "evidence_probe",
+    "probe_score",
+    "is_possible_probe",
+    "probe_reason"
+  ],
+  "note_leakage": "Phase 5 preserves label/evidence audit columns if present. They must be removed before modeling by the leakage/split phases."
+}

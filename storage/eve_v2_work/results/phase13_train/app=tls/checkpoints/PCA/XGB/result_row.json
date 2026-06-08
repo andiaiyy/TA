@@ -1,0 +1,22 @@
+{
+  "App": "tls",
+  "Method": "PCA",
+  "Model": "XGB",
+  "accuracy": 0.9882352941176471,
+  "accuracy_std": 0.005882352941176505,
+  "precision_attack": 0.9829545454545454,
+  "recall_attack": 0.9941176470588236,
+  "f1_attack": 0.9883708998871292,
+  "auc": 0.9997923875432526,
+  "cv_folds": 2,
+  "train_rows": 340,
+  "train_features": 62,
+  "holdout_accuracy": 1.0,
+  "holdout_precision_attack": 1.0,
+  "holdout_recall_attack": 1.0,
+  "holdout_f1_attack": 1.0,
+  "holdout_auc": 1.0,
+  "test_rows": 86,
+  "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=tls\\checkpoints\\PCA\\XGB\\final_model.joblib",
+  "elapsed_seconds": 0.34210329999768874
+}

@@ -1,0 +1,144 @@
+{
+  "phase": 14,
+  "app": "tls",
+  "status": "completed",
+  "airc_leakage_aware": true,
+  "strict_leakage_guard": true,
+  "leakage_guard": {
+    "strict_leakage_guard": true,
+    "drop_probe_direct_features": true,
+    "drop_label_explanation_features": true,
+    "drop_alert_derived_features": true,
+    "dropped_forbidden_features": [],
+    "dropped_forbidden_count": 0
+  },
+  "forbidden_features_after_prep": [],
+  "evaluation_quality_warnings": [
+    "At least one ROC AUC is >= 0.999. This can be valid, but in this project it should trigger leakage/split review before being claimed as final.",
+    "The confusion matrix is perfect (FP=0 and FN=0). Verify that alert/label/probe-derived shortcuts and source/time overlap were removed.",
+    "Phase 13 result column 'holdout_f1_attack' contains values >= 0.999; report this as leakage-aware diagnostic output unless stricter validation is passed."
+  ],
+  "generated_at": "2026-06-05T15:37:46.914718",
+  "eval_mode": "holdout_test_shards",
+  "modeling_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\modeling",
+  "phase12_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase12_fs",
+  "phase13_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase14_advanced_eval\\app=tls",
+  "feature_sets_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase12_fs\\app=tls\\phase12_feature_sets_tls_run.json",
+  "phase13_results_csv": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=tls\\results_comparison_tls_run.csv",
+  "train_rows_seen": 340,
+  "test_rows_seen": 86,
+  "train_rows_loaded_initial": 340,
+  "test_rows_loaded_initial": 86,
+  "train_rows_eval": 340,
+  "test_rows_eval": 86,
+  "train_dist_eval": {
+    "1": 170,
+    "0": 170
+  },
+  "test_dist_eval": {
+    "1": 43,
+    "0": 43
+  },
+  "methods": [
+    "MI",
+    "RFE",
+    "PCA"
+  ],
+  "models_for_roc": [
+    "DT",
+    "RFC",
+    "LSVC",
+    "XGB"
+  ],
+  "missing_models": [],
+  "failed_jobs": [],
+  "roc_auc_summary": {
+    "MI": {
+      "DT": {
+        "auc": 1.0
+      },
+      "RFC": {
+        "auc": 1.0
+      },
+      "LSVC": {
+        "auc": 1.0
+      },
+      "XGB": {
+        "auc": 1.0
+      }
+    },
+    "RFE": {
+      "DT": {
+        "auc": 1.0
+      },
+      "RFC": {
+        "auc": 1.0
+      },
+      "LSVC": {
+        "auc": 1.0
+      },
+      "XGB": {
+        "auc": 1.0
+      }
+    },
+    "PCA": {
+      "DT": {
+        "auc": 1.0
+      },
+      "RFC": {
+        "auc": 1.0
+      },
+      "LSVC": {
+        "auc": 1.0
+      },
+      "XGB": {
+        "auc": 1.0
+      }
+    }
+  },
+  "confusion_matrix": {
+    "status": "completed",
+    "best_method": "MI",
+    "best_model": "DT",
+    "confusion_matrix": [
+      [
+        43,
+        0
+      ],
+      [
+        0,
+        43
+      ]
+    ],
+    "tn": 43,
+    "fp": 0,
+    "fn": 0,
+    "tp": 43
+  },
+  "performance_plot": {
+    "status": "completed",
+    "metric_columns": {
+      "accuracy": "accuracy",
+      "f1_attack": "f1_attack",
+      "auc": "auc"
+    }
+  },
+  "logical_cpu": 12,
+  "worker_threads": 10,
+  "inner_math_threads": 1,
+  "xgb_available": true,
+  "xgb_device": "cpu",
+  "xgb_tree_method": "hist",
+  "predict_batch_rows": 200000,
+  "paths": {
+    "roc_curves_png": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase14_advanced_eval\\app=tls\\roc_curves_tls_run.png",
+    "perf_comparison_png": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase14_advanced_eval\\app=tls\\model_performance_comparison_tls_run.png",
+    "confusion_matrix_png": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase14_advanced_eval\\app=tls\\confusion_matrix_best_model_tls_run.png",
+    "roc_auc_summary_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase14_advanced_eval\\app=tls\\roc_auc_summary_tls_run.json",
+    "summary_json": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase14_advanced_eval\\app=tls\\phase14_summary_tls_run.json"
+  },
+  "seconds": 3.3973549000002095,
+  "elapsed_human": "00:00:03",
+  "note": "Phase 14 performs app-aware advanced evaluation using bounded train/test samples. If Phase 13 did not save fitted models, this phase retrains evaluation models for ROC/confusion matrix artifacts."
+}

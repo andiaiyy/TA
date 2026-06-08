@@ -272,13 +272,6 @@ def _cover(story, styles, ctx):
 # ─── 1. Tujuan Model ──────────────────────────────────────────────────────
 
 _TUJUAN_BY_DATASET = {
-    "CICIDS2017": (
-        "Model machine learning pada eksperimen ini berfungsi sebagai detection engine "
-        "yang melakukan klasifikasi trafik jaringan pada dataset CICIDS2017 menjadi "
-        "kategori benign atau salah satu kelas serangan. Eksperimen ini merupakan replikasi "
-        "konteks paper Sharafaldin et al. (ICISSP 2018), di mana model dievaluasi pada "
-        "fitur-fitur flow yang telah diekstraksi sebelumnya, bukan pada packet capture langsung."
-    ),
     "HIKARI2021": (
         "Model machine learning pada eksperimen ini berfungsi sebagai detection engine untuk "
         "klasifikasi trafik terenkripsi pada dataset HIKARI2021 (varian ALLFLOWMETER), dengan "
@@ -327,7 +320,6 @@ def _section_2_dataset(story, styles, ctx):
                             styles["subsection"]))
 
     char_map = {
-        "CICIDS2017": "Fitur numerik berbasis flow (Flow Duration, packet/byte rates, IAT, flag counts, dll).",
         "HIKARI2021": "Fitur numerik berbasis flow varian ALLFLOWMETER, mencakup payload statistics dan window/header counts.",
         "EVE_SURICATA": "Hasil parsing NDJSON EVE Suricata; tujuh fase preprocessing menurunkan label dari alert.severity.",
     }
@@ -677,7 +669,7 @@ def _section_8_integrasi(story, styles, ctx):
 # ─── 9. Limitasi ──────────────────────────────────────────────────────────
 
 _LIMITATIONS = [
-    "Dataset publik (CICIDS2017, HIKARI2021, EVE Suricata) tidak selalu merepresentasikan "
+    "Dataset publik (HIKARI2021, EVE Suricata) tidak selalu merepresentasikan "
     "trafik jaringan dunia nyata terkini; profil serangan dan distribusi fitur dapat berbeda "
     "dengan kondisi operasional pengguna platform.",
 

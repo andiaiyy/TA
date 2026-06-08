@@ -1,0 +1,279 @@
+{
+  "phase": 5,
+  "status": "completed",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase4_labeled_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase5_feature_engineered_dataset",
+  "total_rows_out": 33954,
+  "total_output_bytes": 1753918,
+  "total_output_gib": 0.0016334634274244308,
+  "apps": {
+    "dns": {
+      "phase": 5,
+      "app": "dns",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase4_labeled_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase5_feature_engineered_dataset\\app=dns",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "use_advanced_module": true,
+      "raw_keep_cols": [
+        "proto",
+        "event_type",
+        "application",
+        "app_proto"
+      ],
+      "raw_suffix": "_raw",
+      "keep_raw_columns_for_visualization": true,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 4799,
+      "rows_out": 4799,
+      "feature_count_min": 62,
+      "feature_count_max": 62,
+      "engineer_loaded_shards": 0,
+      "engineer_fail_counter_top5": {
+        "ImportError('Failed to import AdvancedFeatureEngineer. cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'cbr\\'\") | src.cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'src\\'\")')": 1
+      },
+      "target_counts": {
+        "1": 287,
+        "0": 4512
+      },
+      "unexpected_object_cols": [],
+      "df_sample_shape": [
+        4799,
+        62
+      ],
+      "output_bytes": 174535,
+      "output_gib": 0.00016254838556051254,
+      "seconds": 0.214485,
+      "leakage_audit_cols_present": [
+        "has_alert",
+        "alert_category",
+        "alert_severity",
+        "Target_prelim",
+        "label_status",
+        "label_status_final",
+        "label_source",
+        "label_reason",
+        "label_confidence",
+        "evidence_alert",
+        "evidence_compromised_ip",
+        "evidence_probe",
+        "probe_score",
+        "is_possible_probe",
+        "probe_reason"
+      ],
+      "note_leakage": "Phase 5 preserves label/evidence audit columns if present. They must be removed before modeling by the leakage/split phases."
+    },
+    "http": {
+      "phase": 5,
+      "app": "http",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase4_labeled_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase5_feature_engineered_dataset\\app=http",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "use_advanced_module": true,
+      "raw_keep_cols": [
+        "proto",
+        "event_type",
+        "application",
+        "app_proto"
+      ],
+      "raw_suffix": "_raw",
+      "keep_raw_columns_for_visualization": true,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 1799,
+      "rows_out": 1799,
+      "feature_count_min": 62,
+      "feature_count_max": 62,
+      "engineer_loaded_shards": 0,
+      "engineer_fail_counter_top5": {
+        "ImportError('Failed to import AdvancedFeatureEngineer. cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'cbr\\'\") | src.cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'src\\'\")')": 1
+      },
+      "target_counts": {
+        "1": 492,
+        "0": 1307
+      },
+      "unexpected_object_cols": [],
+      "df_sample_shape": [
+        1799,
+        62
+      ],
+      "output_bytes": 124442,
+      "output_gib": 0.00011589564383029938,
+      "seconds": 0.151385,
+      "leakage_audit_cols_present": [
+        "has_alert",
+        "alert_category",
+        "alert_severity",
+        "Target_prelim",
+        "label_status",
+        "label_status_final",
+        "label_source",
+        "label_reason",
+        "label_confidence",
+        "evidence_alert",
+        "evidence_compromised_ip",
+        "evidence_probe",
+        "probe_score",
+        "is_possible_probe",
+        "probe_reason"
+      ],
+      "note_leakage": "Phase 5 preserves label/evidence audit columns if present. They must be removed before modeling by the leakage/split phases."
+    },
+    "tls": {
+      "phase": 5,
+      "app": "tls",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase4_labeled_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase5_feature_engineered_dataset\\app=tls",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "use_advanced_module": true,
+      "raw_keep_cols": [
+        "proto",
+        "event_type",
+        "application",
+        "app_proto"
+      ],
+      "raw_suffix": "_raw",
+      "keep_raw_columns_for_visualization": true,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 2451,
+      "rows_out": 2451,
+      "feature_count_min": 62,
+      "feature_count_max": 62,
+      "engineer_loaded_shards": 0,
+      "engineer_fail_counter_top5": {
+        "ImportError('Failed to import AdvancedFeatureEngineer. cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'cbr\\'\") | src.cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'src\\'\")')": 1
+      },
+      "target_counts": {
+        "0": 2238,
+        "1": 213
+      },
+      "unexpected_object_cols": [],
+      "df_sample_shape": [
+        2451,
+        62
+      ],
+      "output_bytes": 178487,
+      "output_gib": 0.00016622897237539291,
+      "seconds": 0.176973,
+      "leakage_audit_cols_present": [
+        "has_alert",
+        "alert_category",
+        "alert_severity",
+        "Target_prelim",
+        "label_status",
+        "label_status_final",
+        "label_source",
+        "label_reason",
+        "label_confidence",
+        "evidence_alert",
+        "evidence_compromised_ip",
+        "evidence_probe",
+        "probe_score",
+        "is_possible_probe",
+        "probe_reason"
+      ],
+      "note_leakage": "Phase 5 preserves label/evidence audit columns if present. They must be removed before modeling by the leakage/split phases."
+    },
+    "ssh": {
+      "phase": 5,
+      "app": "ssh",
+      "status": "completed",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase4_labeled_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase5_feature_engineered_dataset\\app=ssh",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "use_advanced_module": true,
+      "raw_keep_cols": [
+        "proto",
+        "event_type",
+        "application",
+        "app_proto"
+      ],
+      "raw_suffix": "_raw",
+      "keep_raw_columns_for_visualization": true,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 24905,
+      "rows_out": 24905,
+      "feature_count_min": 62,
+      "feature_count_max": 62,
+      "engineer_loaded_shards": 0,
+      "engineer_fail_counter_top5": {
+        "ImportError('Failed to import AdvancedFeatureEngineer. cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'cbr\\'\") | src.cbr.feature_engineering_advanced: ModuleNotFoundError(\"No module named \\'src\\'\")')": 1
+      },
+      "target_counts": {
+        "1": 7865,
+        "0": 17040
+      },
+      "unexpected_object_cols": [],
+      "df_sample_shape": [
+        24905,
+        62
+      ],
+      "output_bytes": 1276454,
+      "output_gib": 0.001188790425658226,
+      "seconds": 0.570956,
+      "leakage_audit_cols_present": [
+        "has_alert",
+        "alert_category",
+        "alert_severity",
+        "Target_prelim",
+        "label_status",
+        "label_status_final",
+        "label_source",
+        "label_reason",
+        "label_confidence",
+        "evidence_alert",
+        "evidence_compromised_ip",
+        "evidence_probe",
+        "probe_score",
+        "is_possible_probe",
+        "probe_reason"
+      ],
+      "note_leakage": "Phase 5 preserves label/evidence audit columns if present. They must be removed before modeling by the leakage/split phases."
+    }
+  },
+  "seconds": 1.116265,
+  "note": "Phase 5 is app-aware and reads Phase 4 labeled app partitions. It no longer expects attacks/benign folders."
+}

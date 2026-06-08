@@ -1,0 +1,5 @@
+app,status,rows_in,rows_out,target_0_benign,target_1_malicious,feature_count_min,feature_count_max,shards_out,output_gib,engineer_loaded_shards
+dns,completed,4799,4799,4512,287,62,62,1,0.00016254838556051254,0
+http,completed,1799,1799,1307,492,62,62,1,0.00011589564383029938,0
+tls,completed,2451,2451,2238,213,62,62,1,0.00016622897237539291,0
+ssh,completed,24905,24905,17040,7865,62,62,1,0.001188790425658226,0

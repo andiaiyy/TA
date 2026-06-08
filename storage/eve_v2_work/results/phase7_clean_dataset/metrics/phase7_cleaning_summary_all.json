@@ -1,0 +1,675 @@
+{
+  "phase": 7,
+  "status": "completed",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase6_computed_features_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset",
+  "total_rows_out": 33954,
+  "total_output_bytes": 3529752,
+  "total_output_gib": 0.0032873377203941345,
+  "apps": {
+    "dns": {
+      "phase": 7,
+      "app": "dns",
+      "status": "completed",
+      "mode": "app_aware_sharded",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase6_computed_features_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset\\app=dns",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "raw_suffix": "_raw",
+      "keep_strings_for_raw": true,
+      "coerce_non_raw_objects_to_string": true,
+      "compute_diagnostics": false,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 4799,
+      "rows_out": 4799,
+      "raw_cols_count_max": 4,
+      "numeric_cols_count_min": 99,
+      "numeric_cols_count_max": 99,
+      "output_cols_min": 103,
+      "output_cols_max": 103,
+      "target_counts": {
+        "1": 287,
+        "0": 4512
+      },
+      "visualization_stats": {
+        "app": "dns",
+        "rows_after_phase7": 4799,
+        "target_counts": {
+          "1": 287,
+          "0": 4512
+        },
+        "numeric_quantiles_by_target": {
+          "total_pkts": {
+            "0": {
+              "count": 4512,
+              "min": 1.0,
+              "q1": 2.0,
+              "median": 2.0,
+              "q3": 2.0,
+              "max": 4.0,
+              "mean": 1.955008865248227,
+              "std": 0.231528033762353
+            },
+            "1": {
+              "count": 287,
+              "min": 1.0,
+              "q1": 1.0,
+              "median": 1.0,
+              "q3": 2.0,
+              "max": 3.0,
+              "mean": 1.4878048780487805,
+              "std": 0.5067740325979395
+            }
+          },
+          "total_bytes": {
+            "0": {
+              "count": 4512,
+              "min": 74.0,
+              "q1": 194.0,
+              "median": 194.0,
+              "q3": 237.0,
+              "max": 570.0,
+              "mean": 209.4383865248227,
+              "std": 36.26059050315966
+            },
+            "1": {
+              "count": 287,
+              "min": 72.0,
+              "q1": 89.0,
+              "median": 89.0,
+              "q3": 194.0,
+              "max": 334.0,
+              "mean": 147.41463414634146,
+              "std": 63.526220505906885
+            }
+          },
+          "duration": {
+            "0": {
+              "count": 4512,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 195.0,
+              "mean": 0.13453014194965363,
+              "std": 4.5337910652160645
+            },
+            "1": {
+              "count": 287,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "pkts_per_sec": {
+            "0": {
+              "count": 4512,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 2.0,
+              "mean": 0.004679886485731703,
+              "std": 0.0928574842088599
+            },
+            "1": {
+              "count": 287,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "bytes_per_sec": {
+            "0": {
+              "count": 4512,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 237.0,
+              "mean": 0.5070331669213335,
+              "std": 10.049806479467417
+            },
+            "1": {
+              "count": 287,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          }
+        },
+        "quantile_source": "df_sample",
+        "notes": "These statistics are intended for Phase 9 plots so visualization does not need to reread raw data. Heatmaps still require a bounded df_clean sample."
+      },
+      "df_sample_shape": [
+        4799,
+        103
+      ],
+      "output_bytes": 285895,
+      "output_gib": 0.00026626046746969223,
+      "seconds": 0.160745,
+      "note": "Phase 7 cleans per-application shards and preserves *_raw columns as strings. This is the main clean dataset checkpoint for visualization, leakage analysis, split, FS, training, and evaluation."
+    },
+    "http": {
+      "phase": 7,
+      "app": "http",
+      "status": "completed",
+      "mode": "app_aware_sharded",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase6_computed_features_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset\\app=http",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "raw_suffix": "_raw",
+      "keep_strings_for_raw": true,
+      "coerce_non_raw_objects_to_string": true,
+      "compute_diagnostics": false,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 1799,
+      "rows_out": 1799,
+      "raw_cols_count_max": 4,
+      "numeric_cols_count_min": 99,
+      "numeric_cols_count_max": 99,
+      "output_cols_min": 103,
+      "output_cols_max": 103,
+      "target_counts": {
+        "1": 492,
+        "0": 1307
+      },
+      "visualization_stats": {
+        "app": "http",
+        "rows_after_phase7": 1799,
+        "target_counts": {
+          "1": 492,
+          "0": 1307
+        },
+        "numeric_quantiles_by_target": {
+          "total_pkts": {
+            "0": {
+              "count": 1307,
+              "min": 0.0,
+              "q1": 2.0,
+              "median": 4.0,
+              "q3": 7.0,
+              "max": 79.0,
+              "mean": 5.352716143840857,
+              "std": 5.45948406227504
+            },
+            "1": {
+              "count": 492,
+              "min": 1.0,
+              "q1": 6.0,
+              "median": 9.0,
+              "q3": 11.0,
+              "max": 28.0,
+              "mean": 9.004065040650406,
+              "std": 4.743843222124327
+            }
+          },
+          "total_bytes": {
+            "0": {
+              "count": 1307,
+              "min": 0.0,
+              "q1": 176.0,
+              "median": 250.0,
+              "q3": 639.0,
+              "max": 58238.0,
+              "mean": 700.583779648049,
+              "std": 2845.5851290255027
+            },
+            "1": {
+              "count": 492,
+              "min": 60.0,
+              "q1": 575.0,
+              "median": 732.0,
+              "q3": 884.25,
+              "max": 18012.0,
+              "mean": 1152.30081300813,
+              "std": 2380.7969866465633
+            }
+          },
+          "duration": {
+            "0": {
+              "count": 1307,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 1.0,
+              "max": 219.0,
+              "mean": 1.8905891180038452,
+              "std": 14.4981689453125
+            },
+            "1": {
+              "count": 492,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "pkts_per_sec": {
+            "0": {
+              "count": 1307,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 5.0,
+              "max": 56.0,
+              "mean": 2.345185830027471,
+              "std": 4.383640319128803
+            },
+            "1": {
+              "count": 492,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "bytes_per_sec": {
+            "0": {
+              "count": 1307,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 389.41666666666663,
+              "max": 42889.0,
+              "mean": 310.8859500567281,
+              "std": 1970.0598375450354
+            },
+            "1": {
+              "count": 492,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          }
+        },
+        "quantile_source": "df_sample",
+        "notes": "These statistics are intended for Phase 9 plots so visualization does not need to reread raw data. Heatmaps still require a bounded df_clean sample."
+      },
+      "df_sample_shape": [
+        1799,
+        103
+      ],
+      "output_bytes": 234413,
+      "output_gib": 0.00021831411868333817,
+      "seconds": 0.144104,
+      "note": "Phase 7 cleans per-application shards and preserves *_raw columns as strings. This is the main clean dataset checkpoint for visualization, leakage analysis, split, FS, training, and evaluation."
+    },
+    "tls": {
+      "phase": 7,
+      "app": "tls",
+      "status": "completed",
+      "mode": "app_aware_sharded",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase6_computed_features_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset\\app=tls",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "raw_suffix": "_raw",
+      "keep_strings_for_raw": true,
+      "coerce_non_raw_objects_to_string": true,
+      "compute_diagnostics": false,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 2451,
+      "rows_out": 2451,
+      "raw_cols_count_max": 4,
+      "numeric_cols_count_min": 99,
+      "numeric_cols_count_max": 99,
+      "output_cols_min": 103,
+      "output_cols_max": 103,
+      "target_counts": {
+        "0": 2238,
+        "1": 213
+      },
+      "visualization_stats": {
+        "app": "tls",
+        "rows_after_phase7": 2451,
+        "target_counts": {
+          "0": 2238,
+          "1": 213
+        },
+        "numeric_quantiles_by_target": {
+          "total_pkts": {
+            "0": {
+              "count": 2238,
+              "min": 0.0,
+              "q1": 10.0,
+              "median": 10.0,
+              "q3": 12.0,
+              "max": 20669.0,
+              "mean": 27.78909740840036,
+              "std": 472.78262771751884
+            },
+            "1": {
+              "count": 213,
+              "min": 1.0,
+              "q1": 7.0,
+              "median": 8.0,
+              "q3": 10.0,
+              "max": 15451.0,
+              "mean": 194.31924882629107,
+              "std": 1343.8439475464338
+            }
+          },
+          "total_bytes": {
+            "0": {
+              "count": 2238,
+              "min": 0.0,
+              "q1": 822.0,
+              "median": 986.0,
+              "q3": 2222.0,
+              "max": 17937825.0,
+              "mean": 19320.987042001787,
+              "std": 457611.16288723197
+            },
+            "1": {
+              "count": 213,
+              "min": 60.0,
+              "q1": 694.0,
+              "median": 1001.0,
+              "q3": 3828.0,
+              "max": 12586172.0,
+              "mean": 185580.79812206572,
+              "std": 1186102.268693877
+            }
+          },
+          "duration": {
+            "0": {
+              "count": 2238,
+              "min": 0.0,
+              "q1": 1.0,
+              "median": 1.0,
+              "q3": 3.0,
+              "max": 5446.0,
+              "mean": 7.836461067199707,
+              "std": 154.04957580566406
+            },
+            "1": {
+              "count": 213,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "pkts_per_sec": {
+            "0": {
+              "count": 2238,
+              "min": 0.0,
+              "q1": 1.375,
+              "median": 5.0,
+              "q3": 10.0,
+              "max": 1476.3333333333333,
+              "mean": 7.286530447559291,
+              "std": 37.79000429659323
+            },
+            "1": {
+              "count": 213,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "bytes_per_sec": {
+            "0": {
+              "count": 2238,
+              "min": 0.0,
+              "q1": 118.75,
+              "median": 451.16666666666663,
+              "q3": 1067.0,
+              "max": 3642701.6666666665,
+              "mean": 3773.4132044079347,
+              "std": 84359.71789610278
+            },
+            "1": {
+              "count": 213,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          }
+        },
+        "quantile_source": "df_sample",
+        "notes": "These statistics are intended for Phase 9 plots so visualization does not need to reread raw data. Heatmaps still require a bounded df_clean sample."
+      },
+      "df_sample_shape": [
+        2451,
+        103
+      ],
+      "output_bytes": 362817,
+      "output_gib": 0.00033789966255426407,
+      "seconds": 0.137766,
+      "note": "Phase 7 cleans per-application shards and preserves *_raw columns as strings. This is the main clean dataset checkpoint for visualization, leakage analysis, split, FS, training, and evaluation."
+    },
+    "ssh": {
+      "phase": 7,
+      "app": "ssh",
+      "status": "completed",
+      "mode": "app_aware_sharded",
+      "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase6_computed_features_dataset",
+      "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset\\app=ssh",
+      "selected_apps": [
+        "dns",
+        "http",
+        "tls",
+        "ssh"
+      ],
+      "write_format": "parquet",
+      "parquet_engine": "pyarrow",
+      "parquet_compression": "snappy",
+      "raw_suffix": "_raw",
+      "keep_strings_for_raw": true,
+      "coerce_non_raw_objects_to_string": true,
+      "compute_diagnostics": false,
+      "shards_in": 1,
+      "shards_out": 1,
+      "rows_in": 24905,
+      "rows_out": 24905,
+      "raw_cols_count_max": 4,
+      "numeric_cols_count_min": 99,
+      "numeric_cols_count_max": 99,
+      "output_cols_min": 103,
+      "output_cols_max": 103,
+      "target_counts": {
+        "1": 7865,
+        "0": 17040
+      },
+      "visualization_stats": {
+        "app": "ssh",
+        "rows_after_phase7": 24905,
+        "target_counts": {
+          "1": 7865,
+          "0": 17040
+        },
+        "numeric_quantiles_by_target": {
+          "total_pkts": {
+            "0": {
+              "count": 17040,
+              "min": 0.0,
+              "q1": 10.0,
+              "median": 29.0,
+              "q3": 31.0,
+              "max": 22245.0,
+              "mean": 24.16361502347418,
+              "std": 173.71718588394947
+            },
+            "1": {
+              "count": 7865,
+              "min": 1.0,
+              "q1": 6.0,
+              "median": 8.0,
+              "q3": 10.0,
+              "max": 6855.0,
+              "mean": 15.50184361093452,
+              "std": 84.13573647219538
+            }
+          },
+          "total_bytes": {
+            "0": {
+              "count": 17040,
+              "min": 0.0,
+              "q1": 700.0,
+              "median": 5626.0,
+              "q3": 5778.0,
+              "max": 23496960.0,
+              "mean": 5940.426819248826,
+              "std": 187442.58643341417
+            },
+            "1": {
+              "count": 7865,
+              "min": 54.0,
+              "q1": 472.0,
+              "median": 700.0,
+              "q3": 1983.0,
+              "max": 7179980.0,
+              "mean": 2776.5726636999366,
+              "std": 81019.68075046426
+            }
+          },
+          "duration": {
+            "0": {
+              "count": 17040,
+              "min": 0.0,
+              "q1": 1.0,
+              "median": 12.0,
+              "q3": 15.0,
+              "max": 236.0,
+              "mean": 10.651350021362305,
+              "std": 16.319225311279297
+            },
+            "1": {
+              "count": 7865,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "pkts_per_sec": {
+            "0": {
+              "count": 17040,
+              "min": 0.0,
+              "q1": 1.7058823529411764,
+              "median": 2.2142857142857144,
+              "q3": 5.0,
+              "max": 122.22527472527473,
+              "mean": 3.916218802972421,
+              "std": 4.680566566518788
+            },
+            "1": {
+              "count": 7865,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          },
+          "bytes_per_sec": {
+            "0": {
+              "count": 17040,
+              "min": 0.0,
+              "q1": 327.4663742690058,
+              "median": 401.85714285714283,
+              "q3": 586.0384615384615,
+              "max": 145428.21276595743,
+              "mean": 619.5193739785994,
+              "std": 1664.9237602356388
+            },
+            "1": {
+              "count": 7865,
+              "min": 0.0,
+              "q1": 0.0,
+              "median": 0.0,
+              "q3": 0.0,
+              "max": 0.0,
+              "mean": 0.0,
+              "std": 0.0
+            }
+          }
+        },
+        "quantile_source": "df_sample",
+        "notes": "These statistics are intended for Phase 9 plots so visualization does not need to reread raw data. Heatmaps still require a bounded df_clean sample."
+      },
+      "df_sample_shape": [
+        24905,
+        103
+      ],
+      "output_bytes": 2646627,
+      "output_gib": 0.00246486347168684,
+      "seconds": 0.272125,
+      "note": "Phase 7 cleans per-application shards and preserves *_raw columns as strings. This is the main clean dataset checkpoint for visualization, leakage analysis, split, FS, training, and evaluation."
+    }
+  },
+  "seconds": 0.761206,
+  "note": "Phase 7 is app-aware and reads Phase 6 app partitions. It no longer expects attacks/benign folders."
+}

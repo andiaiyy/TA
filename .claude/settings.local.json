@@ -102,7 +102,21 @@
       "Bash(not exist *)",
       "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\svc_timing_diagnostic.py 2>&1)",
       "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_compute_eta.py)",
-      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_nb_extract.py)"
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_nb_extract.py)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -c \"from config.pipeline_registry import get_pipeline; e = get_pipeline\\('hikari2021.svc_pipeline'\\); print\\('stages:', e['stages']\\); from ui.views.run_experiment import _compute_progress_state; print\\('helper OK'\\)\")",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -c \"from config.pipeline_registry import PIPELINE_REGISTRY; print\\('Total pipelines:', len\\(PIPELINE_REGISTRY\\)\\); print\\('IDs:'\\); [print\\(' ', k\\) for k in PIPELINE_REGISTRY]; from contracts.dataset_schemas import DATASET_SCHEMAS; print\\('Datasets:', list\\(DATASET_SCHEMAS.keys\\(\\)\\)\\)\")",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -c \"import pyarrow, pandas; print\\('pyarrow:', pyarrow.__version__\\); print\\('pandas:', pandas.__version__\\); import sklearn, xgboost, tqdm, matplotlib, joblib; print\\('all sklearn/xgb/tqdm/mpl/joblib OK'\\)\")",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -c \"import fastparquet; print\\('fastparquet OK:', fastparquet.__version__\\)\" 2>&1)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\run_eve_14phase_standalone.py 2>&1)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\run_eve_14phase_standalone.py 2>&1)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\summarize_eve_14phase_run.py 2>&1)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_audit_leakage.py 2>&1 | Select-Object -First 200)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_audit_leakage.py 2>&1 | Select-Object -Last 60)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\run_eve_phases_1to4_only.py 2>&1 | Select-Object -Last 80)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\run_eve_phases_1to4_only.py 2>&1)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_cancel_stuck_eve.py 2>&1)",
+      "PowerShell($env:PYTHONIOENCODING=\"utf-8\"; .\\\\venv\\\\Scripts\\\\python.exe experiments\\\\_eve_rerun_4_pipelines.py 2>&1)",
+      "PowerShell(.\\\\venv\\\\Scripts\\\\python.exe -m pytest tests/test_parser.py -q --tb=short 2>&1)"
     ]
   }
 }

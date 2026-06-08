@@ -1,0 +1,51 @@
+{
+  "method": "PCA",
+  "model_name": "DT",
+  "status": "completed",
+  "updated_at": "2026-06-05T15:37:14.547657",
+  "fold_metrics": {
+    "1": {
+      "accuracy": 1.0,
+      "precision_attack": 1.0,
+      "recall_attack": 1.0,
+      "f1_attack": 1.0,
+      "auc": 1.0
+    },
+    "2": {
+      "accuracy": 1.0,
+      "precision_attack": 1.0,
+      "recall_attack": 1.0,
+      "f1_attack": 1.0,
+      "auc": 1.0
+    }
+  },
+  "holdout_metrics": {
+    "accuracy": 1.0,
+    "precision_attack": 1.0,
+    "recall_attack": 1.0,
+    "f1_attack": 1.0,
+    "auc": 1.0
+  },
+  "result_row": {
+    "App": "dns",
+    "Method": "PCA",
+    "Model": "DT",
+    "accuracy": 1.0,
+    "accuracy_std": 0.0,
+    "precision_attack": 1.0,
+    "recall_attack": 1.0,
+    "f1_attack": 1.0,
+    "auc": 1.0,
+    "cv_folds": 2,
+    "train_rows": 460,
+    "train_features": 53,
+    "holdout_accuracy": 1.0,
+    "holdout_precision_attack": 1.0,
+    "holdout_recall_attack": 1.0,
+    "holdout_f1_attack": 1.0,
+    "holdout_auc": 1.0,
+    "test_rows": 114,
+    "model_checkpoint": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase13_train\\app=dns\\checkpoints\\PCA\\DT\\final_model.joblib",
+    "elapsed_seconds": 0.23522479999883217
+  }
+}

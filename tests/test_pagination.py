@@ -11,7 +11,7 @@ def db_with_experiments(tmp_path):
     init_db(db_path)
     for i in range(25):
         create_experiment(
-            f"exp-{i:03d}", "CICIDS2017", "/d.csv", f"hash{i}", "p.rf",
+            f"exp-{i:03d}", "HIKARI2021", "/d.csv", f"hash{i}", "p.rf",
             f"2026-01-{i+1:02d}T00:00:00Z", db_path,
         )
     return db_path

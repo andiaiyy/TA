@@ -1,0 +1,45 @@
+{
+  "phase": 8,
+  "app": "tls",
+  "status": "completed",
+  "mode": "sample_csv",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase7_clean_dataset",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=tls",
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "rows_seen": 2451,
+  "shards_seen": 1,
+  "input_bytes": 362817,
+  "input_gib": 0.00033789966255426407,
+  "manifest_path": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=tls\\manifest.csv",
+  "schema_path": "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=tls\\schema.json",
+  "export_paths": [
+    "D:\\Program\\TA\\storage\\eve_v2_work\\results\\phase8_export_dataset\\app=tls\\sample\\eve_processed_tls_NA_sample2451.csv"
+  ],
+  "export_bytes": 1865535,
+  "export_mb": 1.7791128158569336,
+  "sample_rows_requested": 200000,
+  "sample_rows_exported": 2451,
+  "sample_shape": [
+    2451,
+    103
+  ],
+  "target_counts_input": {
+    "0": 2238,
+    "1": 213
+  },
+  "target_counts_sample": {
+    "0": 2238,
+    "1": 213
+  },
+  "stratify": true,
+  "stratify_col": "Target",
+  "seed": 42,
+  "include_columns": null,
+  "seconds": 0.249236,
+  "note": "Phase 8 exports manifest/schema and optional samples per application. The main full clean checkpoint remains Phase 7. Avoid copy_shards unless explicitly needed."
+}

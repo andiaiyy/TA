@@ -1,0 +1,29 @@
+{
+  "input_file": "D:\\Program\\TA\\storage\\datasets\\eve_sample_1000000.jsonl",
+  "work_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check",
+  "timings": [
+    {
+      "phase": 1,
+      "elapsed_sec": 28.99201819999871,
+      "ok": true
+    },
+    {
+      "phase": 2,
+      "elapsed_sec": 5.261615900002653,
+      "ok": true
+    },
+    {
+      "phase": 3,
+      "elapsed_sec": 2.559446699997352,
+      "ok": true
+    },
+    {
+      "phase": 4,
+      "elapsed_sec": 5.518267899999046,
+      "ok": true
+    }
+  ],
+  "total_sec": 42.33134869999776,
+  "stopped_after_phase": 4,
+  "traceback": null
+}

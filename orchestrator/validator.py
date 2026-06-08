@@ -41,7 +41,7 @@ def validate_dataset(df: pd.DataFrame, dataset_type: str) -> ValidationResult:
 
     Args:
         df: Parsed DataFrame (headers already stripped).
-        dataset_type: e.g. "CICIDS2017".
+        dataset_type: e.g. "HIKARI2021".
 
     Returns:
         ValidationResult with all fields populated.

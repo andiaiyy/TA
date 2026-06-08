@@ -3,7 +3,6 @@ Pipeline registry — maps pipeline_id to class + metadata.
 
 Adding a new pipeline: create the file, add one entry here. That's it.
 """
-from pipelines.cicids2017.rf_paper_a import RFPaperAPipeline
 from pipelines.hikari2021.rfc_pipeline import HikariRFCPipeline
 from pipelines.hikari2021.dt_pipeline import HikariDTPipeline
 from pipelines.hikari2021.knn_pipeline import HikariKNNPipeline
@@ -16,19 +15,18 @@ from pipelines.eve_suricata.knn_pipeline import EveKNNPipeline
 from pipelines.eve_suricata.xgb_pipeline import EveXGBPipeline
 
 PIPELINE_REGISTRY = {
-    "cicids2017.rf_paper_a": {
-        "dataset_type": "CICIDS2017",
-        "name": "Random Forest + RFE — Sharafaldin et al. (2018)",
-        "paper": "Sharafaldin et al., ICISSP 2018",
-        "algorithm": "Random Forest",
-        "class": RFPaperAPipeline,
-    },
     "hikari2021.rfc_pipeline": {
         "dataset_type": "HIKARI2021",
         "name": "Random Forest + RandomUnderSampler — HIKARI2021",
         "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
         "algorithm": "Random Forest",
         "class": HikariRFCPipeline,
+        "stages": [
+            "Preprocessing",
+            "Balancing & scaling",
+            "Training",
+            "Computing learning curve",
+        ],
     },
     "hikari2021.dt_pipeline": {
         "dataset_type": "HIKARI2021",
@@ -36,6 +34,12 @@ PIPELINE_REGISTRY = {
         "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
         "algorithm": "Decision Tree",
         "class": HikariDTPipeline,
+        "stages": [
+            "Preprocessing",
+            "Training",
+            "Evaluating",
+            "Computing learning curve",
+        ],
     },
     "hikari2021.knn_pipeline": {
         "dataset_type": "HIKARI2021",
@@ -43,6 +47,12 @@ PIPELINE_REGISTRY = {
         "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
         "algorithm": "K-Nearest Neighbors",
         "class": HikariKNNPipeline,
+        "stages": [
+            "Preprocessing",
+            "Balancing & scaling",
+            "Training",
+            "Computing learning curve",
+        ],
     },
     "hikari2021.svc_pipeline": {
         "dataset_type": "HIKARI2021",
@@ -50,6 +60,13 @@ PIPELINE_REGISTRY = {
         "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
         "algorithm": "SVC",
         "class": HikariSVCPipeline,
+        "stages": [
+            "Preprocessing",
+            "Scaling",
+            "Training (SVC — slow on large datasets)",
+            "Evaluating",
+            "Computing learning curve",
+        ],
     },
     "hikari2021.nbgc_pipeline": {
         "dataset_type": "HIKARI2021",
@@ -57,6 +74,11 @@ PIPELINE_REGISTRY = {
         "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
         "algorithm": "Gaussian Naive Bayes",
         "class": HikariNBGCPipeline,
+        "stages": [
+            "Preprocessing",
+            "Training",
+            "Computing learning curve",
+        ],
     },
     "hikari2021.lr_pipeline": {
         "dataset_type": "HIKARI2021",
@@ -64,6 +86,12 @@ PIPELINE_REGISTRY = {
         "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
         "algorithm": "Logistic Regression",
         "class": HikariLRPipeline,
+        "stages": [
+            "Preprocessing",
+            "Scaling & PCA",
+            "Training",
+            "Computing learning curve",
+        ],
     },
     "eve_suricata.rfc": {
         "dataset_type": "EVE_SURICATA",
@@ -71,6 +99,10 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS Pipeline",
         "algorithm": "Random Forest",
         "class": EveRFCPipeline,
+        "stages": [
+            "Running phases 1-9 (preprocessing)",
+            "Training & evaluation",
+        ],
     },
     "eve_suricata.dt": {
         "dataset_type": "EVE_SURICATA",
@@ -78,6 +110,10 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS Pipeline",
         "algorithm": "Decision Tree",
         "class": EveDTPipeline,
+        "stages": [
+            "Running phases 1-9 (preprocessing)",
+            "Training & evaluation",
+        ],
     },
     "eve_suricata.knn": {
         "dataset_type": "EVE_SURICATA",
@@ -85,6 +121,10 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS Pipeline",
         "algorithm": "K-Nearest Neighbors",
         "class": EveKNNPipeline,
+        "stages": [
+            "Running phases 1-9 (preprocessing)",
+            "Training & evaluation",
+        ],
     },
     "eve_suricata.xgb": {
         "dataset_type": "EVE_SURICATA",
@@ -92,6 +132,10 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS Pipeline",
         "algorithm": "XGBoost",
         "class": EveXGBPipeline,
+        "stages": [
+            "Running phases 1-9 (preprocessing)",
+            "Training & evaluation",
+        ],
     },
 }
 

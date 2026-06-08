@@ -41,7 +41,6 @@ def render() -> None:
 
     tree = f"""{storage_rel}/
 ├── datasets/                  <- LETAKKAN BERKAS DATASET DI SINI (read-only saat eksekusi)
-│   ├── cicids2017_friday.csv         (contoh: dataset CICIDS2017)
 │   ├── ALLFLOWMETER_HIKARI2021.csv   (contoh: dataset HIKARI2021)
 │   └── eve_100k.json                 (contoh: dataset EVE Suricata, NDJSON)
 ├── artifacts/                 <- hasil eksperimen tersimpan otomatis di sini
@@ -72,7 +71,7 @@ def render() -> None:
     st.header("Alur Penggunaan")
 
     st.markdown(
-        f"1. **Siapkan dataset.** Letakkan berkas CSV (CICIDS2017/HIKARI2021) atau "
+        f"1. **Siapkan dataset.** Letakkan berkas CSV (HIKARI2021) atau "
         f"NDJSON (EVE Suricata) di `{datasets_rel}/`.  \n"
         "2. **Buka halaman Run Experiment** dari menu sidebar.  \n"
         "3. **Pilih jenis dataset** dengan menekan salah satu kartu tipe dataset. "
@@ -97,14 +96,6 @@ def render() -> None:
         "Hanya dua ekstensi yang diterima: `.csv` dan `.json` (NDJSON, satu objek JSON "
         "per baris). Validator menolak berkas selain itu dan menolak berkas di luar "
         "direktori dataset sebagai pengaman jalur."
-    )
-
-    st.subheader("CICIDS2017")
-    st.markdown(
-        "Format: CSV.  \n"
-        "Kolom label: `Label` (nama kelas: `BENIGN` dan kategori serangan).  \n"
-        "Berkas harus berisi 78 kolom fitur flow standar (lihat "
-        "`contracts/dataset_schemas.py` untuk daftar lengkap)."
     )
 
     st.subheader("HIKARI2021 (varian ALLFLOWMETER)")

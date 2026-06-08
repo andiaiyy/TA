@@ -1,0 +1,91 @@
+{
+  "phase": 4,
+  "app": "tls",
+  "status": "completed",
+  "input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase2_app_dataset\\app=tls",
+  "output_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase4_labeled_dataset\\app=tls",
+  "phase3_input_dir": "D:\\Program\\TA\\storage\\eve_v2_fulldata_check\\results\\phase3_probing",
+  "has_probing_features": true,
+  "probing_feature_rows": 296,
+  "compromised_ip_file": null,
+  "compromised_ip_count": 0,
+  "selected_apps": [
+    "dns",
+    "http",
+    "tls",
+    "ssh"
+  ],
+  "timestamp_col": "timestamp",
+  "window_minutes": 5,
+  "false_positive_alert_categories": [
+    "generic protocol decode"
+  ],
+  "require_alert_severity": true,
+  "use_probing_evidence": true,
+  "probe_score_threshold": 3.0,
+  "use_is_possible_probe_flag": true,
+  "use_compromised_ip_evidence": true,
+  "shards_read": 5,
+  "shards_written": 5,
+  "rows_read": 69332,
+  "rows_written": 69332,
+  "target_counts": {
+    "0": 59128,
+    "1": 10204
+  },
+  "label_source_counts": {
+    "no_malicious_evidence": 59128,
+    "alert": 10204
+  },
+  "evidence_counts": {
+    "alert": 10204,
+    "compromised_ip": 0,
+    "probe": 0
+  },
+  "alert_severity_by_target": {
+    "0": {
+      "0": 59128,
+      "3": 0
+    },
+    "1": {
+      "0": 0,
+      "3": 10204
+    }
+  },
+  "visualization_stats": {
+    "app": "tls",
+    "rows_after_phase4": 69332,
+    "target_counts": {
+      "0": 59128,
+      "1": 10204
+    },
+    "label_source_counts": {
+      "no_malicious_evidence": 59128,
+      "alert": 10204
+    },
+    "evidence_counts": {
+      "alert": 10204,
+      "compromised_ip": 0,
+      "probe": 0
+    },
+    "alert_severity_by_target": {
+      "0": {
+        "0": 59128,
+        "3": 0
+      },
+      "1": {
+        "0": 0,
+        "3": 10204
+      }
+    }
+  },
+  "output_format": "parquet",
+  "output_bytes": 3046832,
+  "output_gib": 0.0028375834226608276,
+  "df_sample_shape": [
+    69332,
+    41
+  ],
+  "seconds": 1.423449,
+  "note": "Phase 4 is the first phase that finalizes Target. Earlier labels are treated as evidence/staging, not final ground truth."
+}

@@ -54,9 +54,9 @@ def _run_task_with_patched_update_state(update_state_mock):
          patch.object(task, "update_state", new=update_state_mock):
         result = task.run(
             experiment_id="exp-progress",
-            dataset_type="CICIDS2017",
+            dataset_type="HIKARI2021",
             dataset_path="/fake/path.csv",
-            pipeline_id="cicids2017.rf_paper_a",
+            pipeline_id="hikari2021.nbgc_pipeline",
         )
     return result, mock_set_finished
 

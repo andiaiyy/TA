@@ -1,0 +1,2 @@
+app,shard_index,path,rows,cols,size_bytes,format
+dns,1,D:\Program\TA\storage\eve_v2_work\results\phase7_clean_dataset\app=dns\part-000001.parquet,4799,103,285895,.parquet

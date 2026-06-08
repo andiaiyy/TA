@@ -1,0 +1,13 @@
+application,event_type,count
+dns,flow,113676
+dns,dns,62785
+dns,quic,1185
+dns,alert,8
+http,flow,14727
+http,alert,208
+tls,flow,56779
+tls,alert,10204
+tls,quic,1567
+tls,anomaly,780
+tls,tls,2
+ssh,flow,5135
