@@ -218,7 +218,7 @@ def _dist_attack_benign(y: pd.Series | np.ndarray) -> dict[str, int]:
 
 def _print_phase10_start_banner(*, cfg: Phase10Config, phase10_t0: float) -> None:
     print("\n" + "=" * 80)
-    print("🤖 PHASE 10: ML MODEL TRAINING & EVALUATION (CPU-SAFE, LEAKAGE-SAFE)")
+    print("PHASE 10: ML MODEL TRAINING & EVALUATION (CPU-SAFE, LEAKAGE-SAFE)")
     print("=" * 80)
     print(f"📌 Phase10 start     : {_ts()}")
     print(f"📌 Prefer disk input : {cfg.prefer_disk_inputs}")
