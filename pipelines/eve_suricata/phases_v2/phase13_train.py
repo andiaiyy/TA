@@ -1086,7 +1086,7 @@ def phase13_train_for_app(
         _json_dump(summary, metrics_dir / f"phase13_train_summary_{app}.json")
         return pd.DataFrame(), summary
 
-    print(f"\n🤖 PHASE 13: Training for app={app}")
+    print(f"\nPHASE 13: Training for app={app}")
     print(f"   Train shards : {len(train_shards):,}")
     print(f"   Test shards  : {len(test_shards):,}")
     print(f"   Output       : {out_app_dir}")
@@ -1477,9 +1477,9 @@ def phase13_train(
     *,
     cfg: Phase13TrainConfig,
 ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Any]]:
-    print("\n" + "🤖 " + "=" * 76)
+    print("\n" + "=" * 78)
     print("PHASE 13: TRAINING (APP-AWARE)")
-    print("🤖 " + "=" * 76)
+    print("=" * 78)
 
     t0 = time.perf_counter()
 
@@ -1680,7 +1680,7 @@ def phase13_train_ram(
     if df_train_loaded.empty:
         raise RuntimeError(f"Phase 13 RAM train sample is empty for app={app}.")
 
-    print(f"\n🤖 PHASE 13 RAM: Training for app={app}")
+    print(f"\nPHASE 13 RAM: Training for app={app}")
     print(f"   Train rows : {len(df_train_loaded):,} / source {len(df_train):,}")
     print(f"   Test rows  : {len(df_test_loaded):,} / source {0 if df_test is None else len(df_test):,}")
     print(f"   Output     : {out_app_dir}")

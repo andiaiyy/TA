@@ -408,7 +408,7 @@ def _section_4_environment(story, styles, ctx):
         ["Platform", _none_or(ctx["platform_str"])],
         ["Docker", "Ya" if ctx["is_docker"] else ("Tidak" if ctx["is_docker"] is False else "[tidak tercatat]")],
         ["Docker image version", _none_or(ctx["docker_image_version"])],
-        ["random_state (invariant platform)", "42 (terkunci untuk seluruh operasi stokastik per CLAUDE.md)"],
+        ["random_state (invariant platform)", "42 (terkunci untuk seluruh operasi stokastik)"],
         ["Dataset SHA-256", ctx["dataset_hash"]],
     ]
     story.append(_kv_table(rows))

@@ -1,4 +1,0 @@
-- [Project context: IDS Research Pipeline](project_ids_pipeline.md) — Streamlit + Celery + SQLite ML execution system, thesis project, 7 fixed pipelines for CICIDS2017/HIKARI2021
-- [Recurring antipattern: SQLite shared via Docker bind mount](antipattern_sqlite_docker_volume.md) — WAL + bind-mount fsync hazards, multi-process correctness
-- [Recurring antipattern: Streamlit cleanup-on-rerun](antipattern_streamlit_cleanup_on_rerun.md) — work executed at module top-level fires on every interaction
-- [Recurring antipattern: bare-except swallowing set_failed](antipattern_swallow_set_failed.md) — losing terminal status updates silently
