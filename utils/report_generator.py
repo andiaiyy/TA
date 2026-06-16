@@ -802,15 +802,26 @@ def _render_roc_curve(metrics: dict) -> io.BytesIO:
 
 
 def _render_feature_importance(feature_importance: list[dict]) -> io.BytesIO:
-    """Render feature importance bar chart as PNG and return as BytesIO."""
-    fig, ax = plt.subplots(figsize=(8, 4))
+    """Render feature importance bar chart as PNG and return as BytesIO.
+
+    Limited to the top 20 features for readability. Title states the limit
+    and the total count explicitly when truncation occurs, so the PDF reader
+    cannot mistake the chart for the full feature set.
+    """
+    n_total = len(feature_importance)
+    top_n = 20
+    fi = feature_importance[:top_n]
+    fig, ax = plt.subplots(figsize=(8, max(4, len(fi) * 0.3)))
     ax.barh(
-        [item["feature"] for item in reversed(feature_importance)],
-        [item["importance"] for item in reversed(feature_importance)],
+        [item["feature"] for item in reversed(fi)],
+        [item["importance"] for item in reversed(fi)],
         color="#2563EB",
     )
     ax.set_xlabel("Importance")
-    ax.set_title("Feature Importance")
+    title = f"Top {len(fi)} Feature Importance"
+    if n_total > len(fi):
+        title += f" (of {n_total} total)"
+    ax.set_title(title)
     fig.tight_layout()
 
     buf = io.BytesIO()
