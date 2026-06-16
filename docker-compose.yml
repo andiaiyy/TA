@@ -41,6 +41,8 @@ services:
       --loglevel=info
       --pool=solo
       --concurrency=1
+    # RAM cap for the cbr EVE pipeline (validated resource budget ~3.53 GB).
+    mem_limit: 3500m
     volumes:
       - ./storage:/app/storage          # shared storage with UI
     depends_on:
