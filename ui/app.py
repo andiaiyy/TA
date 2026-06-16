@@ -32,6 +32,43 @@ _startup_cleanup()
 
 st.set_page_config(page_title="IDS Research Pipeline System", page_icon="", layout="wide")
 
+# ── Small-screen CSS (media query gated; desktop untouched) ──────────────
+# All rules are scoped to viewport widths <= 768px (tablet portrait & phone).
+# Desktop layout (layout="wide", >768px) is the primary target and is NOT
+# affected by any rule below. Rules only:
+#   1. Trim the wide page padding so content does not waste edges.
+#   2. Shrink h1/h2 so headings do not dominate the small viewport.
+#   3. Shrink metric value font so 3-4 metric cards fit without overflow.
+#   4. Allow horizontal scroll on dataframes, AgGrid, and column rows that
+#      overflow — safer than restacking, which depends on Streamlit DOM
+#      internals that can shift between versions.
+# Add !important only where needed to defeat Streamlit's default inline styles.
+st.markdown(
+    """
+<style>
+@media (max-width: 768px) {
+    .block-container {
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-top: 1rem !important;
+    }
+    h1 { font-size: 1.5rem !important; }
+    h2 { font-size: 1.25rem !important; }
+    h3 { font-size: 1.1rem !important; }
+    [data-testid="stMetricValue"] { font-size: 1.25rem !important; }
+    [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
+    [data-testid="stDataFrame"], .stDataFrame, .ag-theme-streamlit, .ag-root-wrapper {
+        overflow-x: auto !important;
+    }
+    [data-testid="stHorizontalBlock"] {
+        overflow-x: auto !important;
+    }
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 # ── Sidebar navigation ────────────────────────────────────────────────────
 # Centralised routing: option_menu returns the selected label, and a single
 # dispatch table below routes to each page's render() function. The four

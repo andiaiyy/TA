@@ -783,29 +783,58 @@ def _display_results(result: dict):
 
     full = get_experiment_metrics(eid) or m
 
-    # Confusion Matrix
-    if "confusion_matrix" in m:
-        st.subheader("Confusion Matrix")
-        cm = np.array(m["confusion_matrix"])
-        lm = result.get("label_mapping", {})
-        labels = sorted(lm.keys(), key=lambda k: lm[k]) if lm else []
-        fig, ax = plt.subplots(figsize=(6, 5))
-        im = ax.imshow(cm, cmap='Blues')
-        plt.colorbar(im, ax=ax)
-        if labels:
-            ax.set_xticks(range(len(labels)))
-            ax.set_yticks(range(len(labels)))
-            ax.set_xticklabels([str(l) for l in labels], rotation=45, ha='right')
-            ax.set_yticklabels([str(l) for l in labels])
-        for i in range(cm.shape[0]):
-            for j in range(cm.shape[1]):
-                ax.text(j, i, format(cm[i, j], 'd'), ha="center", va="center",
-                        color="white" if cm[i, j] > cm.max() / 2 else "black")
-        ax.set_ylabel("Actual")
-        ax.set_xlabel("Predicted")
-        fig.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+    # Confusion Matrix + Feature Importance side by side to save vertical
+    # space and prevent the feature-importance chart from sprawling.
+    has_cm = "confusion_matrix" in m
+    has_fi = bool(full.get("feature_importance"))
+    if has_cm or has_fi:
+        st.subheader("Confusion Matrix & Feature Importance")
+        col_cm, col_fi = st.columns(2)
+        if has_cm:
+            with col_cm:
+                cm = np.array(m["confusion_matrix"])
+                lm = result.get("label_mapping", {})
+                labels = sorted(lm.keys(), key=lambda k: lm[k]) if lm else []
+                fig, ax = plt.subplots(figsize=(5, 4))
+                im = ax.imshow(cm, cmap='Blues')
+                plt.colorbar(im, ax=ax)
+                if labels:
+                    ax.set_xticks(range(len(labels)))
+                    ax.set_yticks(range(len(labels)))
+                    ax.set_xticklabels([str(l) for l in labels], rotation=45, ha='right')
+                    ax.set_yticklabels([str(l) for l in labels])
+                for i in range(cm.shape[0]):
+                    for j in range(cm.shape[1]):
+                        ax.text(j, i, format(cm[i, j], 'd'), ha="center", va="center",
+                                color="white" if cm[i, j] > cm.max() / 2 else "black")
+                ax.set_ylabel("Actual")
+                ax.set_xlabel("Predicted")
+                fig.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+        if has_fi:
+            with col_fi:
+                fi_full = full["feature_importance"]
+                n_total = len(fi_full)
+                top_n = 20
+                fi = fi_full[:top_n]
+                fig, ax = plt.subplots(figsize=(5, max(4, len(fi) * 0.3)))
+                ax.barh(
+                    [x["feature"] for x in reversed(fi)],
+                    [x["importance"] for x in reversed(fi)],
+                    color="#2563EB",
+                )
+                ax.set_xlabel("Importance")
+                title = f"Top {len(fi)} Feature Importance"
+                if n_total > len(fi):
+                    title += f" (of {n_total} total)"
+                ax.set_title(title, fontsize=11)
+                fig.tight_layout()
+                st.pyplot(fig)
+                plt.close(fig)
+        elif has_cm:
+            with col_fi:
+                st.caption("Feature importance tidak tersedia untuk algoritma ini.")
 
     # ROC Curve
     if "roc_auc" in full:
@@ -834,17 +863,8 @@ def _display_results(result: dict):
         with col2:
             st.metric("ROC-AUC", f"{full['roc_auc']:.4f}")
 
-    # Feature Importance
-    if "feature_importance" in full and full["feature_importance"]:
-        st.subheader("Feature Importance")
-        fi = full["feature_importance"]
-        fig, ax = plt.subplots(figsize=(8, max(3, len(fi) * 0.3)))
-        ax.barh([x["feature"] for x in reversed(fi[:20])],
-                [x["importance"] for x in reversed(fi[:20])], color="#2563EB")
-        ax.set_xlabel("Importance")
-        fig.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
+    # (Feature Importance moved into the Confusion Matrix block above to
+    # share a two-column row; this avoids duplicate rendering here.)
 
     # Per-Class Report
     if "classification_report" in full:

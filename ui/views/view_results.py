@@ -362,48 +362,67 @@ def _render_detail(selected_id: str):
             if "roc_auc" in metrics:
                 st.metric("ROC-AUC", f"{metrics['roc_auc']:.4f}")
 
-            if "confusion_matrix" in metrics:
-                cm = np.array(metrics["confusion_matrix"])
-                labels = []
-                if metadata and metadata.get("label_mapping"):
-                    labels = sorted(
-                        metadata["label_mapping"].keys(),
-                        key=lambda k: metadata["label_mapping"][k],
-                    )
-                fig, ax = plt.subplots(figsize=(5, 4))
-                ax.imshow(cm, cmap='Blues')
-                if labels:
-                    ax.set_xticks(range(len(labels)))
-                    ax.set_yticks(range(len(labels)))
-                    ax.set_xticklabels(labels, rotation=45, ha='right')
-                    ax.set_yticklabels(labels)
-                for i in range(cm.shape[0]):
-                    for j in range(cm.shape[1]):
-                        ax.text(j, i, format(cm[i, j], 'd'), ha="center", va="center",
-                                color="white" if cm[i, j] > cm.max() / 2 else "black")
-                ax.set_ylabel("Actual")
-                ax.set_xlabel("Predicted")
-                fig.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
+            # Confusion Matrix + Feature Importance side by side to save
+            # vertical space. Pipelines without feature importance (e.g. KNN)
+            # get a caption in the right column instead of an empty plot.
+            has_cm = "confusion_matrix" in metrics
+            has_fi = bool(metrics.get("feature_importance"))
+            if has_cm or has_fi:
+                col_left, col_right = st.columns(2)
+                if has_cm:
+                    with col_left:
+                        cm = np.array(metrics["confusion_matrix"])
+                        labels = []
+                        if metadata and metadata.get("label_mapping"):
+                            labels = sorted(
+                                metadata["label_mapping"].keys(),
+                                key=lambda k: metadata["label_mapping"][k],
+                            )
+                        fig, ax = plt.subplots(figsize=(5, 4))
+                        ax.imshow(cm, cmap='Blues')
+                        if labels:
+                            ax.set_xticks(range(len(labels)))
+                            ax.set_yticks(range(len(labels)))
+                            ax.set_xticklabels(labels, rotation=45, ha='right')
+                            ax.set_yticklabels(labels)
+                        for i in range(cm.shape[0]):
+                            for j in range(cm.shape[1]):
+                                ax.text(j, i, format(cm[i, j], 'd'), ha="center", va="center",
+                                        color="white" if cm[i, j] > cm.max() / 2 else "black")
+                        ax.set_ylabel("Actual")
+                        ax.set_xlabel("Predicted")
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        plt.close(fig)
+                if has_fi:
+                    with col_right:
+                        fi_full = metrics["feature_importance"]
+                        n_total = len(fi_full)
+                        top_n = 20
+                        fi = fi_full[:top_n]
+                        fig, ax = plt.subplots(figsize=(5, max(4, len(fi) * 0.3)))
+                        ax.barh(
+                            [x["feature"] for x in reversed(fi)],
+                            [x["importance"] for x in reversed(fi)],
+                            color="#2563EB",
+                        )
+                        ax.set_xlabel("Importance")
+                        title = f"Top {len(fi)} Feature Importance"
+                        if n_total > len(fi):
+                            title += f" (of {n_total} total)"
+                        ax.set_title(title, fontsize=11)
+                        fig.tight_layout()
+                        st.pyplot(fig)
+                        plt.close(fig)
+                elif has_cm:
+                    with col_right:
+                        st.caption("Feature importance tidak tersedia untuk algoritma ini.")
 
             if "classification_report" in metrics:
                 report = metrics["classification_report"]
                 rows = {k: v for k, v in report.items() if isinstance(v, dict)}
                 if rows:
                     st.dataframe(pd.DataFrame(rows).T.round(4), use_container_width=True)
-
-            if "feature_importance" in metrics:
-                fi = metrics["feature_importance"]
-                fig, ax = plt.subplots(figsize=(7, 3))
-                ax.barh(
-                    [x["feature"] for x in reversed(fi)],
-                    [x["importance"] for x in reversed(fi)],
-                    color="#2563EB",
-                )
-                fig.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
 
         # Process Log — captured pipeline stdout, persisted in metrics.json
         if "process_log" in metrics and metrics["process_log"]:
