@@ -1,0 +1,13 @@
+# Port list for pre-pipeline app splitting.
+# This file is the single source of truth for port fallback.
+# Format: app=comma-separated-ports
+
+# Detection priority in split_eve_by_app_incremental.py:
+# 1. app_proto
+# 2. event_type
+# 3. src_port/dest_port fallback using these ports
+
+dns=53
+http=80,8000,8008,8080,8888
+tls=443,8443
+ssh=22
