@@ -1,10 +1,14 @@
 """
-Integration tests for EVE/Suricata pipeline wrappers.
+Tests for the EVE/Suricata pipeline family.
 
-These tests run the FULL 9-phase preprocessing chain — expect several minutes
-per test, not seconds. All tests are skipped when the EVE dataset is absent.
+The EVE family is now the **cbr 14-phase anti-leakage** pipeline (`eve_cbr.*`).
+The legacy 7-phase pipelines (`eve_suricata.*`) were archived (recoverable)
+under ``pipelines/_archive/eve_suricata_7phase/`` and are no longer registered.
 
-Expected dataset: storage/datasets/eve_100k.json  (NDJSON, one object per line)
+Schema / parser / validator tests are dataset-format tests and remain.
+Full cbr pipeline execution (split TLS → 14 phases → natural-holdout metrics)
+needs the full 1M EVE dataset and ~80s; it is covered by the Docker integration
+checkpoint (STAGE 4a/4b), not by this fast unit-test module.
 """
 import json as _json
 import sys
@@ -17,8 +21,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from contracts.pipeline_contracts import PipelineInput
 
-_EVE_PATH = Path("storage/datasets/eve_100k.json")
-_MIN_RECORDS = 500   # minimum viable record count for Phase 1 to produce both classes
+# eve_100k.json is a JSON array (not NDJSON); use the line-delimited .ndjson.
+_EVE_PATH = Path("storage/datasets/eve_100k.ndjson")
+_MIN_RECORDS = 500   # minimum viable record count for both classes
 
 
 # ---------------------------------------------------------------------------
@@ -27,11 +32,7 @@ _MIN_RECORDS = 500   # minimum viable record count for Phase 1 to produce both c
 
 @pytest.fixture(scope="session")
 def small_eve_ndjson(tmp_path_factory):
-    """
-    Write the first 2000 valid NDJSON records to a temp file.
-    Scoped to session so all tests share one preprocessing run.
-    Skips if the dataset is not present.
-    """
+    """First 2000 valid NDJSON records to a temp file; skip if dataset absent."""
     if not _EVE_PATH.exists():
         pytest.skip(f"EVE dataset not found at {_EVE_PATH}")
 
@@ -61,21 +62,8 @@ def small_eve_ndjson(tmp_path_factory):
     return str(out)
 
 
-@pytest.fixture(scope="session")
-def eve_input(small_eve_ndjson, tmp_path_factory):
-    """PipelineInput with dataset_path pointing to small NDJSON fixture."""
-    import config.settings as _s
-    _s.BASE_DIR = str(tmp_path_factory.getbasetemp().parent)
-    return PipelineInput(
-        df=pd.DataFrame({"_placeholder": [1]}),
-        label_column="Target",
-        dataset_type="EVE_SURICATA",
-        dataset_path=small_eve_ndjson,
-    )
-
-
 # ---------------------------------------------------------------------------
-# Schema / validator tests (fast)
+# Schema test (fast)
 # ---------------------------------------------------------------------------
 
 def test_eve_schema_registered():
@@ -87,40 +75,75 @@ def test_eve_schema_registered():
     assert "expected_top_level_keys" in schema
 
 
-def test_eve_pipelines_in_registry():
+# ---------------------------------------------------------------------------
+# Registry — EVE family is now cbr; 7-phase is archived/unregistered
+# ---------------------------------------------------------------------------
+
+def test_eve_cbr_pipelines_in_registry():
     from config.pipeline_registry import PIPELINE_REGISTRY
-    for pid in ("eve_suricata.rfc", "eve_suricata.dt", "eve_suricata.knn", "eve_suricata.xgb"):
+    for pid in ("eve_cbr.rfc", "eve_cbr.dt", "eve_cbr.lsvc", "eve_cbr.xgb"):
         assert pid in PIPELINE_REGISTRY
         assert PIPELINE_REGISTRY[pid]["dataset_type"] == "EVE_SURICATA"
 
 
-def test_rfc_get_info():
-    from pipelines.eve_suricata.rfc_pipeline import EveRFCPipeline
-    info = EveRFCPipeline().get_info()
-    assert "paper" in info
-    assert "algorithm" in info
-    assert "preprocessing_steps" in info
-    assert len(info["preprocessing_steps"]) >= 5
+def test_legacy_7phase_unregistered():
+    from config.pipeline_registry import PIPELINE_REGISTRY
+    for pid in ("eve_suricata.rfc", "eve_suricata.dt", "eve_suricata.knn", "eve_suricata.xgb"):
+        assert pid not in PIPELINE_REGISTRY
 
 
-def test_dt_get_info():
-    from pipelines.eve_suricata.dt_pipeline import EveDTPipeline
-    info = EveDTPipeline().get_info()
-    assert info["algorithm"] == "Decision Tree"
+def test_registry_composition():
+    """Registry is exactly 6 HIKARI + 4 eve_cbr = 10 pipelines."""
+    from config.pipeline_registry import PIPELINE_REGISTRY as R
+    hikari = [k for k in R if k.startswith("hikari2021.")]
+    cbr = [k for k in R if k.startswith("eve_cbr.")]
+    suricata = [k for k in R if k.startswith("eve_suricata.")]
+    assert len(hikari) == 6
+    assert len(cbr) == 4
+    assert len(suricata) == 0
+    assert len(R) == 10
 
 
-def test_knn_get_info():
-    from pipelines.eve_suricata.knn_pipeline import EveKNNPipeline
-    info = EveKNNPipeline().get_info()
-    assert info["algorithm"] == "K-Nearest Neighbors"
-    assert "scaler" in info.get("fixed_params", {})
+# ---------------------------------------------------------------------------
+# cbr get_info() — metadata honesty
+# ---------------------------------------------------------------------------
+
+def test_cbr_rfc_get_info():
+    from pipelines.eve_cbr.rfc_pipeline import EveCbrRFCPipeline
+    info = EveCbrRFCPipeline().get_info()
+    assert info["algorithm"] == "Random Forest"
+    assert info["app"] == "TLS"
+    assert "anti_leakage" in info
+    assert info["fixed_params"]["enforce_row_level_conversion_cap"] is True
+    assert info["fixed_params"]["models"] == ["RFC"]
 
 
-def test_xgb_get_info():
-    pytest.importorskip("xgboost", reason="xgboost not installed")
-    from pipelines.eve_suricata.xgb_pipeline import EveXGBPipeline
-    info = EveXGBPipeline().get_info()
-    assert info["algorithm"] == "XGBoost"
+def test_cbr_dt_get_info():
+    from pipelines.eve_cbr.dt_pipeline import EveCbrDTPipeline
+    assert EveCbrDTPipeline().get_info()["algorithm"] == "Decision Tree"
+
+
+def test_cbr_lsvc_get_info():
+    from pipelines.eve_cbr.lsvc_pipeline import EveCbrLSVCPipeline
+    assert EveCbrLSVCPipeline().get_info()["algorithm"] == "Linear SVC"
+
+
+def test_cbr_xgb_get_info():
+    from pipelines.eve_cbr.xgb_pipeline import EveCbrXGBPipeline
+    assert EveCbrXGBPipeline().get_info()["algorithm"] == "XGBoost"
+
+
+def test_cbr_requires_dataset_path():
+    """cbr pipelines must reject input without a dataset_path."""
+    from pipelines.eve_cbr.rfc_pipeline import EveCbrRFCPipeline
+    inp = PipelineInput(
+        df=pd.DataFrame({"_placeholder": [1]}),
+        label_column="Target",
+        dataset_type="EVE_SURICATA",
+        dataset_path="",
+    )
+    with pytest.raises(ValueError):
+        EveCbrRFCPipeline().run(inp)
 
 
 # ---------------------------------------------------------------------------
@@ -145,59 +168,3 @@ def test_validate_eve_dataset(small_eve_ndjson, tmp_path, monkeypatch):
     result = validate_dataset(df, "EVE_SURICATA")
     assert result.is_valid, f"Validation failed: {result.errors}"
     assert result.label_column == "Target"
-
-
-# ---------------------------------------------------------------------------
-# Pipeline integration tests (slow — full phase chain)
-# ---------------------------------------------------------------------------
-
-@pytest.mark.slow
-def test_rfc_pipeline_runs(eve_input):
-    from pipelines.eve_suricata.rfc_pipeline import EveRFCPipeline
-    result = EveRFCPipeline().run(eve_input)
-    assert 0.0 <= result.accuracy <= 1.0
-    assert result.model is not None
-    assert result.feature_names
-    assert "phase_summaries" in result.extra_info
-    assert result.confusion_matrix
-
-
-@pytest.mark.slow
-def test_dt_pipeline_runs(eve_input):
-    from pipelines.eve_suricata.dt_pipeline import EveDTPipeline
-    result = EveDTPipeline().run(eve_input)
-    assert 0.0 <= result.accuracy <= 1.0
-    assert result.model is not None
-
-
-@pytest.mark.slow
-def test_knn_pipeline_runs(eve_input):
-    from pipelines.eve_suricata.knn_pipeline import EveKNNPipeline
-    result = EveKNNPipeline().run(eve_input)
-    assert 0.0 <= result.accuracy <= 1.0
-    assert result.model is not None
-
-
-@pytest.mark.slow
-def test_xgb_pipeline_runs(eve_input):
-    pytest.importorskip("xgboost", reason="xgboost not installed")
-    from pipelines.eve_suricata.xgb_pipeline import EveXGBPipeline
-    result = EveXGBPipeline().run(eve_input)
-    assert 0.0 <= result.accuracy <= 1.0
-
-
-@pytest.mark.slow
-def test_rfc_reproducibility(small_eve_ndjson, tmp_path_factory):
-    """Same seed + same file → same accuracy."""
-    import config.settings as _s
-    _s.BASE_DIR = str(tmp_path_factory.getbasetemp().parent)
-    inp = PipelineInput(
-        df=pd.DataFrame({"_placeholder": [1]}),
-        label_column="Target",
-        dataset_type="EVE_SURICATA",
-        dataset_path=small_eve_ndjson,
-    )
-    from pipelines.eve_suricata.rfc_pipeline import EveRFCPipeline
-    r1 = EveRFCPipeline().run(inp)
-    r2 = EveRFCPipeline().run(inp)
-    assert r1.accuracy == r2.accuracy
