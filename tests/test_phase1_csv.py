@@ -12,7 +12,10 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from pipelines.eve_suricata.phases.phase1 import (
+# The 7-phase EVE pipeline was archived (recoverable) under
+# pipelines/_archive/eve_suricata_7phase/. phase1.py is self-contained, so this
+# test still validates the archived Phase 1 CSV ingestion from its new location.
+from pipelines._archive.eve_suricata_7phase.phases.phase1 import (
     _row_to_event,
     Phase1DiskConfig,
     phase1_load_and_label,
