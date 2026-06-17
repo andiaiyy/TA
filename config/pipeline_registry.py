@@ -9,10 +9,6 @@ from pipelines.hikari2021.knn_pipeline import HikariKNNPipeline
 from pipelines.hikari2021.svc_pipeline import HikariSVCPipeline
 from pipelines.hikari2021.nbgc_pipeline import HikariNBGCPipeline
 from pipelines.hikari2021.lr_pipeline import HikariLRPipeline
-from pipelines.eve_suricata.rfc_pipeline import EveRFCPipeline
-from pipelines.eve_suricata.dt_pipeline import EveDTPipeline
-from pipelines.eve_suricata.knn_pipeline import EveKNNPipeline
-from pipelines.eve_suricata.xgb_pipeline import EveXGBPipeline
 from pipelines.eve_cbr.dt_pipeline import EveCbrDTPipeline
 from pipelines.eve_cbr.rfc_pipeline import EveCbrRFCPipeline
 from pipelines.eve_cbr.lsvc_pipeline import EveCbrLSVCPipeline
@@ -97,51 +93,10 @@ PIPELINE_REGISTRY = {
             "Computing learning curve",
         ],
     },
-    "eve_suricata.rfc": {
-        "dataset_type": "EVE_SURICATA",
-        "name": "Random Forest — EVE/Suricata 7-Phase Pipeline",
-        "paper": "EVE/Suricata IDS Pipeline",
-        "algorithm": "Random Forest",
-        "class": EveRFCPipeline,
-        "stages": [
-            "Running 7 preprocessing phases",
-            "Training & evaluation",
-        ],
-    },
-    "eve_suricata.dt": {
-        "dataset_type": "EVE_SURICATA",
-        "name": "Decision Tree — EVE/Suricata 7-Phase Pipeline",
-        "paper": "EVE/Suricata IDS Pipeline",
-        "algorithm": "Decision Tree",
-        "class": EveDTPipeline,
-        "stages": [
-            "Running 7 preprocessing phases",
-            "Training & evaluation",
-        ],
-    },
-    "eve_suricata.knn": {
-        "dataset_type": "EVE_SURICATA",
-        "name": "K-Nearest Neighbors + StandardScaler — EVE/Suricata 7-Phase Pipeline",
-        "paper": "EVE/Suricata IDS Pipeline",
-        "algorithm": "K-Nearest Neighbors",
-        "class": EveKNNPipeline,
-        "stages": [
-            "Running 7 preprocessing phases",
-            "Training & evaluation",
-        ],
-    },
-    "eve_suricata.xgb": {
-        "dataset_type": "EVE_SURICATA",
-        "name": "XGBoost — EVE/Suricata 7-Phase Pipeline",
-        "paper": "EVE/Suricata IDS Pipeline",
-        "algorithm": "XGBoost",
-        "class": EveXGBPipeline,
-        "stages": [
-            "Running 7 preprocessing phases",
-            "Training & evaluation",
-        ],
-    },
     # --- EVE/Suricata cbr 14-phase anti-leakage pipeline (TLS), natural-holdout ---
+    # NOTE: the legacy 7-phase EVE pipelines (eve_suricata.*) were archived
+    # (recoverable) under pipelines/_archive/eve_suricata_7phase/ and replaced
+    # by these cbr pipelines as the sole EVE/Suricata pipeline family.
     "eve_cbr.rfc": {
         "dataset_type": "EVE_SURICATA",
         "name": "Random Forest — EVE/Suricata cbr (TLS, anti-leakage)",
