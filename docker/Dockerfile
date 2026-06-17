@@ -16,7 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
-RUN pip install -e .
+# --no-build-isolation: reuse the setuptools already installed in the image
+# instead of fetching an isolated build env from PyPI (resilient to offline/
+# flaky-network builds).
+RUN pip install -e . --no-build-isolation
 
 # Create storage directories (will be overridden by volume mounts)
 RUN mkdir -p storage/datasets storage/artifacts
