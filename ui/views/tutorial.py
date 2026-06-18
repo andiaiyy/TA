@@ -92,12 +92,6 @@ def render() -> None:
     # ── D. Format Dataset yang Didukung ───────────────────────────────────
     st.header("Format Dataset yang Didukung")
 
-    st.markdown(
-        "Hanya dua ekstensi yang diterima: `.csv` dan `.json` (NDJSON, satu objek JSON "
-        "per baris). Validator menolak berkas selain itu dan menolak berkas di luar "
-        "direktori dataset sebagai pengaman jalur."
-    )
-
     st.subheader("HIKARI2021 (varian ALLFLOWMETER)")
     st.markdown(
         "Format: CSV.  \n"
@@ -111,8 +105,8 @@ def render() -> None:
         "Format: NDJSON (`.json`), satu objek JSON per baris.  \n"
         "Kunci tingkat-atas yang wajib ada minimal: `timestamp`, `flow_id`, "
         "`event_type`, `src_ip`, `src_port`, `dest_ip`, `dest_port`, `proto`. Kolom "
-        "label tidak perlu ada di berkas; platform menurunkan label biner dari "
-        "`alert.severity` pada Phase 1 pipeline EVE."
+        "label tidak perlu ada di berkas; pipeline cbr memfokuskan trafik TLS dan "
+        "menurunkan label dari alert Suricata (disempurnakan secara konservatif)."
     )
 
     # ── E. Catatan Penting ────────────────────────────────────────────────
