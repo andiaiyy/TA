@@ -280,9 +280,10 @@ _TUJUAN_BY_DATASET = {
     ),
     "EVE_SURICATA": (
         "Model machine learning pada eksperimen ini berfungsi sebagai detection engine untuk "
-        "klasifikasi catatan EVE Suricata dengan label biner yang diturunkan dari kehadiran "
-        "alert berisi severity. Eksperimen berorientasi batch pada berkas NDJSON yang sudah "
-        "tersedia, bukan pada stream alert real-time dari Suricata yang sedang berjalan."
+        "klasifikasi catatan EVE Suricata pada trafik TLS, dengan label biner yang diturunkan "
+        "dari alert Suricata lalu disempurnakan secara konservatif (dengan pembatasan konversi "
+        "label). Eksperimen berorientasi batch pada berkas NDJSON yang sudah tersedia, bukan "
+        "pada stream alert real-time dari Suricata yang sedang berjalan."
     ),
 }
 
@@ -321,7 +322,7 @@ def _section_2_dataset(story, styles, ctx):
 
     char_map = {
         "HIKARI2021": "Fitur numerik berbasis flow varian ALLFLOWMETER, mencakup payload statistics dan window/header counts.",
-        "EVE_SURICATA": "Hasil parsing NDJSON EVE Suricata; tujuh fase preprocessing menurunkan label dari alert.severity.",
+        "EVE_SURICATA": "Hasil parsing NDJSON EVE Suricata pada trafik TLS; pipeline cbr 14 fase dengan pertahanan anti-leakage berlapis (group-split, scaling in-pipeline, leakage guard) dan label yang disempurnakan konservatif (cap konversi).",
     }
     story.append(Paragraph(
         f"<b>Jenis fitur:</b> {char_map.get(ctx['dataset_type'], '[ISI: jelaskan jenis fitur]')}",
@@ -364,7 +365,7 @@ def _section_3_pipeline(story, styles, ctx):
     flow[2] = f"Feature Selection: {fs}"
 
     if ctx["dataset_type"] == "EVE_SURICATA":
-        flow.insert(1, "EVE preprocessing tujuh fase (load+label, feature engineering, computed features, cleaning, correlation analysis, train-test split, feature selection)")
+        flow.insert(1, "EVE preprocessing cbr 14 fase (split TLS, profiling probing, refinement label dengan cap konversi, konstruksi & pembersihan fitur, screening leakage, feature selection train-only, pelatihan & evaluasi dual-holdout)")
 
     # Render as a numbered flow (text-based, no ASCII art)
     flow_html = "<br/>".join(
@@ -476,11 +477,16 @@ def _section_6_hasil(story, styles, ctx):
     rows = [["Metrik", "Nilai"]]
     def _fmt(v):
         return f"{v:.6f}" if isinstance(v, (int, float)) else "[tidak tersedia]"
+    # HIKARI metrics are weighted-averaged; EVE/cbr metrics are attack-class on
+    # the natural (original-distribution) holdout. Label honestly per dataset —
+    # this only changes the displayed label, never the stored values.
+    _avg = ("attack-class, natural-holdout"
+            if ctx["dataset_type"] == "EVE_SURICATA" else "weighted")
     rows += [
         ["Accuracy", _fmt(ctx["accuracy"])],
-        ["Precision (weighted)", _fmt(ctx["precision"])],
-        ["Recall (weighted)", _fmt(ctx["recall"])],
-        ["F1-score (weighted)", _fmt(ctx["f1_score"])],
+        [f"Precision ({_avg})", _fmt(ctx["precision"])],
+        [f"Recall ({_avg})", _fmt(ctx["recall"])],
+        [f"F1-score ({_avg})", _fmt(ctx["f1_score"])],
     ]
     if ctx["roc_auc"] is not None:
         rows.append(["ROC-AUC", _fmt(ctx["roc_auc"])])

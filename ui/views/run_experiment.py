@@ -561,15 +561,16 @@ def render():
         _display_results(st.session_state["last_result"])
 
 
+# Tahapan besar pipeline EVE cbr (14 fase, dikelompokkan agar jelas & jujur).
+# Hanya ditampilkan untuk pipeline EVE (eve_cbr.*) — bukan HIKARI.
 _EVE_PHASE_LINES = [
-    "Phase 1 — Load & Label",
-    "Phase 2 — Feature Engineering",
-    "Phase 3 — Computed Features",
-    "Phase 4 — Aggressive Cleaning",
-    "Phase 7 — Correlation Analysis",
-    "Phase 8 — Train/Test Split",
-    "Phase 9 — Feature Selection (MI + RFE + PCA)",
-    "Phase 10 — Model Training & Evaluation",
+    "Memisahkan trafik TLS dari dataset EVE",
+    "Profiling & analisis probing",
+    "Refinement label konservatif (cap konversi baris)",
+    "Konstruksi & pembersihan fitur",
+    "Screening korelasi & leakage",
+    "Feature selection (MI / RFE / PCA, train-only)",
+    "Pelatihan & evaluasi dual-holdout (natural + balanced)",
 ]
 
 
@@ -587,14 +588,22 @@ def _run_with_status(dataset_type: str, dataset_path: str, pipeline_id: str) -> 
     Async mode: the call returns immediately after dispatching the Celery
     task. We transition to the polling view, which handles its own UI.
     """
+    # The EVE phase checklist describes the cbr (EVE) pipeline stages, so show
+    # it only for EVE pipelines. HIKARI pipelines get a generic line instead —
+    # never the EVE phase names.
+    is_eve = (dataset_type == "EVE_SURICATA") or (pipeline_id or "").startswith("eve_cbr")
     with st.status("Running pipeline...", expanded=True) as status_box:
         st.write("Initializing experiment...")
         st.write("Parsing and validating dataset...")
         st.write("")
-        st.write("**Phases will execute in sequence:**")
-        phase_placeholder = st.empty()
-        phase_placeholder.markdown(_phase_checklist("[ ]"))
-        st.write("")
+        phase_placeholder = None
+        if is_eve:
+            st.write("**Tahapan pipeline cbr (EVE) akan dijalankan berurutan:**")
+            phase_placeholder = st.empty()
+            phase_placeholder.markdown(_phase_checklist("[ ]"))
+            st.write("")
+        else:
+            st.write("Pipeline dijalankan; metrik dan artefak muncul setelah selesai.")
         st.info("Full process log will appear in results after completion.")
 
         result = create_and_run_experiment(dataset_type, dataset_path, pipeline_id)
@@ -612,7 +621,8 @@ def _run_with_status(dataset_type: str, dataset_path: str, pipeline_id: str) -> 
             return
 
         # Sync path completed successfully
-        phase_placeholder.markdown(_phase_checklist("[x]"))
+        if phase_placeholder is not None:
+            phase_placeholder.markdown(_phase_checklist("[x]"))
         status_box.update(label="Pipeline complete!", state="complete")
         st.session_state["last_result"] = result
         st.rerun()
