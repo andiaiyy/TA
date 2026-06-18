@@ -79,8 +79,12 @@ st.markdown(
 # of the repo without the dep installed), fall back to a plain radio so the
 # app stays usable and the user gets a clear hint to install it.
 
-_PAGES = ("Tutorial", "Run Experiment", "History", "Environment Info")
-_PAGE_ICONS = ("book", "play-circle", "clock-history", "info-circle")
+_PAGES = ("Run Experiment", "History", "Tutorial", "Environment Info")
+_PAGE_ICONS = ("play-circle", "clock-history", "book", "info-circle")
+# Landing page shown when the app first opens. Tutorial remains in the menu,
+# just no longer the default. Index is resolved by name so menu order can
+# change freely without breaking the default.
+_DEFAULT_PAGE = "Run Experiment"
 
 try:
     from streamlit_option_menu import option_menu
@@ -102,7 +106,7 @@ def _select_page() -> str:
                 options=list(_PAGES),
                 icons=list(_PAGE_ICONS),
                 menu_icon="list",
-                default_index=0,
+                default_index=_PAGES.index(_DEFAULT_PAGE),
                 styles={
                     "container": {"padding": "4px 0", "background-color": "transparent"},
                     "icon": {"font-size": "16px"},
@@ -132,7 +136,7 @@ def _select_page() -> str:
         "Catatan: streamlit-option-menu belum terpasang. Jalankan "
         "`pip install streamlit-option-menu` untuk tampilan menu yang lengkap."
     )
-    return st.sidebar.radio("Navigation", _PAGES, index=0)
+    return st.sidebar.radio("Navigation", _PAGES, index=_PAGES.index(_DEFAULT_PAGE))
 
 
 page = _select_page()
