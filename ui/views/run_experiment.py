@@ -405,6 +405,31 @@ def _render_file_picker(dtype: str) -> None:
         st.rerun()
 
 
+def _pipeline_dataset_confirmation(dataset_type: str) -> str | None:
+    """Dynamic, dataset_type-derived note about the input the selected pipeline
+    expects. Informational only — it does NOT replace the dataset validation
+    performed elsewhere. ``dataset_type`` comes from the selected pipeline's
+    registry entry and the label column from the schema, so there is no brittle
+    pipeline->dataset hardcoding here."""
+    schema = get_schema(dataset_type) or {}
+    label_col = schema.get("label_column") or "label"
+    if dataset_type == "HIKARI2021":
+        return (
+            f"**Pipeline ini menerima dataset:** HIKARI2021 (varian ALLFLOWMETER) berformat "
+            f"**CSV**, dengan kolom label `{label_col}` (0 = benign, 1 = malicious) dan "
+            f"puluhan kolom fitur numerik berbasis *flow*."
+        )
+    if dataset_type == "EVE_SURICATA":
+        return (
+            f"**Pipeline ini menerima dataset:** EVE Suricata berformat **NDJSON** (satu objek "
+            f"JSON per baris). Pipeline cbr memfokuskan analisis pada **trafik TLS** dan "
+            f"menurunkan label dari **alert Suricata** (disempurnakan secara konservatif); "
+            f"berkas mentah tidak perlu memiliki kolom `{label_col}`/label eksplisit."
+        )
+    # Unknown/future dataset type: stay honest and generic, still derived.
+    return f"**Pipeline ini menerima dataset bertipe:** {dataset_type} (kolom label `{label_col}`)."
+
+
 def render():
     st.title("Run Experiment")
 
@@ -522,6 +547,15 @@ def render():
     st.session_state["selected_pipeline"] = selected
 
     if selected:
+        # Dynamic, per-pipeline dataset confirmation — a SEPARATE element from
+        # the read-only Pipeline Detail / Config Viewer below. Derived from the
+        # selected pipeline's dataset_type in the registry; informational only,
+        # it does NOT replace the dataset validation already performed above.
+        _pdtype = pipelines.get(selected, {}).get("dataset_type")
+        _confirm = _pipeline_dataset_confirmation(_pdtype) if _pdtype else None
+        if _confirm:
+            st.info(_confirm)
+
         info = get_pipeline_info(selected)
         if info:
             with st.expander("Pipeline Detail (Read-Only)"):
