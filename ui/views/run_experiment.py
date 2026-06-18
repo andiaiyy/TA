@@ -633,12 +633,24 @@ def render():
                 )
 
         # Algorithm selector within the chosen research (algorithm names only —
-        # the research name is already clear from the level above).
-        algorithm = st.selectbox(
-            "Pilih algoritma", list(algo_to_pid.keys()), index=None,
-            placeholder="Pilih algoritma…",
-            key="algorithm_select",
-        )
+        # the research name is already clear from the level above). Horizontal
+        # segmented buttons; fall back to a horizontal radio on older Streamlit
+        # without st.segmented_control. Both return the selected algorithm name
+        # (or None when nothing is picked), so the pipeline_id resolution below
+        # is identical either way and the Execute button stays conditional.
+        _algo_names = list(algo_to_pid.keys())
+        if hasattr(st, "segmented_control"):
+            algorithm = st.segmented_control(
+                "Pilih algoritma", _algo_names,
+                selection_mode="single", default=None,
+                key="algorithm_select",
+            )
+        else:
+            algorithm = st.radio(
+                "Pilih algoritma", _algo_names,
+                index=None, horizontal=True,
+                key="algorithm_select",
+            )
         selected = algo_to_pid.get(algorithm) if algorithm else None
 
     st.session_state["selected_pipeline"] = selected
