@@ -112,11 +112,43 @@ def render() -> None:
     # ── E. Catatan Penting ────────────────────────────────────────────────
     st.header("Catatan Penting")
 
-    st.info(
-        "Hasil setiap eksperimen tersimpan otomatis di folder artefak. Eksperimen yang "
-        "sudah selesai dapat dibuka kembali kapan saja dari halaman History dan "
-        "diunduh sebagai laporan PDF, tanpa perlu dijalankan ulang."
-    )
+    # Lokasi penting di penyimpanan platform — satu expander per path agar
+    # mudah dipindai. Path diturunkan dari config/settings.py (akurat).
+    st.markdown("**Lokasi penting di penyimpanan platform**")
+
+    db_rel = _relative(STORAGE_DIR / "experiments.db")
+
+    with st.expander("📊  Hasil eksperimen (artefak)"):
+        st.markdown(
+            "Setiap eksperimen yang selesai menyimpan artefaknya otomatis di sini, "
+            "satu subfolder per `experiment_id`. Hasil dapat dibuka kembali kapan saja "
+            "dari halaman **History** dan diunduh sebagai laporan PDF — tanpa perlu "
+            "dijalankan ulang."
+        )
+        st.code(artifacts_rel + "/{experiment_id}/", language="text")
+        st.markdown(
+            "Isi tiap folder: `model.pkl` (model terlatih, joblib), "
+            "`metrics.json` (metrik utama + extra_info), dan "
+            "`metadata.json` (dataset_hash, pipeline_id, environment)."
+        )
+
+    with st.expander("📁  Lokasi dataset"):
+        st.markdown(
+            "Satu-satunya folder yang perlu disentuh pengguna. Letakkan berkas dataset "
+            "(CSV HIKARI2021 atau NDJSON EVE Suricata) di sini sebelum membuka halaman "
+            "**Run Experiment**; dropdown akan mendeteksinya otomatis."
+        )
+        st.code(datasets_rel + "/", language="text")
+
+    with st.expander("🗄️  Basis data eksperimen"):
+        st.markdown(
+            "Basis data SQLite berisi metadata setiap eksperimen (status, metrik "
+            "ringkas, path artefak, hash dataset). Diisi dan dikelola otomatis oleh "
+            "platform — tidak perlu (dan sebaiknya tidak) diubah manual."
+        )
+        st.code(db_rel, language="text")
+
+    st.markdown("**Catatan lain**")
     st.info(
         "Kolom dataset harus sesuai skema. Bila skema tidak cocok, validasi akan "
         "gagal dengan pesan yang menyebutkan kolom yang hilang. Periksa berkas dataset "
