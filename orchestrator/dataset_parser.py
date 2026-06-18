@@ -18,27 +18,23 @@ import pandas as pd
 from pathlib import Path
 
 
-def parse_dataset(file_path: str) -> pd.DataFrame:
-    """
-    Load a CSV file and return a cleaned DataFrame.
+def resolve_dataset_path(file_path: str) -> Path:
+    """Resolve a dataset path applying the platform's safety rules; return the
+    resolved Path.
+
+    Shared by ``parse_dataset`` (the full-file EXECUTION read) and the
+    memory-safe validation readers in ``orchestrator/validation_service.py`` so
+    both enforce identical path safety.
 
     Steps:
-      1. Check file exists
-      2. Check .csv extension
-      3. Check path is within allowed directories (prevents path traversal)
-      4. Read CSV
-      5. Strip whitespace from column names
-      6. Replace inf/-inf with NaN
-
-    Args:
-        file_path: Path to CSV file.
-
-    Returns:
-        Cleaned DataFrame.
+      1. Existence check (+ basename fallback under DATASETS_DIR)
+      2. Extension allow-list
+      3. Within-project containment (prevents path traversal)
 
     Raises:
-        FileNotFoundError: If file does not exist.
-        ValueError: If file is not .csv format or is outside allowed directories.
+        FileNotFoundError: If the file does not exist (after fallback).
+        ValueError: If the extension is unsupported or the path is outside the
+            allowed project roots.
     """
     path = Path(file_path)
 
@@ -76,8 +72,34 @@ def parse_dataset(file_path: str) -> pd.DataFrame:
             f"Access denied: dataset path must be within the project directory. "
             f"Got: {resolved}"
         )
+    return resolved
+
+
+def parse_dataset(file_path: str) -> pd.DataFrame:
+    """
+    Load a dataset file and return a cleaned DataFrame.
+
+    NOTE (memory): for CSV this reads the FULL file — it is the EXECUTION read
+    used by the worker (which is sized for it). The UI validation path must NOT
+    call this for large CSVs; it uses the memory-safe readers in
+    ``orchestrator/validation_service.py`` instead. For NDJSON/JSON only a light
+    ~100-record stub is read here (Phase 1 handles the full file downstream).
+
+    Steps:
+      1. Resolve + path-safety (resolve_dataset_path)
+      2. Read (full CSV, or 100-record NDJSON stub)
+      3. Strip whitespace from column names
+      4. (CSV) Replace inf/-inf with NaN
+
+    Raises:
+        FileNotFoundError: If file does not exist.
+        ValueError: If file format unsupported or outside allowed directories.
+    """
+    resolved = resolve_dataset_path(file_path)
+    ext = resolved.suffix.lower()
 
     if ext == ".csv":
+        # Full read — EXECUTION path. (UI validation uses a memory-safe reader.)
         # Use resolved path for the actual read to avoid TOCTOU between check and open.
         df = pd.read_csv(resolved)
         df.columns = df.columns.str.strip()
