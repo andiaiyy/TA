@@ -430,120 +430,158 @@ def _pipeline_dataset_confirmation(dataset_type: str) -> str | None:
     return f"**Pipeline ini menerima dataset bertipe:** {dataset_type} (kolom label `{label_col}`)."
 
 
+def _all_dataset_options() -> list[tuple[str, str]]:
+    """[(path, dataset_type)] for every dataset file in storage/datasets/.
+
+    dataset_type is derived by the SAME extension mapping the former type tabs
+    used (``_list_dataset_files`` per registered type), so the dataset_path and
+    dataset_type that flow to execution stay identical to before.
+    """
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for dtype in get_available_datasets():
+        for p in _list_dataset_files(dtype):
+            if p not in seen:
+                out.append((p, dtype))
+                seen.add(p)
+    return sorted(out, key=lambda t: Path(t[0]).name.lower())
+
+
+def _dataset_preview(path: str, dataset_type: str, n: int = 5):
+    """Memory-safe preview: read ONLY the first ``n`` rows. Never loads the whole
+    file (datasets can be ~568 MB → OOM on a fragile host). Returns a DataFrame
+    or None. Display-only — not used for validation, parsing, or execution."""
+    import json as _json
+
+    ext = Path(path).suffix.lower()
+    if ext == ".csv":
+        return pd.read_csv(path, nrows=n)
+    # NDJSON / JSON-lines: stream only the first n valid objects.
+    records: list[dict] = []
+    with open(path, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = _json.loads(line)
+            except Exception:
+                continue
+            if isinstance(obj, dict):
+                records.append(obj)
+            if len(records) >= n:
+                break
+    if not records:
+        return None
+    return pd.json_normalize(records, max_level=1)
+
+
 def render():
     st.title("Run Experiment")
 
-    # === SECTION 1: Dataset Selection ===
-    st.header("1. Dataset Selection")
+    # ── Dataset Selection ──────────────────────────────────────────────
+    st.header("Dataset Selection")
 
-    dataset_path = st.session_state.get("dataset_path")
-    dataset_type = st.session_state.get("dataset_type", "")
-
-    if dataset_path:
-        # Show confirmed selection with a Change button
-        c1, c2, c3 = st.columns([3, 4, 1])
-        with c1:
-            meta = _TYPE_META.get(dataset_type, {})
-            st.markdown(f"**Type:** `{dataset_type}`")
-        with c2:
-            st.markdown(f"**File:** `{Path(dataset_path).name}`")
-        with c3:
-            if st.button("Change"):
-                # Clear current selection — type cards re-appear
-                for key in ("dataset_type", "dataset_path", "validation", "last_result", "polling_experiment_id"):
-                    st.session_state.pop(key, None)
-                st.rerun()
-    else:
-        # Horizontal type filter — replaces the previous static tiles.
-        # Type list is sourced dynamically from contracts/dataset_schemas.py
-        # via orchestrator.validation_service.get_available_datasets(); adding
-        # a new schema there automatically adds a tab here.
-        st.markdown("Pilih type dataset, lalu pilih berkas:")
-        types = list(get_available_datasets())
-
-        # Stable default_index from session_state so the menu does not jump
-        # back to the first item on every Streamlit rerun.
-        current_type = st.session_state.get("selected_dataset_type")
-        default_idx = types.index(current_type) if current_type in types else 0
-
-        selected_type = option_menu(
-            menu_title=None,
-            options=types,
-            icons=[_type_icon(t) for t in types],
-            orientation="horizontal",
-            default_index=default_idx,
-            key="dataset_type_filter",
-            styles={
-                "container": {"padding": "0", "background-color": "transparent"},
-                "icon": {"font-size": "14px"},
-                "nav-link": {
-                    "font-size": "14px",
-                    "margin": "0 4px",
-                    "padding": "8px 14px",
-                    "border-radius": "6px",
-                    "--hover-color": "#eef2ff",
-                },
-                "nav-link-selected": {
-                    "background-color": _ACCENT,
-                    "color": "white",
-                    "font-weight": "600",
-                },
-            },
+    # Single dropdown over every dataset file in storage/datasets/. Each option
+    # carries its dataset_type (derived exactly as the former type tabs did), so
+    # the dataset_path + dataset_type flowing to execution are unchanged.
+    _ds_options = _all_dataset_options()
+    if not _ds_options:
+        st.info(
+            "Belum ada berkas dataset di `storage/datasets/`. Tambahkan berkas CSV "
+            "(HIKARI2021) atau NDJSON (EVE Suricata) untuk memulai."
         )
+        return
 
-        # Reset per-type radio selections when the active type changes, so a
-        # stale file pick from a different type cannot be confirmed.
-        prev_type = st.session_state.get("selected_dataset_type")
-        if prev_type is not None and prev_type != selected_type:
-            for k in list(st.session_state.keys()):
-                if k.startswith("selected_dataset_file__"):
-                    st.session_state.pop(k, None)
-        st.session_state["selected_dataset_type"] = selected_type
+    _path_to_type = {p: t for p, t in _ds_options}
+    _paths = [p for p, _ in _ds_options]
 
-        _render_type_characteristics(selected_type)
-        st.markdown("")
-        _render_file_picker(selected_type)
-        return  # nothing else to render until a dataset is selected
+    def _ds_label(p: str) -> str:
+        try:
+            size = format_size(Path(p).stat().st_size)
+        except Exception:
+            size = "ukuran tidak diketahui"
+        return f"{Path(p).name}  ·  {_path_to_type.get(p, '?')}  ({size})"
 
-    # Validate button
-    if st.button("Validate Dataset", type="primary"):
-        with st.spinner("Validating..."):
+    dataset_path = st.selectbox(
+        "Pilih dataset", _paths, index=None,
+        placeholder="Pilih berkas dataset…",
+        format_func=_ds_label, key="dataset_select",
+    )
+
+    if not dataset_path:
+        st.caption(
+            "Pilih satu berkas dataset untuk melihat preview, hasil validasi, dan "
+            "pipeline yang kompatibel."
+        )
+        return
+
+    dataset_type = _path_to_type.get(dataset_path, "")
+    # Persist for downstream readers (PDF/report read session dataset_path/type).
+    st.session_state["dataset_path"] = dataset_path
+    st.session_state["dataset_type"] = dataset_type
+
+    # Validate once per selected path — identical logic to the former "Validate
+    # Dataset" button (validate_dataset_for_ui), guarded so the parse/hash runs
+    # once per selection (not every rerun). A new selection re-validates and
+    # drops stale result/polling/pipeline state.
+    if st.session_state.get("_validated_path") != dataset_path:
+        with st.spinner("Memvalidasi dataset…"):
             st.session_state["validation"] = validate_dataset_for_ui(dataset_type, dataset_path)
-            st.session_state.pop("last_result", None)
-            st.session_state.pop("polling_experiment_id", None)
+        st.session_state["_validated_path"] = dataset_path
+        for _k in ("last_result", "polling_experiment_id", "pipeline_select", "selected_pipeline"):
+            st.session_state.pop(_k, None)
 
-    if "validation" not in st.session_state:
+    v = st.session_state.get("validation") or {}
+
+    # Detail dataset — memory-safe preview (first rows only) + existing validation info.
+    with st.expander("Detail dataset (preview & validasi)", expanded=True):
+        st.markdown("**Preview (beberapa baris pertama):**")
+        try:
+            _preview = _dataset_preview(dataset_path, dataset_type, n=5)
+            if _preview is not None and not _preview.empty:
+                st.dataframe(_preview, use_container_width=True)
+            else:
+                st.caption("Preview tidak tersedia untuk berkas ini.")
+        except Exception as _e:
+            st.caption(f"Preview tidak tersedia: {_e}")
+
+        st.markdown("---")
+        if not v.get("success"):
+            st.error(v.get("error", "Validasi dataset gagal."))
+        else:
+            st.success("Dataset is valid!")
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Type", dataset_type)
+            c2.metric("Rows", f"{v['row_count']:,}" if isinstance(v.get("row_count"), int) else "-")
+            c3.metric("Columns", v.get("column_count", "-"))
+            # EVE-style datasets have no labels in the raw file — Phase 1
+            # synthesizes them. Show a placeholder instead of a meaningless count.
+            if v.get("unique_labels"):
+                c4.metric("Classes", len(v["unique_labels"]))
+            else:
+                c4.metric("Classes", "pipeline-generated")
+            if v.get("dataset_hash"):
+                st.code(f"SHA-256: {v['dataset_hash']}", language=None)
+            if v.get("unique_labels"):
+                st.markdown(f"**Labels:** {', '.join(str(lbl) for lbl in v['unique_labels'])}")
+
+    if not v.get("success"):
         return
 
-    v = st.session_state["validation"]
-    if not v["success"]:
-        st.error(f"{v['error']}")
-        return
-
-    st.success("Dataset is valid!")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Rows", f"{v['row_count']:,}")
-    c2.metric("Columns", v["column_count"])
-    # EVE-style datasets have no labels in the raw file — Phase 1 synthesizes
-    # them. Show a placeholder instead of a meaningless count.
-    if v["unique_labels"]:
-        c3.metric("Classes", len(v["unique_labels"]))
-    else:
-        c3.metric("Classes", "pipeline-generated")
-    if v.get("dataset_hash"):
-        st.code(f"SHA-256: {v['dataset_hash']}", language=None)
-    if v["unique_labels"]:
-        st.markdown(f"**Labels:** {', '.join(str(lbl) for lbl in v['unique_labels'])}")
-
-    # === SECTION 2: Pipeline Selection ===
-    st.header("2. Pipeline Selection")
+    # ── Pipeline Selection ─────────────────────────────────────────────
+    st.header("Pipeline Selection")
     pipelines = v.get("compatible_pipelines", {})
     if not pipelines:
-        st.warning("No compatible pipelines.")
+        st.warning("Tidak ada pipeline yang kompatibel untuk dataset ini.")
         return
 
     pipeline_opts = {pid: info["name"] for pid, info in pipelines.items()}
-    selected = st.selectbox("Select Pipeline", list(pipeline_opts.keys()), format_func=lambda x: pipeline_opts[x])
+    selected = st.selectbox(
+        "Pilih pipeline", list(pipeline_opts.keys()), index=None,
+        placeholder="Pilih pipeline…",
+        format_func=lambda x: pipeline_opts[x], key="pipeline_select",
+    )
     st.session_state["selected_pipeline"] = selected
 
     if selected:
@@ -580,17 +618,18 @@ def render():
                 state_key="selected_file_pipeline_view",
             )
 
-    # === SECTION 3: Execute ===
-    st.header("3. Execute")
-
+    # ── Execute (conditional — only after a pipeline is selected) ───────
+    # Async polling view takes over while an experiment is in flight.
     if "polling_experiment_id" in st.session_state:
         _poll_experiment(st.session_state["polling_experiment_id"])
         return
 
-    if st.button("Run Experiment", type="primary"):
-        _run_with_status(dataset_type, dataset_path, selected)
+    if selected:
+        st.header("Execute")
+        if st.button("Run Experiment", type="primary"):
+            _run_with_status(dataset_type, dataset_path, selected)
 
-    # === SECTION 4: Results (sync path) ===
+    # Results (sync path)
     if "last_result" in st.session_state and st.session_state["last_result"].get("success"):
         _display_results(st.session_state["last_result"])
 
