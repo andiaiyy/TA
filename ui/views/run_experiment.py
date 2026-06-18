@@ -529,7 +529,7 @@ def render():
         with st.spinner("Memvalidasi dataset…"):
             st.session_state["validation"] = validate_dataset_for_ui(dataset_type, dataset_path)
         st.session_state["_validated_path"] = dataset_path
-        for _k in ("last_result", "polling_experiment_id", "pipeline_select", "selected_pipeline"):
+        for _k in ("last_result", "polling_experiment_id", "research_select", "algorithm_select", "selected_pipeline"):
             st.session_state.pop(_k, None)
 
     v = st.session_state.get("validation") or {}
@@ -576,24 +576,75 @@ def render():
         st.warning("Tidak ada pipeline yang kompatibel untuk dataset ini.")
         return
 
-    pipeline_opts = {pid: info["name"] for pid, info in pipelines.items()}
-    selected = st.selectbox(
-        "Pilih pipeline", list(pipeline_opts.keys()), index=None,
-        placeholder="Pilih pipeline…",
-        format_func=lambda x: pipeline_opts[x], key="pipeline_select",
-    )
-    st.session_state["selected_pipeline"] = selected
+    # Two-level selection (DISPLAY/grouping only): research pipeline → algorithm.
+    # Group key = dataset_type (robust, 1:1 with a research); display label is
+    # derived from the registry `name` suffix; the algorithm name comes from the
+    # registry `algorithm` field. Each (research, algorithm) resolves back to a
+    # REAL registered pipeline_id, dispatched exactly as before. compatible_pipelines
+    # is already filtered by the selected dataset's dataset_type, so the research
+    # filter is preserved — just applied one level up.
+    research_groups: dict[str, dict[str, str]] = {}
+    research_display: dict[str, str] = {}
+    for pid, info in pipelines.items():
+        dt = info.get("dataset_type", "") or pid
+        algo = info.get("algorithm") or info.get("name", pid)
+        research_groups.setdefault(dt, {})[algo] = pid
+        if dt not in research_display:
+            nm = info.get("name", "")
+            research_display[dt] = nm.split("—")[-1].strip() if "—" in nm else dt
 
-    if selected:
-        # Dynamic, per-pipeline dataset confirmation — a SEPARATE element from
-        # the read-only Pipeline Detail / Config Viewer below. Derived from the
-        # selected pipeline's dataset_type in the registry; informational only,
-        # it does NOT replace the dataset validation already performed above.
-        _pdtype = pipelines.get(selected, {}).get("dataset_type")
+    research_keys = list(research_groups.keys())
+    research = st.selectbox(
+        "Pilih research pipeline", research_keys,
+        index=0 if len(research_keys) == 1 else None,
+        placeholder="Pilih research pipeline…",
+        format_func=lambda k: research_display.get(k, k),
+        key="research_select",
+    )
+
+    selected = None
+    if research:
+        algo_to_pid = research_groups[research]
+        _rep_pid = next(iter(algo_to_pid.values()))  # representative for shared info
+
+        # Dynamic dataset confirmation (research/dataset-level) — separate element.
+        _pdtype = pipelines.get(_rep_pid, {}).get("dataset_type")
         _confirm = _pipeline_dataset_confirmation(_pdtype) if _pdtype else None
         if _confirm:
             st.info(_confirm)
 
+        # Research-level info (shared across the algorithms of this research).
+        rep_info = get_pipeline_info(_rep_pid)
+        if rep_info:
+            with st.expander("Tentang Research Pipeline (Read-Only)", expanded=True):
+                st.markdown(f"**Research:** {research_display.get(research, research)}")
+                st.markdown(f"**Dataset type:** `{research}`")
+                if rep_info.get("paper"):
+                    st.markdown(f"**Paper:** {rep_info['paper']}")
+                if rep_info.get("anti_leakage"):
+                    st.markdown("**Anti-leakage:**")
+                    for a in rep_info["anti_leakage"]:
+                        st.markdown(f"  - {a}")
+                if rep_info.get("metrics_policy"):
+                    st.markdown(f"**Metrics policy:** {rep_info['metrics_policy']}")
+                st.caption(
+                    "Pilih algoritma di bawah untuk melihat preprocessing & "
+                    "hyperparameter spesifik algoritma tersebut."
+                )
+
+        # Algorithm selector within the chosen research (algorithm names only —
+        # the research name is already clear from the level above).
+        algorithm = st.selectbox(
+            "Pilih algoritma", list(algo_to_pid.keys()), index=None,
+            placeholder="Pilih algoritma…",
+            key="algorithm_select",
+        )
+        selected = algo_to_pid.get(algorithm) if algorithm else None
+
+    st.session_state["selected_pipeline"] = selected
+
+    if selected:
+        # Algorithm-specific detail (full per-pipeline get_info) + config viewer.
         info = get_pipeline_info(selected)
         if info:
             with st.expander("Pipeline Detail (Read-Only)"):
