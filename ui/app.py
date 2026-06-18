@@ -146,7 +146,6 @@ st.sidebar.markdown(
     "Platform eksperimen IDS berbasis web on-premise dengan pipeline ML "
     "terstandarisasi dan reproduksibilitas bit-per-bit."
 )
-st.sidebar.caption("Repositori: [ISI: link repositori]")
 st.sidebar.caption("© 2026 Andi Siti Aisyah Amin (D1212221043)")
 
 # ── Page routing ──────────────────────────────────────────────────────────
