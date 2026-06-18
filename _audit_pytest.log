@@ -1,0 +1,33 @@
+Windows fatal exception: access violation
+
+Current thread 0x000040f8 (most recent call first):
+  File "C:\Users\andia\AppData\Local\Python\pythoncore-3.11-64\Lib\pathlib.py", line ??? in _parse_args
+  File "C:\Users\andia\AppData\Local\Python\pythoncore-3.11-64\Lib\pathlib.py", line 509 in _from_parts
+  File "C:\Users\andia\AppData\Local\Python\pythoncore-3.11-64\Lib\pathlib.py", line 871 in __new__
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\nodes.py", line 452 in _repr_failure_py
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\nodes.py", line 534 in repr_failure
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\runner.py", line 420 in pytest_make_collect_report
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\runner.py", line 576 in collect_one_node
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 883 in _collect_one_node
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 1020 in genitems
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 1023 in genitems
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 857 in perform_collect
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 382 in pytest_collection
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 371 in _main
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 318 in wrap_session
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\main.py", line 365 in pytest_cmdline_main
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_callers.py", line 121 in _multicall
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_manager.py", line 120 in _hookexec
+  File "D:\Program\TA\venv\Lib\site-packages\pluggy\_hooks.py", line 512 in __call__
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\config\__init__.py", line 199 in main
+  File "D:\Program\TA\venv\Lib\site-packages\_pytest\config\__init__.py", line 223 in console_main
+  File "D:\Program\TA\venv\Lib\site-packages\pytest\__main__.py", line 9 in <module>
+  File "<frozen runpy>", line 88 in _run_code
+  File "<frozen runpy>", line 198 in _run_module_as_main
+PYTEST_EXIT=139
