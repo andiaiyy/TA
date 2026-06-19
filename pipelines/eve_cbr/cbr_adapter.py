@@ -58,6 +58,13 @@ _RES = dict(
     modeling_balanced_test_per_class_rows=20_000,
     n_jobs=2,
     cv_folds=2,
+    # Phase 8 reservoir caps (viz_sampler/corr_sampler in phase8_export_dataset.py
+    # each hold a full dict-copy per sampled row). cbr core defaults are
+    # 300_000/1_000_000, which on production-scale apps (>=1.3M rows) fill
+    # completely and measured ~2.7-3.7 GB peak RSS -- over the worker's 3.5 GB
+    # cap. These caps mirror the modeling caps above to keep Phase 8 bounded.
+    visualization_sample_rows=50_000,
+    corr_leak_sample_rows=100_000,
 )
 
 # Feature methods preferred for the reported result. MI/RFE map importances to
@@ -155,7 +162,12 @@ def build_run_config(*, algo: str, split_dir: Path, work_dir: Path, archive_dir:
             export_train_test_in_phase8=True,
             export_full_feature_ready=False,
         ),
-        export=ExportConfig(format="csv", compression=None),
+        export=ExportConfig(
+            format="csv",
+            compression=None,
+            visualization_sample_rows=_RES["visualization_sample_rows"],
+            corr_leak_sample_rows=_RES["corr_leak_sample_rows"],
+        ),
         probing=ProbingConfig(
             window_minutes=5,
             ip_only_relabeling_enabled=False,
@@ -500,6 +512,8 @@ class BaseCbrEvePipeline(BasePipeline):
                 "models": [self.ALGORITHM],
                 "fs_sample_rows": _RES["fs_sample_rows"],
                 "modeling_train_rows": _RES["modeling_train_rows"],
+                "visualization_sample_rows": _RES["visualization_sample_rows"],
+                "corr_leak_sample_rows": _RES["corr_leak_sample_rows"],
                 "n_jobs": _RES["n_jobs"],
                 "cv_folds": _RES["cv_folds"],
                 "enforce_row_level_conversion_cap": True,
