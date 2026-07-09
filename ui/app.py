@@ -71,7 +71,7 @@ st.markdown(
 
 # ── Sidebar navigation ────────────────────────────────────────────────────
 # Centralised routing: option_menu returns the selected label, and a single
-# dispatch table below routes to each page's render() function. The four
+# dispatch table below routes to each page's render() function. The two
 # pages are independent modules in ui/views/. No ui/pages/ folder is used,
 # so there is no conflict with Streamlit's built-in multipage navigation.
 #
@@ -79,11 +79,10 @@ st.markdown(
 # of the repo without the dep installed), fall back to a plain radio so the
 # app stays usable and the user gets a clear hint to install it.
 
-_PAGES = ("Run Experiment", "History", "Tutorial", "Environment Info")
-_PAGE_ICONS = ("play-circle", "clock-history", "book", "info-circle")
-# Landing page shown when the app first opens. Tutorial remains in the menu,
-# just no longer the default. Index is resolved by name so menu order can
-# change freely without breaking the default.
+_PAGES = ("Run Experiment", "History")
+_PAGE_ICONS = ("play-circle", "clock-history")
+# Landing page shown when the app first opens. Index is resolved by name so
+# menu order can change freely without breaking the default.
 _DEFAULT_PAGE = "Run Experiment"
 
 try:
@@ -141,27 +140,10 @@ def _select_page() -> str:
 
 page = _select_page()
 
-# ── About section ────────────────────────────────────────────────────────
-st.sidebar.markdown("---")
-st.sidebar.markdown("**About**")
-st.sidebar.markdown(
-    "**IDS Research Pipeline System**  \n"
-    "Versi 1.0.0  \n"
-    "Platform eksperimen IDS berbasis web on-premise dengan pipeline ML "
-    "terstandarisasi dan reproduksibilitas bit-per-bit."
-)
-st.sidebar.caption("© 2026 Andi Siti Aisyah Amin (D1212221043)")
-
 # ── Page routing ──────────────────────────────────────────────────────────
-if page == "Tutorial":
-    from ui.views.tutorial import render
-    render()
-elif page == "Run Experiment":
+if page == "Run Experiment":
     from ui.views.run_experiment import render
     render()
 elif page == "History":
     from ui.views.view_results import render
-    render()
-elif page == "Environment Info":
-    from ui.views.environment_info import render
     render()

@@ -1,21 +1,34 @@
 """
-PDF report generator for experiment results — 9-section thesis-grade layout.
+PDF report generator — operational-first layout for network engineers (non-ML).
 
-Sections (numbered, in order):
-  1. Tujuan Model            (static, dataset-aware)
-  2. Dataset dan Karakteristik (auto + static)
-  3. Pipeline ML              (auto from get_info + flow diagram)
-  4. Environment dan Reproducibility (auto from metadata.environment)
-  5. Metode Evaluasi          (static template)
-  6. Hasil Model              (auto from metrics; reuses existing PNG renderers)
-  7. Analisis Hasil           (placeholder, NOT auto-generated)
-  8. Integrasi ke Platform    (honest description of actual capabilities)
-  9. Limitasi                 (static + audit findings)
+Design goal: translate ML results into network-security language FIRST, then
+provide ML technical detail as supporting appendix. Every interpretive sentence
+is assembled from the experiment's ACTUAL numbers at render time (computed from
+metrics.json / extra_info / metadata) — never boilerplate, never fabricated.
+If a field is absent, its block is hidden cleanly (no empty placeholders).
+
+Section order (easy → technical):
+  Cover            identity + one-line detection verdict
+  A. Ringkasan Eksekutif          (1 computed paragraph, plain language)
+  B. Konteks Eksperimen           (dataset, honest label origin, algorithm, config)
+  C. Hasil Deteksi — Interpretasi Jaringan   (confusion matrix → operational terms)
+  D. Metrik Performa — Penjelasan Awam       (each metric + plain meaning + verdict)
+  E. Fitur Jaringan Paling Berpengaruh       (importance + per-feature network meaning)
+  F. Catatan Metodologis (kejujuran)         (metric semantics, holdout, anti-leakage)
+  G. Informasi Reproducibility               (dataset_hash, seed, environment)
+  Lampiran Teknis                            (full metric table, ROC, per-class, LC)
+
+Narrative is family-aware: HIKARI metrics are weighted-average on ground-truth
+labels; EVE-cbr metrics are attack-class on the natural holdout with labels
+derived from Suricata alerts. The operational counts (detected / missed / false
+alarm) are ALWAYS derived from the confusion matrix (attack = positive class),
+so they are correct and attack-focused for both families.
 
 Signature, return type (bytes), and ReportLab mechanism are preserved exactly
 so the call site in ui/views/view_results.py keeps working.
 
-Rules: No database access. No UI imports.
+Rules: No database access. No UI imports. Reads provided data only — never
+mutates pipeline outputs or recomputes model metrics.
 """
 import io
 import numpy as np
@@ -39,9 +52,13 @@ _PRIMARY = HexColor('#1a1a2e')
 _ACCENT = HexColor('#2563eb')
 _MUTED = HexColor('#666666')
 _GRID = HexColor('#cccccc')
-_PLACEHOLDER_FILL = HexColor('#fff8e1')   # light yellow for "needs human fill"
-_PLACEHOLDER_BORDER = HexColor('#b08800')
-_NOTE_FILL = HexColor('#f0f4ff')          # light blue for honest-limitation notes
+_GOOD = HexColor('#15803d')        # green — good direction
+_WARN = HexColor('#b45309')        # amber — needs attention
+_CRIT = HexColor('#b91c1c')        # red — critical (missed attacks)
+_GOOD_FILL = HexColor('#ecfdf5')
+_WARN_FILL = HexColor('#fffbeb')
+_CRIT_FILL = HexColor('#fef2f2')
+_NOTE_FILL = HexColor('#f0f4ff')   # light blue for honest-method notes
 
 
 # ─── Entry point (signature preserved) ────────────────────────────────────
@@ -58,7 +75,7 @@ def generate_report(
     label_mapping: dict | None = None,
     feature_names: list[str] | None = None,
 ) -> bytes:
-    """Generate the 9-section PDF and return it as bytes."""
+    """Generate the operational-first PDF and return it as bytes."""
     ctx = _build_context(
         experiment_id=experiment_id, dataset_type=dataset_type,
         dataset_path=dataset_path, dataset_hash=dataset_hash,
@@ -79,15 +96,14 @@ def generate_report(
     _cover(story, styles, ctx)
 
     for section_fn in (
-        _section_1_tujuan,
-        _section_2_dataset,
-        _section_3_pipeline,
-        _section_4_environment,
-        _section_5_metode,
-        _section_6_hasil,
-        _section_7_analisis,
-        _section_8_integrasi,
-        _section_9_limitasi,
+        _section_a_ringkasan,
+        _section_b_konteks,
+        _section_c_deteksi,
+        _section_d_metrik,
+        _section_e_fitur,
+        _section_f_metodologi,
+        _section_g_reproducibility,
+        _section_lampiran,
     ):
         try:
             section_fn(story, styles, ctx)
@@ -122,14 +138,22 @@ def _build_context(**kw) -> dict:
     completed_at = md.get("completed_at")
     wall_clock = _wall_clock(created_at, completed_at)
 
+    dataset_type = kw.get("dataset_type")
+    label_mapping = kw.get("label_mapping") or md.get("label_mapping")
+
+    # Operational breakdown from the confusion matrix (attack = positive class).
+    # This is the single source of truth for "detected / missed / false alarm".
+    breakdown = _confusion_breakdown(metrics.get("confusion_matrix"), label_mapping)
+
     return {
         # IDs and paths
         "experiment_id": kw.get("experiment_id"),
-        "dataset_type": kw.get("dataset_type"),
+        "dataset_type": dataset_type,
+        "is_eve": dataset_type == "EVE_SURICATA",
         "dataset_path": kw.get("dataset_path"),
         "dataset_hash": kw.get("dataset_hash") or "N/A",
         "pipeline_id": kw.get("pipeline_id"),
-        "label_mapping": kw.get("label_mapping"),
+        "label_mapping": label_mapping,
         "feature_names": kw.get("feature_names") or md.get("feature_names"),
         # Pipeline metadata (from get_info)
         "paper": pinfo.get("paper"),
@@ -138,6 +162,8 @@ def _build_context(**kw) -> dict:
         "feature_selection": pinfo.get("feature_selection"),
         "fixed_params": pinfo.get("fixed_params") or {},
         "train_test_split": pinfo.get("train_test_split") or {},
+        "anti_leakage_info": pinfo.get("anti_leakage"),
+        "metrics_policy": pinfo.get("metrics_policy"),
         "runtime_warning": pinfo.get("runtime_warning"),
         # Metrics
         "metrics": metrics,
@@ -147,15 +173,20 @@ def _build_context(**kw) -> dict:
         "f1_score": metrics.get("f1_score"),
         "roc_auc": metrics.get("roc_auc"),
         "confusion_matrix": metrics.get("confusion_matrix"),
+        "breakdown": breakdown,
         "feature_importance": metrics.get("feature_importance") or [],
         "classification_report": metrics.get("classification_report") or {},
         "learning_curve": metrics.get("learning_curve") if isinstance(
             metrics.get("learning_curve"), dict
         ) and "error" not in (metrics.get("learning_curve") or {}) else None,
+        # EVE-cbr honesty fields (absent for HIKARI)
+        "anti_leakage": metrics.get("anti_leakage") if isinstance(metrics.get("anti_leakage"), dict) else {},
+        "evaluation": metrics.get("evaluation") if isinstance(metrics.get("evaluation"), dict) else {},
+        "selected_combo": metrics.get("selected_combo") if isinstance(metrics.get("selected_combo"), dict) else {},
         # Timing
         "created_at": created_at or "N/A",
         "completed_at": completed_at or "N/A",
-        "wall_clock": wall_clock,   # str or None
+        "wall_clock": wall_clock,
         # Environment
         "env": env,
         "python_version": env.get("python_version"),
@@ -186,6 +217,267 @@ def _wall_clock(created_at, completed_at) -> str | None:
         return None
 
 
+# ─── Operational helpers (everything derived from real numbers) ───────────
+
+def _norm_label_mapping(label_mapping) -> dict:
+    """Return {int_index: name} from a mapping that may have str or int keys."""
+    out = {}
+    if isinstance(label_mapping, dict):
+        for k, v in label_mapping.items():
+            try:
+                out[int(k)] = str(v)
+            except (ValueError, TypeError):
+                continue
+    return out
+
+
+_ATTACK_WORDS = ("attack", "malicious", "malign", "intrusion", "anomaly", "serangan")
+
+
+def _confusion_breakdown(cm, label_mapping) -> dict | None:
+    """Translate a binary 2x2 confusion matrix into operational counts.
+
+    Convention (sklearn): rows = actual, cols = predicted, label order ascending
+    [0, 1]. Positive class (attack) is detected by name when possible, else
+    defaults to index 1. Returns None for non-binary / empty / all-zero matrices
+    so callers can hide the operational section cleanly.
+    """
+    if not cm or not isinstance(cm, (list, tuple)) or len(cm) != 2:
+        return None
+    try:
+        c = [[int(cm[0][0]), int(cm[0][1])], [int(cm[1][0]), int(cm[1][1])]]
+    except (ValueError, TypeError, IndexError):
+        return None
+
+    total = c[0][0] + c[0][1] + c[1][0] + c[1][1]
+    if total <= 0:
+        return None
+
+    names = _norm_label_mapping(label_mapping)
+    pos = 1
+    for idx, name in names.items():
+        if any(w in name.lower() for w in _ATTACK_WORDS):
+            pos = idx
+            break
+    neg = 0 if pos == 1 else 1
+
+    attack_name = names.get(pos, "Serangan")
+    normal_name = names.get(neg, "Normal")
+
+    tp = c[pos][pos]
+    fn = c[pos][neg]
+    fp = c[neg][pos]
+    tn = c[neg][neg]
+
+    attack_total = tp + fn
+    normal_total = tn + fp
+    pred_attack = tp + fp
+
+    def _safe(n, d):
+        return (n / d) if d else None
+
+    big, small = max(attack_total, normal_total), min(attack_total, normal_total)
+    imbalance_ratio = (big / small) if small else None
+
+    a_rec = _safe(tp, attack_total)
+    a_prec = _safe(tp, pred_attack)
+    a_f1 = None
+    if a_rec is not None and a_prec is not None and (a_rec + a_prec) > 0:
+        a_f1 = 2 * a_prec * a_rec / (a_prec + a_rec)
+
+    return {
+        "tp": tp, "fn": fn, "fp": fp, "tn": tn,
+        "total": total,
+        "attack_total": attack_total, "normal_total": normal_total,
+        "pred_attack": pred_attack,
+        "attack_recall": a_rec,
+        "attack_precision": a_prec,
+        "attack_f1": a_f1,
+        "fp_rate": _safe(fp, normal_total),
+        "specificity": _safe(tn, normal_total),
+        "attack_share": _safe(attack_total, total),
+        "imbalance_ratio": imbalance_ratio,
+        "attack_name": attack_name,
+        "normal_name": normal_name,
+        "pos_index": pos, "neg_index": neg,
+    }
+
+
+def _pct(x) -> str:
+    return f"{x*100:.1f}%" if isinstance(x, (int, float)) else "[tidak tersedia]"
+
+
+def _grp(n) -> str:
+    """Thousands-grouped integer string (e.g. 135.046) using dot separator."""
+    try:
+        return f"{int(n):,}".replace(",", ".")
+    except (ValueError, TypeError):
+        return str(n)
+
+
+def _recall_verdict(r):
+    """(color, label, clause) for attack-detection rate. Value-driven, not fixed."""
+    if r is None:
+        return _MUTED, "tidak tersedia", ""
+    if r >= 0.95:
+        return _GOOD, "sangat baik", "hampir seluruh serangan berhasil tertangkap"
+    if r >= 0.85:
+        return _GOOD, "baik", "sebagian besar serangan tertangkap, sebagian kecil lolos"
+    if r >= 0.60:
+        return _WARN, "perlu perhatian", "cukup banyak serangan lolos tanpa terdeteksi"
+    return _CRIT, "lemah", "mayoritas serangan lolos tanpa terdeteksi"
+
+
+def _precision_verdict(p):
+    """(color, label, clause) for how trustworthy an 'attack' alert is."""
+    if p is None:
+        return _MUTED, "tidak tersedia", ""
+    if p >= 0.90:
+        return _GOOD, "sangat baik", "hampir setiap alarm benar-benar serangan"
+    if p >= 0.75:
+        return _GOOD, "baik", "mayoritas alarm benar, sebagian kecil false alarm"
+    if p >= 0.50:
+        return _WARN, "perlu perhatian", "hampir separuh alarm adalah false alarm"
+    return _CRIT, "lemah", "mayoritas alarm ternyata bukan serangan (banyak false alarm)"
+
+
+def _f1_verdict(f):
+    if f is None:
+        return _MUTED, "tidak tersedia", ""
+    if f >= 0.90:
+        return _GOOD, "sangat baik", "keseimbangan deteksi dan ketepatan alarm sangat baik"
+    if f >= 0.75:
+        return _GOOD, "baik", "keseimbangan deteksi dan ketepatan alarm tergolong baik"
+    if f >= 0.55:
+        return _WARN, "perlu perhatian", "ada kompromi antara serangan lolos dan false alarm"
+    return _CRIT, "lemah", "deteksi dan ketepatan alarm sama-sama belum memadai"
+
+
+def _auc_verdict(a):
+    if a is None:
+        return _MUTED, "tidak tersedia", ""
+    if a >= 0.90:
+        return _GOOD, "sangat baik", "model memisahkan serangan dari trafik normal dengan jelas"
+    if a >= 0.80:
+        return _GOOD, "baik", "model cukup mampu memisahkan serangan dari trafik normal"
+    if a >= 0.70:
+        return _WARN, "perlu perhatian", "kemampuan memisahkan serangan dari normal masih terbatas"
+    return _CRIT, "lemah", "kemampuan memisahkan serangan dari normal mendekati tebakan acak"
+
+
+# ─── Network meaning of features (derived from the feature name itself) ────
+
+# Exact, curated meanings for features actually emitted by the pipelines.
+_FEATURE_EXACT = {
+    "bytes_per_sec": "laju volume data (byte per detik) pada aliran — throughput koneksi",
+    "pkts_per_sec": "laju paket per detik — kepadatan pengiriman paket",
+    "bytes_per_pkt": "rata-rata ukuran paket (byte/paket) — besar tiap paket",
+    "total_bytes": "total byte yang ditransfer dalam aliran",
+    "total_pkts": "total paket dalam aliran",
+    "duration": "durasi aliran (lama koneksi berlangsung)",
+    "bytes_toserver": "volume byte dari klien ke server (arah unggah)",
+    "pkts_toserver": "jumlah paket dari klien ke server",
+    "pkts_toclient": "jumlah paket dari server ke klien (arah unduh)",
+    "bytes_toserver_ratio": "porsi byte yang menuju server dibanding total — arah dominan trafik",
+    "pkts_toserver_ratio": "porsi paket yang menuju server dibanding total — arah dominan trafik",
+    "src_port": "port sumber koneksi",
+    "src_port_class": "kategori port sumber (well-known / registered / ephemeral)",
+    "dest_port_class": "kategori port tujuan — menyiratkan jenis layanan yang dihubungi",
+    "unique_dest_port_window": "banyak port tujuan unik dalam satu jendela waktu — indikator port scanning",
+    "unique_dest_ip_window": "banyak IP tujuan unik dalam satu jendela waktu — indikator sweep/penyebaran",
+    "event_count_window": "jumlah event log dalam jendela waktu — intensitas aktivitas",
+    "no_alert_count_window": "jumlah event tanpa alert dalam jendela waktu",
+    "total_bytes_window": "akumulasi byte dalam jendela waktu — burst volume",
+    "total_pkts_window": "akumulasi paket dalam jendela waktu — burst paket",
+    "bytes_per_event_window": "rata-rata byte per event dalam jendela waktu",
+    "pkts_per_event_window": "rata-rata paket per event dalam jendela waktu",
+    "ts_hour": "jam terjadinya aktivitas — pola waktu (temporal) trafik",
+    "app_proto_h": "protokol aplikasi (hash) — jenis layanan pada aliran",
+    # EVE interaction (product) features — describe both factors honestly.
+    "interaction_bytes_rate_packet_rate": "interaksi antara laju byte dan laju paket per detik",
+    "interaction_total_bytes_duration": "interaksi antara total byte dan durasi aliran",
+    "interaction_total_pkts_duration": "interaksi antara total paket dan durasi aliran",
+    # HIKARI ALLFLOWMETER common features.
+    "flow_duration": "durasi aliran (lama koneksi berlangsung)",
+    "down_up_ratio": "rasio volume unduh terhadap unggah pada aliran",
+    "fwd_subflow_bytes": "volume byte pada subflow arah maju (klien→server)",
+    "bwd_subflow_bytes": "volume byte pada subflow arah balik (server→klien)",
+    "fwd_init_window_size": "ukuran TCP receive window awal arah maju (kontrol aliran)",
+    "bwd_init_window_size": "ukuran TCP receive window awal arah balik (kontrol aliran)",
+}
+
+
+def _feature_network_meaning(name: str) -> str | None:
+    """Plain-Indonesian network meaning of a feature, derived from its name.
+
+    Returns None when the name carries no recognizable network token, so the
+    caller can omit the sentence rather than invent a meaning.
+    """
+    if not name:
+        return None
+    raw = str(name)
+    key = raw.lower()
+    if key in _FEATURE_EXACT:
+        return _FEATURE_EXACT[key]
+
+    prefix = ""
+    work = key
+    if work.startswith("log_"):
+        prefix = "skala logaritmik dari "
+        work = work[4:]
+    if work.startswith("interaction_"):
+        prefix = "kombinasi (interaksi) dari " + prefix
+        work = work[len("interaction_"):]
+
+    if work in _FEATURE_EXACT:
+        return prefix + _FEATURE_EXACT[work]
+
+    # Token-based fallback — each clause is an honest reading of the name token,
+    # not an invented statistic. Ordered specific -> general; tokens prone to
+    # substring collisions (e.g. "ratio" is inside "du-ratio-n") are placed
+    # AFTER the words that legitimately contain them.
+    rules = [
+        # window size (TCP control) BEFORE the generic "window" time-bucket token
+        ("init_window", "ukuran TCP receive window awal (kontrol aliran)"),
+        ("window_size", "ukuran TCP receive window (kontrol aliran)"),
+        # duration / IAT BEFORE "ratio" (avoids 'du-ratio-n' false match)
+        ("duration", "durasi aliran (lama koneksi)"),
+        ("iat", "inter-arrival time — jeda waktu antar paket"),
+        ("per_sec", "laju per detik (kecepatan) suatu besaran trafik"),
+        ("_rate", "laju (kecepatan) suatu besaran trafik"),
+        ("down_up_ratio", "rasio volume unduh terhadap unggah"),
+        ("ratio", "rasio antar komponen/arah trafik"),
+        ("unique_dest_port", "banyak port tujuan unik — indikator port scanning"),
+        ("unique_dest_ip", "banyak IP tujuan unik — indikator sweep jaringan"),
+        ("port_class", "kategori port (jenis layanan)"),
+        ("dest_port", "port tujuan — layanan yang dihubungi"),
+        ("src_port", "port sumber koneksi"),
+        ("toserver", "volume/arah trafik dari klien ke server"),
+        ("toclient", "volume/arah trafik dari server ke klien"),
+        ("subflow", "volume/jumlah pada subflow (segmen aliran)"),
+        ("payload", "statistik ukuran payload (byte) paket"),
+        ("header", "ukuran header paket"),
+        ("flag", "jumlah TCP flag (mis. SYN/PSH/URG) pada aliran"),
+        ("bulk", "transfer data bulk (burst) pada aliran"),
+        ("active", "lama koneksi dalam keadaan aktif"),
+        ("idle", "lama koneksi dalam keadaan idle (menganggur)"),
+        ("seg_size", "ukuran segmen paket"),
+        ("window", "agregasi dalam jendela waktu — perilaku per periode (burst/berulang)"),
+        ("bytes", "volume data (byte) yang ditransfer"),
+        ("pkts", "jumlah paket"),
+        ("packet", "jumlah paket"),
+        ("alert", "jumlah alert pada aliran"),
+        ("event", "jumlah event log pada aliran"),
+        ("proto", "protokol aplikasi yang dipakai"),
+        ("hour", "jam aktivitas — pola waktu (temporal)"),
+        ("flow", "karakteristik aliran (flow) jaringan"),
+    ]
+    for token, meaning in rules:
+        if token in work:
+            return prefix + meaning
+    return None
+
+
 # ─── Style sheet ──────────────────────────────────────────────────────────
 
 def _build_styles() -> dict:
@@ -194,44 +486,34 @@ def _build_styles() -> dict:
         "title": ParagraphStyle("Title", parent=base["Title"], fontSize=20, spaceAfter=4*mm),
         "subtitle": ParagraphStyle("Sub", parent=base["Heading4"], fontSize=11,
                                     textColor=_MUTED, spaceAfter=4*mm),
+        "verdict": ParagraphStyle("Verdict", parent=base["Normal"], fontSize=11,
+                                   leading=15),
         "section": ParagraphStyle("Section", parent=base["Heading2"], fontSize=14,
                                    spaceBefore=8*mm, spaceAfter=3*mm, textColor=_PRIMARY),
         "subsection": ParagraphStyle("Subsec", parent=base["Heading3"], fontSize=11,
                                       spaceBefore=4*mm, spaceAfter=2*mm, textColor=_PRIMARY),
-        "normal": base["Normal"],
+        "normal": ParagraphStyle("Body", parent=base["Normal"], fontSize=10, leading=14),
         "italic": ParagraphStyle("Italic", parent=base["Normal"], fontName="Helvetica-Oblique"),
         "small_muted": ParagraphStyle("SmallMuted", parent=base["Normal"],
                                        fontSize=8, textColor=_MUTED),
-        "placeholder": ParagraphStyle("Placeholder", parent=base["Normal"],
-                                       fontName="Helvetica-Oblique", textColor=HexColor('#705500')),
         "note": ParagraphStyle("Note", parent=base["Normal"],
                                 fontName="Helvetica-Oblique", fontSize=9, textColor=_MUTED),
+        "cell": ParagraphStyle("Cell", parent=base["Normal"], fontSize=9, leading=12),
     }
 
 
 # ─── Reusable mini-blocks ─────────────────────────────────────────────────
 
-def _placeholder_block(text: str, styles: dict):
-    """Visually distinct [ISI ANALISIS ...] block (light-yellow with border)."""
-    p = Paragraph(text, styles["placeholder"])
-    t = Table([[p]], colWidths=[16*cm])
-    t.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, -1), _PLACEHOLDER_FILL),
-        ("BOX", (0, 0), (-1, -1), 0.75, _PLACEHOLDER_BORDER),
-        ("LEFTPADDING", (0, 0), (-1, -1), 8),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-    ]))
-    return t
-
-
 def _kv_table(rows: list[list[str]], col_widths=(5*cm, 11*cm)):
-    t = Table(rows, colWidths=list(col_widths))
+    wrapped = []
+    style_cell = ParagraphStyle("kvcell", fontSize=9, leading=12)
+    for r in rows:
+        wrapped.append([Paragraph(str(r[0]), ParagraphStyle("kvkey", fontSize=9, leading=12,
+                                                             fontName="Helvetica-Bold")),
+                        Paragraph(str(r[1]), style_cell)])
+    t = Table(wrapped, colWidths=list(col_widths))
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, -1), HexColor('#f0f0f0')),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("GRID", (0, 0), (-1, -1), 0.5, _GRID),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -241,8 +523,23 @@ def _kv_table(rows: list[list[str]], col_widths=(5*cm, 11*cm)):
     return t
 
 
-def _section_heading(story, styles, number: int, title: str) -> None:
-    story.append(Paragraph(f"{number}. {title}", styles["section"]))
+def _callout(text: str, styles, *, fill, border):
+    """Colored callout box (used for the critical 'serangan lolos' highlight)."""
+    p = Paragraph(text, styles["normal"])
+    t = Table([[p]], colWidths=[16*cm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), fill),
+        ("BOX", (0, 0), (-1, -1), 0.9, border),
+        ("LEFTPADDING", (0, 0), (-1, -1), 8),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+        ("TOPPADDING", (0, 0), (-1, -1), 6),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+    ]))
+    return t
+
+
+def _section_heading(story, styles, letter: str, title: str) -> None:
+    story.append(Paragraph(f"{letter}. {title}", styles["section"]))
 
 
 def _none_or(v, fallback="[tidak tersedia]"):
@@ -252,236 +549,487 @@ def _none_or(v, fallback="[tidak tersedia]"):
     return str(v)
 
 
-# ─── Cover ────────────────────────────────────────────────────────────────
+def _hexcolor_name(c) -> str:
+    """ReportLab HexColor → '#rrggbb' for inline <font color=...> tags."""
+    return '#%02x%02x%02x' % (int(c.red * 255), int(c.green * 255), int(c.blue * 255))
+
+
+# ─── Cover (+ one-line detection verdict) ─────────────────────────────────
 
 def _cover(story, styles, ctx):
-    story.append(Paragraph("Experiment Report", styles["title"]))
+    story.append(Paragraph("Laporan Eksperimen Deteksi Intrusi", styles["title"]))
     story.append(Paragraph("IDS Research Pipeline Execution System", styles["subtitle"]))
     story.append(HRFlowable(width="100%", thickness=1, color=_GRID))
-    story.append(Spacer(1, 4*mm))
+    story.append(Spacer(1, 3*mm))
+
+    b = ctx["breakdown"]
+    if b and b["attack_recall"] is not None:
+        color, label, _ = _recall_verdict(b["attack_recall"])
+        ch = _hexcolor_name(color)
+        verdict = (
+            f"Pada pengujian ini model mengenali "
+            f"<b><font color='{ch}'>{_pct(b['attack_recall'])}</font></b> dari serangan yang ada "
+            f"(<b>{_grp(b['tp'])}</b> dari <b>{_grp(b['attack_total'])}</b> serangan), "
+            f"dengan <b>{_grp(b['fn'])}</b> serangan lolos dan "
+            f"<b>{_grp(b['fp'])}</b> false alarm dari "
+            f"<b>{_grp(b['normal_total'])}</b> aliran normal."
+        )
+        story.append(Paragraph(verdict, styles["verdict"]))
+        story.append(Spacer(1, 3*mm))
+
     story.append(_kv_table([
         ["Experiment ID", _none_or(ctx["experiment_id"])],
         ["Dataset", _none_or(ctx["dataset_type"])],
         ["Pipeline", _none_or(ctx["pipeline_id"])],
-        ["Algorithm", _none_or(ctx["algorithm"])],
-        ["Created", _none_or(ctx["created_at"])],
-        ["Completed", _none_or(ctx["completed_at"])],
+        ["Algoritma", _none_or(ctx["algorithm"])],
+        ["Dibuat", _none_or(ctx["created_at"])],
+        ["Selesai", _none_or(ctx["completed_at"])],
     ]))
 
 
-# ─── 1. Tujuan Model ──────────────────────────────────────────────────────
+# ─── A. Ringkasan Eksekutif (computed paragraph) ──────────────────────────
 
-_TUJUAN_BY_DATASET = {
-    "HIKARI2021": (
-        "Model machine learning pada eksperimen ini berfungsi sebagai detection engine untuk "
-        "klasifikasi trafik terenkripsi pada dataset HIKARI2021 (varian ALLFLOWMETER), dengan "
-        "label biner benign versus malicious. Klasifikasi dilakukan pada fitur flow yang sudah "
-        "diekstraksi; eksperimen tidak melakukan dekripsi maupun analisis payload."
-    ),
-    "EVE_SURICATA": (
-        "Model machine learning pada eksperimen ini berfungsi sebagai detection engine untuk "
-        "klasifikasi catatan EVE Suricata pada trafik TLS, dengan label biner yang diturunkan "
-        "dari alert Suricata lalu disempurnakan secara konservatif (dengan pembatasan konversi "
-        "label). Eksperimen berorientasi batch pada berkas NDJSON yang sudah tersedia, bukan "
-        "pada stream alert real-time dari Suricata yang sedang berjalan."
-    ),
-}
+def _section_a_ringkasan(story, styles, ctx):
+    _section_heading(story, styles, "A", "Ringkasan Eksekutif")
 
+    algo = ctx["algorithm"] or "Model machine learning"
+    ds = "EVE/Suricata (trafik TLS)" if ctx["is_eve"] else (ctx["dataset_type"] or "dataset terpilih")
+    b = ctx["breakdown"]
 
-def _section_1_tujuan(story, styles, ctx):
-    _section_heading(story, styles, 1, "Tujuan Model")
-    text = _TUJUAN_BY_DATASET.get(
-        ctx["dataset_type"],
-        "Model machine learning pada eksperimen ini berfungsi sebagai detection engine "
-        "yang melakukan klasifikasi pada dataset terpilih. Eksperimen berorientasi batch "
-        "dan tidak melakukan alert generation real-time."
-    )
-    story.append(Paragraph(text, styles["normal"]))
-
-
-# ─── 2. Dataset dan Karakteristik ─────────────────────────────────────────
-
-def _section_2_dataset(story, styles, ctx):
-    _section_heading(story, styles, 2, "Dataset dan Karakteristik")
-
-    full_hash = ctx["dataset_hash"]
-    rows = [
-        ["Nama dataset", _none_or(ctx["dataset_type"])],
-        ["Berkas sumber", _none_or(ctx["dataset_path"])],
-        ["SHA-256 (lengkap)", full_hash],
-        ["Jumlah baris (total)", "[ISI: tidak tersimpan di metadata.json]"],
-        ["Baris training", "[ISI: tidak tersimpan di metadata.json]"],
-        ["Baris testing", "[ISI: tidak tersimpan di metadata.json]"],
-        ["Distribusi label (benign vs malicious)", "[ISI: tidak tersimpan; lihat confusion matrix di Bagian 6]"],
-    ]
-    story.append(_kv_table(rows))
-    story.append(Spacer(1, 3*mm))
-
-    story.append(Paragraph("Karakteristik dan preprocessing yang dipakai pipeline:",
-                            styles["subsection"]))
-
-    char_map = {
-        "HIKARI2021": "Fitur numerik berbasis flow varian ALLFLOWMETER, mencakup payload statistics dan window/header counts.",
-        "EVE_SURICATA": "Hasil parsing NDJSON EVE Suricata pada trafik TLS; pipeline cbr 14 fase dengan pertahanan anti-leakage berlapis (group-split, scaling in-pipeline, leakage guard) dan label yang disempurnakan konservatif (cap konversi).",
-    }
-    story.append(Paragraph(
-        f"<b>Jenis fitur:</b> {char_map.get(ctx['dataset_type'], '[ISI: jelaskan jenis fitur]')}",
-        styles["normal"],
-    ))
-
-    steps = ctx["preprocessing_steps"]
-    if steps:
-        steps_html = "<br/>".join(f"<b>{i+1}.</b> {s}" for i, s in enumerate(steps))
-        story.append(Spacer(1, 2*mm))
-        story.append(Paragraph(f"<b>Langkah preprocessing (dari get_info):</b><br/>{steps_html}",
-                                styles["normal"]))
-    else:
+    if not b:
         story.append(Paragraph(
-            "<b>Langkah preprocessing:</b> tidak tersedia dari pipeline_info.",
-            styles["italic"],
+            f"Eksperimen ini menjalankan algoritma <b>{algo}</b> pada dataset <b>{ds}</b>. "
+            "Rincian hasil deteksi tidak dapat diterjemahkan ke bentuk operasional karena "
+            "confusion matrix tidak tersedia atau bukan biner; lihat tabel metrik teknis "
+            "pada Lampiran.",
+            styles["normal"],
+        ))
+        return
+
+    rec, prec = b["attack_recall"], b["attack_precision"]
+    rcolor, rlabel, rclause = _recall_verdict(rec)
+    pcolor, plabel, pclause = _precision_verdict(prec)
+    rc, pc = _hexcolor_name(rcolor), _hexcolor_name(pcolor)
+
+    para = (
+        f"Algoritma <b>{algo}</b> diuji untuk membedakan trafik serangan dari trafik normal pada "
+        f"dataset <b>{ds}</b>. Dari total <b>{_grp(b['total'])}</b> aliran jaringan yang diuji "
+        f"(<b>{_grp(b['attack_total'])}</b> benar-benar serangan dan "
+        f"<b>{_grp(b['normal_total'])}</b> normal), model berhasil mendeteksi "
+        f"<b><font color='{rc}'>{_pct(rec)}</font></b> serangan ({rlabel} — {rclause}). "
+        f"Sebanyak <b><font color='{_hexcolor_name(_CRIT)}'>{_grp(b['fn'])}</font></b> serangan "
+        f"lolos tanpa terdeteksi, dan <b>{_grp(b['fp'])}</b> aliran normal salah ditandai sebagai "
+        f"serangan (false alarm). "
+        f"Ketika model menyalakan alarm 'serangan', alarm itu tepat sebesar "
+        f"<b><font color='{pc}'>{_pct(prec)}</font></b> ({plabel} — {pclause})."
+    )
+    story.append(Paragraph(para, styles["normal"]))
+
+    # Honest one-liner about label provenance for EVE.
+    if ctx["is_eve"]:
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph(
+            "Catatan: pada dataset EVE/Suricata, label 'serangan' diturunkan dari alert "
+            "Suricata (bukan kebenaran lapangan/ground-truth eksternal). Angka di atas adalah "
+            "metrik kelas serangan pada natural-holdout (distribusi asli).",
+            styles["note"],
         ))
 
 
-# ─── 3. Pipeline ML ───────────────────────────────────────────────────────
+# ─── B. Konteks Eksperimen ────────────────────────────────────────────────
 
-_FLOW_DEFAULT = [
-    "Dataset Ingestion (CSV / NDJSON)",
-    "Preprocessing (cleaning, encoding)",
-    "Feature Selection",
-    "Train-Test Split (stratified, random_state tetap)",
-    "Model Training (hyperparameter terkunci)",
-    "Evaluation (metrik utama + extra_info)",
-    "Artifact Serialization (joblib model.pkl + metrics.json + metadata.json)",
-]
+def _section_b_konteks(story, styles, ctx):
+    _section_heading(story, styles, "B", "Konteks Eksperimen")
 
-
-def _section_3_pipeline(story, styles, ctx):
-    _section_heading(story, styles, 3, "Pipeline ML")
-
-    # Use feature_selection text from get_info if available
-    fs = ctx["feature_selection"] or "(detail di pipeline_info.feature_selection)"
-
-    flow = list(_FLOW_DEFAULT)
-    flow[2] = f"Feature Selection: {fs}"
-
-    if ctx["dataset_type"] == "EVE_SURICATA":
-        flow.insert(1, "EVE preprocessing cbr 14 fase (split TLS, profiling probing, refinement label dengan cap konversi, konstruksi & pembersihan fitur, screening leakage, feature selection train-only, pelatihan & evaluasi dual-holdout)")
-
-    # Render as a numbered flow (text-based, no ASCII art)
-    flow_html = "<br/>".join(
-        f"<b>{i+1}.</b> {step} &nbsp;&nbsp;&#8595;" if i < len(flow) - 1 else f"<b>{i+1}.</b> {step}"
-        for i, step in enumerate(flow)
-    )
-    story.append(Paragraph(flow_html, styles["normal"]))
-
-    story.append(Spacer(1, 3*mm))
-    note = (
-        "Alur berhenti pada serialisasi artefak. Platform ini tidak menyediakan "
-        "deployment ke endpoint API inference atau alert storage; model dipakai "
-        "kembali untuk evaluasi atau rerun, bukan untuk serving real-time."
-    )
-    story.append(Paragraph(f"<i>Catatan kejujuran:</i> {note}", styles["note"]))
-
-    # Fixed parameters + train-test split from get_info
-    if ctx["fixed_params"]:
-        story.append(Spacer(1, 3*mm))
-        story.append(Paragraph("Hyperparameter terkunci (dari get_info):", styles["subsection"]))
-        rows = [[k, str(v)] for k, v in ctx["fixed_params"].items()]
-        story.append(_kv_table(rows, col_widths=(6*cm, 10*cm)))
-
-    if ctx["train_test_split"]:
-        story.append(Spacer(1, 3*mm))
-        story.append(Paragraph("Konfigurasi train-test split:", styles["subsection"]))
-        rows = [[k, str(v)] for k, v in ctx["train_test_split"].items()]
-        story.append(_kv_table(rows, col_widths=(6*cm, 10*cm)))
-
-
-# ─── 4. Environment dan Reproducibility ───────────────────────────────────
-
-def _section_4_environment(story, styles, ctx):
-    _section_heading(story, styles, 4, "Environment dan Reproducibility")
+    if ctx["is_eve"]:
+        label_origin = ("Turunan dari alert Suricata pada trafik TLS, lalu disempurnakan "
+                        "secara konservatif (cap konversi label). BUKAN ground-truth eksternal.")
+        fmt = "NDJSON (catatan EVE Suricata, satu objek JSON per baris)"
+        feat_kind = ("Fitur statistik aliran (flow) hasil pipeline cbr 14 fase: volume byte/paket, "
+                     "laju, durasi, agregasi per jendela waktu, dan karakteristik port/protokol.")
+    else:
+        label_origin = ("Label ground-truth bawaan dataset HIKARI2021 (varian ALLFLOWMETER): "
+                        "biner benign vs malicious.")
+        fmt = "CSV (fitur flow ALLFLOWMETER yang sudah diekstraksi)"
+        feat_kind = ("Fitur numerik berbasis flow (varian ALLFLOWMETER): statistik payload, "
+                     "perhitungan header/paket, dan atribut koneksi.")
 
     rows = [
-        ["Python version", _none_or(ctx["python_version"])],
-        ["scikit-learn", _none_or(ctx["sklearn_version"])],
-        ["pandas", _none_or(ctx["pandas_version"])],
-        ["numpy", _none_or(ctx["numpy_version"])],
-        ["Platform", _none_or(ctx["platform_str"])],
-        ["Docker", "Ya" if ctx["is_docker"] else ("Tidak" if ctx["is_docker"] is False else "[tidak tercatat]")],
-        ["Docker image version", _none_or(ctx["docker_image_version"])],
-        ["random_state (invariant platform)", "42 (terkunci untuk seluruh operasi stokastik)"],
-        ["Dataset SHA-256", ctx["dataset_hash"]],
+        ["Dataset", _none_or(ctx["dataset_type"])],
+        ["Format berkas", fmt],
+        ["Asal label", label_origin],
+        ["Algoritma", _none_or(ctx["algorithm"])],
+        ["Berkas sumber", _none_or(ctx["dataset_path"])],
+        ["Tanggal eksperimen", _none_or(ctx["created_at"])],
     ]
+    if ctx["wall_clock"]:
+        rows.append(["Durasi total (queue + eksekusi)", ctx["wall_clock"]])
+    b = ctx["breakdown"]
+    if b:
+        rows.append(["Aliran diuji (test set)",
+                     f"{_grp(b['total'])} (serangan {_grp(b['attack_total'])} / "
+                     f"normal {_grp(b['normal_total'])})"])
     story.append(_kv_table(rows))
 
-    story.append(Spacer(1, 3*mm))
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph(f"<b>Jenis fitur:</b> {feat_kind}", styles["normal"]))
+
+    # Key locked configuration (from get_info) — concise, real values only.
+    cfg = ctx["fixed_params"]
+    if cfg:
+        compact = ", ".join(f"{k}={v}" for k, v in list(cfg.items())[:8])
+        story.append(Spacer(1, 2*mm))
+        story.append(Paragraph(
+            f"<b>Konfigurasi kunci (terkunci):</b> {compact}", styles["normal"]))
+
+
+# ─── C. Hasil Deteksi — Interpretasi Jaringan (INTI) ──────────────────────
+
+def _section_c_deteksi(story, styles, ctx):
+    _section_heading(story, styles, "C", "Hasil Deteksi — Interpretasi Jaringan")
+
+    b = ctx["breakdown"]
+    if not b:
+        story.append(Paragraph(
+            "Confusion matrix tidak tersedia atau bukan biner, sehingga hasil tidak dapat "
+            "diterjemahkan ke kuadran operasional. Lihat tabel metrik teknis pada Lampiran.",
+            styles["italic"],
+        ))
+        return
+
     story.append(Paragraph(
-        "Kombinasi random_state yang dikunci, dataset hash yang tercatat, dan lingkungan "
-        "yang dikontainerisasi memungkinkan eksperimen direproduksi bit-per-bit pada mesin "
-        "lain. Selama hash dataset sama, kode pipeline sama, dan environment image sama, "
-        "metrik yang dihasilkan akan identik antar eksekusi. Sifat ini adalah nilai jual "
-        "utama platform dan menjadi dasar klaim reproducibility tugas akhir.",
-        styles["normal"],
-    ))
-
-
-# ─── 5. Metode Evaluasi ───────────────────────────────────────────────────
-
-_METRIC_EXPLAIN = [
-    ("Accuracy",
-     "Proporsi prediksi yang benar dari total prediksi. Pada dataset IDS dengan kelas "
-     "tidak seimbang, accuracy bisa menyesatkan karena dominansi kelas benign."),
-    ("Precision",
-     "Dari semua trafik yang ditandai malicious oleh model, berapa proporsi yang benar-benar "
-     "malicious. Precision rendah berarti banyak false positive, yang menghasilkan alert "
-     "lelah (alert fatigue) pada operator IDS."),
-    ("Recall",
-     "Dari semua trafik malicious yang sebenarnya, berapa proporsi yang berhasil "
-     "ditemukan model. Recall rendah berarti banyak false negative, yaitu serangan lolos "
-     "tidak terdeteksi. Pada konteks keamanan, recall sering lebih kritis daripada precision."),
-    ("F1-score",
-     "Harmonic mean dari precision dan recall, memberi satu angka ringkasan ketika kedua "
-     "sisi diberi bobot sama. Digunakan sebagai metrik utama bila tidak ada preferensi "
-     "operasional spesifik antara false positive dan false negative."),
-    ("ROC-AUC",
-     "Area di bawah kurva ROC, mengukur kemampuan model membedakan kelas pada berbagai "
-     "threshold. Nilai mendekati 1 menandakan separabilitas yang baik; 0,5 setara tebak acak."),
-    ("Confusion Matrix",
-     "Tabel jumlah prediksi per pasangan (actual, predicted). Sumber data mentah untuk "
-     "menghitung precision, recall, false positive rate, dan menelusuri kelas mana yang "
-     "saling tertukar."),
-]
-
-
-def _section_5_metode(story, styles, ctx):
-    _section_heading(story, styles, 5, "Metode Evaluasi")
-    story.append(Paragraph(
-        "Pada konteks Intrusion Detection System, false negative (serangan lolos) dan "
-        "false positive (alarm palsu) memiliki konsekuensi operasional yang berbeda. "
-        "Karenanya, evaluasi tidak bergantung pada accuracy tunggal, melainkan pada "
-        "kombinasi metrik berikut yang masing-masing menyoroti aspek berbeda dari performa.",
+        "Tabel berikut menerjemahkan hasil model ke empat kemungkinan operasional. "
+        "Tiap angka adalah jumlah aliran nyata pada data uji.",
         styles["normal"],
     ))
     story.append(Spacer(1, 2*mm))
-    for name, desc in _METRIC_EXPLAIN:
-        story.append(Paragraph(f"<b>{name}.</b> {desc}", styles["normal"]))
+
+    an, nn = b["attack_name"], b["normal_name"]
+    quad_rows = [
+        ["Kategori", "Jumlah", "Arti operasional"],
+        [f"Serangan terdeteksi (TP)", _grp(b["tp"]),
+         f"{an} yang berhasil dikenali model — deteksi yang benar."],
+        [f"Serangan LOLOS (FN)", _grp(b["fn"]),
+         f"{an} yang TIDAK terdeteksi (dianggap normal) — risiko keamanan paling kritis."],
+        [f"False alarm (FP)", _grp(b["fp"]),
+         f"{nn} yang salah ditandai sebagai serangan — membebani analis (alert fatigue)."],
+        [f"Normal benar (TN)", _grp(b["tn"]),
+         f"{nn} yang benar dibiarkan lewat — tidak mengganggu operasi."],
+    ]
+    # Wrap the long 'arti' column via Paragraphs for proper line breaking.
+    qt = Table(
+        [quad_rows[0]] + [
+            [r[0], r[1], Paragraph(r[2], styles["cell"])] for r in quad_rows[1:]
+        ],
+        colWidths=[4.2*cm, 2.3*cm, 9.5*cm],
+    )
+    qt.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), _PRIMARY),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("GRID", (0, 0), (-1, -1), 0.5, _GRID),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (1, 0), (1, -1), "CENTER"),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 5),
+        ("BACKGROUND", (0, 2), (-1, 2), _CRIT_FILL),
+        ("TEXTCOLOR", (0, 2), (0, 2), _CRIT),
+        ("FONTNAME", (0, 2), (0, 2), "Helvetica-Bold"),
+        ("BACKGROUND", (0, 3), (-1, 3), _WARN_FILL),
+    ]))
+    story.append(qt)
+
+    # Critical highlight callout — value-driven.
+    story.append(Spacer(1, 3*mm))
+    if b["attack_total"]:
+        miss_pct = b["fn"] / b["attack_total"]
+        story.append(_callout(
+            f"<b><font color='{_hexcolor_name(_CRIT)}'>Serangan lolos (paling kritis):</font></b> "
+            f"<b>{_grp(b['fn'])}</b> dari <b>{_grp(b['attack_total'])}</b> serangan "
+            f"(<b>{_pct(miss_pct)}</b>) tidak terdeteksi dan akan melewati sistem tanpa alarm.",
+            styles, fill=_CRIT_FILL, border=_CRIT,
+        ))
+    if b["normal_total"] and b["fp_rate"] is not None:
+        story.append(Spacer(1, 2*mm))
+        story.append(_callout(
+            f"<b><font color='{_hexcolor_name(_WARN)}'>Beban false alarm:</font></b> "
+            f"<b>{_grp(b['fp'])}</b> dari <b>{_grp(b['normal_total'])}</b> aliran normal "
+            f"(<b>{_pct(b['fp_rate'])}</b>) memicu alarm palsu — biaya investigasi bagi analis.",
+            styles, fill=_WARN_FILL, border=_WARN,
+        ))
+
+    # Labeled confusion-matrix figure.
+    story.append(Spacer(1, 3*mm))
+    try:
+        cm_img = _render_network_confusion_matrix(b)
+        story.append(Image(cm_img, width=12*cm, height=10*cm))
+    except Exception as e:
+        story.append(Paragraph(f"<i>Gagal merender confusion matrix: {e}</i>", styles["italic"]))
+
+
+# ─── D. Metrik Performa — Penjelasan Awam ─────────────────────────────────
+
+def _section_d_metrik(story, styles, ctx):
+    _section_heading(story, styles, "D", "Metrik Performa — Penjelasan Awam")
+
+    b = ctx["breakdown"]
+    is_eve = ctx["is_eve"]
+
+    if b:
+        intro = (
+            "Recall, Precision, dan F1 di bawah dihitung untuk <b>kelas serangan</b> — sudut "
+            "pandang yang paling relevan secara operasional — langsung dari jumlah deteksi "
+            "(confusion matrix di Bagian C)."
+        )
+        if not is_eve:
+            intro += (" Catatan: metrik headline weighted (rata-rata seluruh kelas) tersedia "
+                      "pada Lampiran.")
+    else:
+        intro = ("Nilai metrik diambil apa adanya dari hasil eksperimen; penjelasan disesuaikan "
+                 "untuk pembaca non-ML.")
+    story.append(Paragraph(intro, styles["normal"]))
+    story.append(Spacer(1, 2*mm))
+
+    # Operational framing always uses attack-class values derived from the
+    # confusion matrix (correct & consistent for both families). When the
+    # matrix is unavailable, fall back to the stored headline values.
+    if b:
+        recall_val = b["attack_recall"]
+        precision_val = b["attack_precision"]
+        f1_val = b["attack_f1"]
+    else:
+        recall_val = ctx["recall"]
+        precision_val = ctx["precision"]
+        f1_val = ctx["f1_score"]
+
+    items = []
+
+    if recall_val is not None:
+        color, label, clause = _recall_verdict(recall_val)
+        extra = ""
+        if b:
+            extra = f" Artinya {_grp(b['fn'])} dari {_grp(b['attack_total'])} serangan lolos."
+        items.append((
+            "Recall (tingkat deteksi serangan)", recall_val, color, label,
+            f"Dari semua serangan yang sebenarnya ada, {_pct(recall_val)} berhasil terdeteksi "
+            f"(sisanya lolos).{extra}"
+        ))
+
+    if precision_val is not None:
+        color, label, clause = _precision_verdict(precision_val)
+        extra = ""
+        if b:
+            extra = f" Dari {_grp(b['pred_attack'])} alarm, {_grp(b['fp'])} adalah false alarm."
+        items.append((
+            "Precision (ketepatan alarm)", precision_val, color, label,
+            f"Dari semua yang ditandai sebagai serangan, {_pct(precision_val)} benar-benar "
+            f"serangan (sisanya false alarm).{extra}"
+        ))
+
+    if f1_val is not None:
+        color, label, clause = _f1_verdict(f1_val)
+        items.append((
+            "F1-score (keseimbangan)", f1_val, color, label,
+            "Keseimbangan antara tidak meloloskan serangan dan tidak membuat false alarm. "
+            f"{clause.capitalize()}."
+        ))
+
+    if ctx["accuracy"] is not None:
+        # Accuracy can mislead under class imbalance — warn using the real ratio.
+        imbalanced = bool(b and b["imbalance_ratio"] and b["imbalance_ratio"] >= 1.5)
+        color = _WARN if imbalanced else _GOOD
+        label = "baca dengan hati-hati" if imbalanced else "informatif"
+        desc = (f"Proporsi seluruh prediksi yang benar ({_pct(ctx['accuracy'])}).")
+        if imbalanced:
+            share = b["attack_share"]
+            desc += (f" PERHATIAN: data tidak seimbang (serangan hanya {_pct(share)} dari "
+                     f"total), sehingga accuracy bisa terlihat tinggi meski sebagian serangan "
+                     f"lolos — utamakan Recall & Precision di atas.")
+        items.append(("Accuracy (akurasi keseluruhan)", ctx["accuracy"], color, label, desc))
+
+    if ctx["roc_auc"] is not None:
+        color, label, clause = _auc_verdict(ctx["roc_auc"])
+        items.append((
+            "ROC-AUC (daya pisah)", ctx["roc_auc"], color, label,
+            f"Kemampuan model memisahkan serangan dari trafik normal secara keseluruhan "
+            f"(1,0 = sempurna; 0,5 = tebak acak). {clause.capitalize()}."
+        ))
+
+    for name, value, color, label, desc in items:
+        ch = _hexcolor_name(color)
+        head = (f"<b>{name}: <font color='{ch}'>{value:.4f}</font></b> "
+                f"<font color='{ch}'>({label})</font>")
+        story.append(Paragraph(head, styles["normal"]))
+        story.append(Paragraph(desc, styles["cell"]))
+        story.append(Spacer(1, 2*mm))
+
+
+# ─── E. Fitur Jaringan Paling Berpengaruh ─────────────────────────────────
+
+def _section_e_fitur(story, styles, ctx):
+    fi = ctx["feature_importance"]
+    if not fi:
+        # Only show the section header + honest note for algorithms that
+        # genuinely lack importances; otherwise hide entirely.
+        algo = (ctx["algorithm"] or "").lower()
+        if any(k in algo for k in ("knn", "naive", "nearest", "logistic", "svc", "svm")):
+            _section_heading(story, styles, "E", "Fitur Jaringan Paling Berpengaruh")
+            story.append(Paragraph(
+                f"Algoritma {ctx['algorithm']} tidak menghasilkan skor kepentingan fitur "
+                "(feature importance) yang dapat dipetakan ke fitur jaringan asli, sehingga "
+                "bagian ini tidak ditampilkan.",
+                styles["italic"],
+            ))
+        return
+
+    _section_heading(story, styles, "E", "Fitur Jaringan Paling Berpengaruh")
+    story.append(Paragraph(
+        "Fitur berikut paling menentukan keputusan model. Bagi network engineer, ini menunjukkan "
+        "sinyal trafik apa yang paling membedakan serangan dari trafik normal.",
+        styles["normal"],
+    ))
+    story.append(Spacer(1, 2*mm))
+    try:
+        fi_img = _render_feature_importance(fi)
+        story.append(Image(fi_img, width=14*cm, height=8*cm))
+    except Exception as e:
+        story.append(Paragraph(f"<i>Gagal merender feature importance: {e}</i>", styles["italic"]))
+
+    story.append(Spacer(1, 2*mm))
+    story.append(Paragraph("Arti fitur teratas dalam istilah jaringan:", styles["subsection"]))
+    shown = 0
+    for item in fi[:6]:
+        name = item.get("feature")
+        meaning = _feature_network_meaning(name)
+        if not name:
+            continue
+        if meaning:
+            story.append(Paragraph(
+                f"<b>{name}</b> — {meaning}.", styles["cell"]))
+        else:
+            # Honest: do not invent a meaning for an unrecognized name.
+            story.append(Paragraph(
+                f"<b>{name}</b> — statistik aliran jaringan (makna spesifik tidak dipetakan).",
+                styles["cell"],
+            ))
         story.append(Spacer(1, 1*mm))
+        shown += 1
+        if shown >= 5:
+            break
 
 
-# ─── 6. Hasil Model ───────────────────────────────────────────────────────
+# ─── F. Catatan Metodologis (kejujuran) ───────────────────────────────────
 
-def _section_6_hasil(story, styles, ctx):
-    _section_heading(story, styles, 6, "Hasil Model")
+def _section_f_metodologi(story, styles, ctx):
+    _section_heading(story, styles, "F", "Catatan Metodologis (Kejujuran)")
+
+    notes = []
+    if ctx["is_eve"]:
+        notes.append(
+            "Semantik metrik: precision/recall/F1 dihitung untuk <b>kelas serangan</b> pada "
+            "<b>natural-holdout</b> (distribusi asli, apa adanya) — bukan rata-rata berbobot. "
+            "Ini sengaja dipilih agar angka jujur terhadap kelas minoritas (serangan)."
+        )
+        notes.append(
+            "Asal label: label serangan diturunkan dari <b>alert Suricata</b> lalu disempurnakan "
+            "konservatif (cap konversi). Ini bukan kebenaran lapangan eksternal, sehingga hasil "
+            "harus dibaca sebagai kesepakatan model terhadap alert, bukan deteksi mutlak."
+        )
+        al = ctx["anti_leakage"]
+        if al:
+            parts = []
+            if al.get("group_split"):
+                parts.append(f"pemisahan data berbasis grup ({al['group_split']})")
+            if al.get("pipeline_scaling"):
+                parts.append("penskalaan di dalam pipeline (tanpa kebocoran ke data uji)")
+            if al.get("dual_holdout"):
+                parts.append("dual holdout: natural (utama) + balanced (sekunder)")
+            if al.get("forbidden_feature_guard"):
+                parts.append("penjaga fitur terlarang (kolom yang membocorkan label diblokir)")
+            if parts:
+                notes.append("Anti-kebocoran (anti-leakage): " + "; ".join(parts) + ".")
+    else:
+        notes.append(
+            "Semantik metrik: precision/recall/F1 headline adalah <b>rata-rata berbobot "
+            "(weighted)</b> antar kelas. Untuk fokus pada kelas serangan, lihat baris kelas "
+            "Malicious pada Lampiran (Per-Class Report) dan kuadran deteksi di Bagian C."
+        )
+        notes.append(
+            "Asal label: <b>ground-truth</b> bawaan dataset HIKARI2021 (benign vs malicious)."
+        )
+        notes.append(
+            "Anti-kebocoran: scaler/PCA/penyeimbang (balancing) di-<i>fit</i> hanya pada data "
+            "latih setelah split, lalu diterapkan ke data uji — mencegah kebocoran informasi."
+        )
+
+    # Imbalance honesty (computed).
+    b = ctx["breakdown"]
+    if b and b["attack_share"] is not None:
+        notes.append(
+            f"Keseimbangan kelas pada data uji: serangan {_pct(b['attack_share'])} dari total "
+            f"({_grp(b['attack_total'])} serangan vs {_grp(b['normal_total'])} normal). "
+            "Pada data timpang, accuracy tunggal dapat menyesatkan."
+        )
+
+    for n in notes:
+        story.append(Paragraph(f"• {n}", styles["normal"]))
+        story.append(Spacer(1, 1.5*mm))
+
+    # Conditional algorithm caveat (only when relevant).
+    algo = (ctx["algorithm"] or "").lower()
+    if "svc" in algo or "svm" in algo:
+        story.append(Paragraph(
+            "• Keterbatasan algoritma: Support Vector Classifier berskala O(n²) dan sangat lambat "
+            "pada data ratusan ribu baris; platform menampilkan peringatan runtime sebelum eksekusi.",
+            styles["note"],
+        ))
+    if ctx["runtime_warning"]:
+        story.append(Paragraph(f"• {ctx['runtime_warning']}", styles["note"]))
+
+
+# ─── G. Informasi Reproducibility ─────────────────────────────────────────
+
+def _section_g_reproducibility(story, styles, ctx):
+    _section_heading(story, styles, "G", "Informasi Reproducibility")
+    story.append(Paragraph(
+        "Eksperimen dirancang dapat direproduksi: selama hash dataset, kode pipeline, dan "
+        "environment sama, metrik yang dihasilkan identik antar eksekusi.",
+        styles["normal"],
+    ))
+    story.append(Spacer(1, 2*mm))
+    rows = [
+        ["Dataset SHA-256", ctx["dataset_hash"]],
+        ["random_state / seed", "42 (terkunci untuk seluruh operasi stokastik)"],
+        ["Python", _none_or(ctx["python_version"])],
+        ["scikit-learn", _none_or(ctx["sklearn_version"])],
+        ["pandas / numpy", f"{_none_or(ctx['pandas_version'])} / {_none_or(ctx['numpy_version'])}"],
+        ["Platform", _none_or(ctx["platform_str"])],
+        ["Docker", "Ya" if ctx["is_docker"] else ("Tidak" if ctx["is_docker"] is False else "[tidak tercatat]")],
+    ]
+    story.append(_kv_table(rows))
+    story.append(Paragraph(
+        "Untuk membuktikan reproducibility: jalankan pipeline yang sama dua kali pada dataset yang "
+        "sama, lalu bandingkan nilai metrik (accuracy/precision/recall/F1/AUC) — harus identik, "
+        "dan hash dataset di atas harus sama.",
+        styles["note"],
+    ))
+
+
+# ─── Lampiran Teknis (supporting ML detail) ───────────────────────────────
+
+def _section_lampiran(story, styles, ctx):
+    story.append(PageBreak())
+    _section_heading(story, styles, "Lampiran", "Detail Teknis ML")
 
     metrics = ctx["metrics"]
-    rows = [["Metrik", "Nilai"]]
+    _avg = "kelas attack, natural-holdout" if ctx["is_eve"] else "weighted"
+
     def _fmt(v):
         return f"{v:.6f}" if isinstance(v, (int, float)) else "[tidak tersedia]"
-    # HIKARI metrics are weighted-averaged; EVE/cbr metrics are attack-class on
-    # the natural (original-distribution) holdout. Label honestly per dataset —
-    # this only changes the displayed label, never the stored values.
-    _avg = ("attack-class, natural-holdout"
-            if ctx["dataset_type"] == "EVE_SURICATA" else "weighted")
+
+    rows = [["Metrik", "Nilai"]]
     rows += [
         ["Accuracy", _fmt(ctx["accuracy"])],
         [f"Precision ({_avg})", _fmt(ctx["precision"])],
@@ -490,15 +1038,13 @@ def _section_6_hasil(story, styles, ctx):
     ]
     if ctx["roc_auc"] is not None:
         rows.append(["ROC-AUC", _fmt(ctx["roc_auc"])])
-    wc_label = "Wall-clock elapsed (created → completed)"
-    rows.append([wc_label, ctx["wall_clock"] or "[tidak dapat dihitung]"])
-
-    t = Table(rows, colWidths=[7*cm, 6*cm])
+    rows.append(["Wall-clock (created → completed)", ctx["wall_clock"] or "[tidak dapat dihitung]"])
+    t = Table(rows, colWidths=[8*cm, 6*cm])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), _PRIMARY),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
         ("GRID", (0, 0), (-1, -1), 0.5, _GRID),
         ("ALIGN", (1, 1), (1, -1), "CENTER"),
         ("TOPPADDING", (0, 0), (-1, -1), 4),
@@ -506,60 +1052,27 @@ def _section_6_hasil(story, styles, ctx):
     ]))
     story.append(t)
     story.append(Paragraph(
-        "Catatan: wall-clock di atas dihitung dari created_at hingga completed_at; ini "
-        "termasuk waktu antrian (queue) untuk mode asinkron. Platform tidak menyimpan "
-        "waktu mulai eksekusi terpisah dan tidak mengukur inference latency.",
+        "Wall-clock mencakup waktu antrian (queue) untuk mode asinkron; bukan inference latency.",
         styles["note"],
     ))
 
-    # Confusion matrix
-    if ctx["confusion_matrix"]:
-        story.append(Spacer(1, 3*mm))
-        story.append(Paragraph("Confusion Matrix", styles["subsection"]))
-        try:
-            cm_img = _render_confusion_matrix(
-                np.array(ctx["confusion_matrix"]),
-                label_mapping=ctx["label_mapping"],
-            )
-            story.append(Image(cm_img, width=12*cm, height=10*cm))
-        except Exception as e:
-            story.append(Paragraph(f"<i>Gagal merender confusion matrix: {e}</i>", styles["italic"]))
-
-    # ROC curve
+    # ROC curve.
     if ctx["roc_auc"] is not None or "roc_curve" in metrics:
-        story.append(Spacer(1, 2*mm))
+        story.append(Spacer(1, 3*mm))
         story.append(Paragraph("ROC Curve", styles["subsection"]))
         try:
-            roc_img = _render_roc_curve(metrics)
-            story.append(Image(roc_img, width=12*cm, height=10*cm))
+            story.append(Image(_render_roc_curve(metrics), width=12*cm, height=10*cm))
         except Exception as e:
             story.append(Paragraph(f"<i>Gagal merender ROC curve: {e}</i>", styles["italic"]))
 
-    # Feature importance
-    if ctx["feature_importance"]:
-        story.append(PageBreak())
-        story.append(Paragraph("Feature Importance", styles["subsection"]))
-        try:
-            fi_img = _render_feature_importance(ctx["feature_importance"])
-            story.append(Image(fi_img, width=14*cm, height=8*cm))
-        except Exception as e:
-            story.append(Paragraph(f"<i>Gagal merender feature importance: {e}</i>", styles["italic"]))
-    elif ctx["algorithm"] and any(k in (ctx["algorithm"] or "").lower() for k in ("knn", "naive", "logistic")):
-        story.append(Spacer(1, 2*mm))
-        story.append(Paragraph(
-            "<i>Feature importance tidak tersedia untuk algoritma ini.</i>",
-            styles["italic"],
-        ))
-
-    # Per-class classification report
+    # Per-class classification report (HIKARI).
     if ctx["classification_report"]:
-        story.append(Spacer(1, 2*mm))
+        story.append(Spacer(1, 3*mm))
         story.append(Paragraph("Per-Class Classification Report", styles["subsection"]))
         rep = ctx["classification_report"]
         class_rows = {k: v for k, v in rep.items() if isinstance(v, dict)}
         if class_rows:
-            header = ["Class", "Precision", "Recall", "F1-Score", "Support"]
-            data = [header]
+            data = [["Class", "Precision", "Recall", "F1-Score", "Support"]]
             for cls, m in class_rows.items():
                 data.append([
                     cls,
@@ -581,151 +1094,21 @@ def _section_6_hasil(story, styles, ctx):
             ]))
             story.append(rt)
 
-    # Learning curve
+    # Learning curve (HIKARI).
     if ctx["learning_curve"]:
         story.append(Spacer(1, 3*mm))
         story.append(Paragraph("Learning Curve", styles["subsection"]))
         try:
-            lc_img = _render_learning_curve(ctx["learning_curve"])
-            story.append(Image(lc_img, width=14*cm, height=9*cm))
+            story.append(Image(_render_learning_curve(ctx["learning_curve"]), width=14*cm, height=9*cm))
         except Exception as e:
             story.append(Paragraph(f"<i>Gagal merender learning curve: {e}</i>", styles["italic"]))
 
-
-# ─── 7. Analisis Hasil (placeholders) ─────────────────────────────────────
-
-_ANALYSIS_PROMPTS = [
-    "[ISI ANALISIS: Apakah performa model sesuai ekspektasi untuk dataset ini? Bandingkan "
-    "dengan klaim paper rujukan bila ada. Sebutkan apakah accuracy/F1 berada dalam rentang "
-    "yang dilaporkan paper aslinya, dan jelaskan penyebab bila terdapat selisih signifikan.]",
-
-    "[ISI ANALISIS: Apakah imbalance kelas memengaruhi hasil? Bandingkan precision dan "
-    "recall pada metrik weighted dan pada per-class classification report di Bagian 6. "
-    "Bila terdapat selisih besar antara kelas mayoritas dan minoritas, jelaskan implikasinya "
-    "untuk operasional IDS.]",
-
-    "[ISI ANALISIS: Kategori serangan atau pola trafik mana yang paling sulit diklasifikasi? "
-    "Rujuk confusion matrix. Identifikasi kelas yang banyak salah-prediksi menjadi kelas lain "
-    "dan diskusikan kemungkinan penyebab dari sudut pandang karakteristik fitur.]",
-
-    "[ISI ANALISIS: Bagaimana trade-off precision versus recall pada konteks operasional IDS "
-    "untuk skenario penggunaan model ini? Pada SOC dengan kapasitas analyst terbatas, "
-    "precision rendah berarti alert fatigue; pada lingkungan kritis, recall rendah berarti "
-    "serangan lolos. Sebutkan mana yang lebih relevan dan mengapa.]",
-
-    "[ISI ANALISIS: Apakah ada indikasi overfitting? Bandingkan training score dan validation "
-    "score pada learning curve di Bagian 6 (bila tersedia). Selisih besar antara keduanya "
-    "atau plateau validation score yang dini menandakan overfitting; jelaskan mitigasi yang "
-    "telah diterapkan pipeline.]",
-]
-
-
-def _section_7_analisis(story, styles, ctx):
-    _section_heading(story, styles, 7, "Analisis Hasil")
-    story.append(Paragraph(
-        "<i>Bagian ini sengaja diisi peneliti setelah meninjau hasil. Placeholder di "
-        "bawah memandu pertanyaan-pertanyaan kunci yang perlu dijawab; jangan dihapus "
-        "tanpa pengisian.</i>",
-        styles["note"],
-    ))
-    story.append(Spacer(1, 2*mm))
-    for prompt in _ANALYSIS_PROMPTS:
-        story.append(_placeholder_block(prompt, styles))
-        story.append(Spacer(1, 2*mm))
-
-
-# ─── 8. Integrasi ke Platform ─────────────────────────────────────────────
-
-def _section_8_integrasi(story, styles, ctx):
-    _section_heading(story, styles, 8, "Integrasi ke Platform")
-
-    story.append(Paragraph(
-        "Platform mengintegrasikan model ke dalam alur eksperimen yang terkontrol, bukan "
-        "ke dalam jalur produksi serving. Berikut detail kapabilitas aktual saat laporan "
-        "ini dibuat, ditulis apa adanya tanpa fitur yang dilebih-lebihkan.",
-        styles["normal"],
-    ))
-    story.append(Spacer(1, 2*mm))
-
-    rows = [
-        ["Penyimpanan model",
-         "joblib di storage/artifacts/{experiment_id}/model.pkl"],
-        ["Penyimpanan metrik",
-         "metrics.json (metrik utama + extra_info) di direktori artefak yang sama"],
-        ["Penyimpanan metadata",
-         "metadata.json (dataset_hash SHA-256, pipeline_id, timestamp, environment)"],
-        ["Antarmuka pengguna",
-         "Streamlit (ui/views/). Tidak terdapat endpoint API inference (FastAPI/Flask)."],
-        ["Mode eksekusi sinkron",
-         "workers/local_worker.py — pipeline.run() langsung di proses pemanggil"],
-        ["Mode eksekusi asinkron",
-         "workers/celery_worker.py via Celery + Redis (aktif bila USE_ASYNC=true)"],
-        ["Orkestrasi",
-         "orchestrator/ (validation, execution dispatch, experiment lifecycle, result read)"],
-        ["Containerization",
-         "docker-compose dengan tiga service: ids_redis, ids_worker, ids_ui"],
-        ["Inference real-time / API serving",
-         "Tidak tersedia. Platform berorientasi eksperimen batch."],
-        ["Pengukuran inference latency / throughput",
-         "Tidak diukur. Yang tersedia hanya wall-clock total eksperimen."],
-    ]
-    story.append(_kv_table(rows, col_widths=(5.5*cm, 10.5*cm)))
-
-
-# ─── 9. Limitasi ──────────────────────────────────────────────────────────
-
-_LIMITATIONS = [
-    "Dataset publik (HIKARI2021, EVE Suricata) tidak selalu merepresentasikan "
-    "trafik jaringan dunia nyata terkini; profil serangan dan distribusi fitur dapat berbeda "
-    "dengan kondisi operasional pengguna platform.",
-
-    "Platform tidak melakukan packet capture real-time. Masukan adalah dataset yang sudah "
-    "diekstraksi menjadi fitur flow (CSV) atau catatan alert NDJSON. Integrasi dengan "
-    "Suricata yang sedang berjalan, NetFlow live, atau sumber lain di luar lingkup platform.",
-
-    "Tidak terdapat online learning atau adaptive retraining. Setiap eksperimen melatih "
-    "model dari nol dengan random_state tetap; model tidak diperbarui secara inkremental "
-    "ketika tersedia data baru.",
-
-    "Tidak terdapat penanganan khusus untuk encrypted traffic di luar fitur yang sudah "
-    "tersedia di dataset (misalnya HIKARI2021 ALLFLOWMETER). Platform tidak melakukan "
-    "decryption, fingerprinting TLS lanjutan, atau analisis payload terenkripsi.",
-
-    "Tidak terdapat endpoint API inference. Model tidak dapat dipanggil sebagai service "
-    "untuk klasifikasi real-time; konsumsi model dilakukan dalam konteks evaluasi pada "
-    "antarmuka platform atau melalui rerun eksperimen.",
-
-    "Tidak terdapat pengukuran inference latency atau throughput. Wall-clock yang tercatat "
-    "hanya mencakup durasi total eksperimen (queue + execution); membandingkan model untuk "
-    "skenario produksi memerlukan instrumentasi tambahan.",
-
-    "Pipeline tertentu memiliki keterbatasan algoritmik yang melekat. Sebagai contoh, "
-    "Support Vector Classifier pada dataset HIKARI2021 berjalan sangat lambat pada data "
-    "berukuran ratusan ribu baris karena kompleksitas O(n²) — platform menampilkan "
-    "runtime warning di antarmuka sebelum eksekusi dimulai.",
-]
-
-
-def _section_9_limitasi(story, styles, ctx):
-    _section_heading(story, styles, 9, "Limitasi")
-    story.append(Paragraph(
-        "Keterbatasan berikut dilaporkan secara terbuka. Pengungkapan ini bukan untuk "
-        "mengurangi nilai platform, melainkan untuk memberikan panduan jujur bagi peneliti "
-        "lain yang ingin memakai atau memperluas hasil eksperimen.",
-        styles["normal"],
-    ))
-    story.append(Spacer(1, 2*mm))
-    for i, lim in enumerate(_LIMITATIONS, 1):
-        story.append(Paragraph(f"<b>{i}.</b> {lim}", styles["normal"]))
-        story.append(Spacer(1, 1*mm))
-
-    # Append per-experiment runtime warning if get_info had one
-    if ctx["runtime_warning"]:
-        story.append(Spacer(1, 2*mm))
-        story.append(Paragraph(
-            f"<b>Catatan khusus pipeline ini:</b> {ctx['runtime_warning']}",
-            styles["note"],
-        ))
+    # Locked hyperparameters (from get_info).
+    if ctx["fixed_params"]:
+        story.append(Spacer(1, 3*mm))
+        story.append(Paragraph("Hyperparameter Terkunci", styles["subsection"]))
+        story.append(_kv_table([[k, str(v)] for k, v in ctx["fixed_params"].items()],
+                               col_widths=(6*cm, 10*cm)))
 
 
 # ─── Footer ───────────────────────────────────────────────────────────────
@@ -734,39 +1117,54 @@ def _footer(story, styles, ctx):
     story.append(Spacer(1, 10*mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=_GRID))
     story.append(Paragraph(
-        f"Generated by IDS Research Pipeline System  -  "
+        f"Dihasilkan oleh IDS Research Pipeline System  -  "
         f"{datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}  -  "
         f"experiment {ctx['experiment_id']}",
         styles["small_muted"],
     ))
 
 
-# ─── Existing chart render helpers (preserved verbatim) ───────────────────
+# ─── Chart render helpers ─────────────────────────────────────────────────
 
-def _render_confusion_matrix(cm: np.ndarray, label_mapping: dict | None = None) -> io.BytesIO:
-    """Render confusion matrix as PNG and return as BytesIO."""
-    labels = []
-    if label_mapping:
-        labels = sorted(label_mapping.keys(), key=lambda k: label_mapping[k])
+def _render_network_confusion_matrix(b: dict) -> io.BytesIO:
+    """Confusion matrix labeled in network terms (Serangan/Normal) with the
+    meaning of each quadrant annotated. Built entirely from the breakdown dict.
 
-    fig, ax = plt.subplots(figsize=(6, 5))
-    im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
-    plt.colorbar(im, ax=ax)
+    Layout (rows = Aktual, cols = Prediksi), order [Normal, Serangan]:
+        TN  FP
+        FN  TP
+    """
+    an, nn = b["attack_name"], b["normal_name"]
+    grid = np.array([[b["tn"], b["fp"]], [b["fn"], b["tp"]]], dtype=float)
+    quad_labels = [["Normal benar\n(TN)", "False alarm\n(FP)"],
+                   ["Serangan LOLOS\n(FN)", "Serangan terdeteksi\n(TP)"]]
+    # Cell background hue: green=good (TN/TP), red=critical (FN), amber=FP.
+    cell_colors = [["#dcfce7", "#fef3c7"], ["#fee2e2", "#dcfce7"]]
 
-    if labels:
-        ax.set_xticks(range(len(labels)))
-        ax.set_yticks(range(len(labels)))
-        ax.set_xticklabels(labels, rotation=45, ha='right')
-        ax.set_yticklabels(labels)
+    fig, ax = plt.subplots(figsize=(6.4, 5.4))
+    ax.set_xlim(0, 2)
+    ax.set_ylim(0, 2)
+    ax.invert_yaxis()
 
-    for i in range(cm.shape[0]):
-        for j in range(cm.shape[1]):
-            ax.text(j, i, format(cm[i, j], 'd'), ha="center", va="center",
-                    color="white" if cm[i, j] > cm.max() / 2 else "black")
+    for i in range(2):
+        for j in range(2):
+            ax.add_patch(plt.Rectangle((j, i), 1, 1, facecolor=cell_colors[i][j],
+                                       edgecolor="#333333", linewidth=1.2))
+            count = int(grid[i][j])
+            ax.text(j + 0.5, i + 0.34, f"{count:,}".replace(",", "."),
+                    ha="center", va="center", fontsize=15, fontweight="bold",
+                    color="#111111")
+            ax.text(j + 0.5, i + 0.66, quad_labels[i][j],
+                    ha="center", va="center", fontsize=8.5, color="#333333")
 
-    ax.set_ylabel("Actual")
-    ax.set_xlabel("Predicted")
-    ax.set_title("Confusion Matrix")
+    ax.set_xticks([0.5, 1.5])
+    ax.set_yticks([0.5, 1.5])
+    ax.set_xticklabels([f"Prediksi: {nn}", f"Prediksi: {an}"], fontsize=9)
+    ax.set_yticklabels([f"Aktual: {nn}", f"Aktual: {an}"], fontsize=9, rotation=90, va="center")
+    ax.set_title("Confusion Matrix (istilah jaringan)", fontsize=11, fontweight="bold")
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    ax.tick_params(length=0)
     fig.tight_layout()
 
     buf = io.BytesIO()
@@ -782,9 +1180,9 @@ def _render_roc_curve(metrics: dict) -> io.BytesIO:
 
     if "roc_curve" in metrics:
         roc = metrics["roc_curve"]
-        fpr = roc["fpr"]
-        tpr = roc["tpr"]
-        if isinstance(fpr, list):
+        fpr = roc.get("fpr")
+        tpr = roc.get("tpr")
+        if isinstance(fpr, list) and isinstance(tpr, list) and fpr and tpr:
             ax.plot(fpr, tpr, label=f"ROC (AUC = {metrics.get('roc_auc', 0):.4f})", linewidth=2)
         elif isinstance(fpr, dict):
             for cls_name in fpr:
@@ -793,9 +1191,9 @@ def _render_roc_curve(metrics: dict) -> io.BytesIO:
         for cls_name, curve in metrics["roc_curves_per_class"].items():
             ax.plot(curve["fpr"], curve["tpr"], label=cls_name, linewidth=1.5)
 
-    ax.plot([0, 1], [0, 1], 'k--', alpha=0.5, label="Random")
+    ax.plot([0, 1], [0, 1], 'k--', alpha=0.5, label="Tebak acak")
     ax.set_xlabel("False Positive Rate")
-    ax.set_ylabel("True Positive Rate")
+    ax.set_ylabel("True Positive Rate (Recall)")
     ax.set_title(f"ROC Curve (AUC = {metrics.get('roc_auc', 0):.4f})")
     ax.legend(loc="lower right")
     fig.tight_layout()
@@ -826,7 +1224,7 @@ def _render_feature_importance(feature_importance: list[dict]) -> io.BytesIO:
     ax.set_xlabel("Importance")
     title = f"Top {len(fi)} Feature Importance"
     if n_total > len(fi):
-        title += f" (of {n_total} total)"
+        title += f" (dari {n_total} fitur)"
     ax.set_title(title)
     fig.tight_layout()
 
