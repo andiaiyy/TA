@@ -35,7 +35,7 @@ This is not a production IDS, not a real-time detector, and not a multi-tenant s
 - **10 registered ML pipelines** across 2 dataset families (see [Pipelines](#pipelines)).
 - **Reproducibility by construction**: every stochastic step uses `random_state=42`, every split is `stratify=y`, every dataset is SHA-256 hashed and the hash is persisted to the experiment record.
 - **Dual execution modes**: synchronous (in-process) or asynchronous (Celery + Redis). Toggled via `USE_ASYNC` environment variable.
-- **Web UI (Streamlit)** with 4 pages: Tutorial, Run Experiment, Experiment History (AgGrid), Environment Info.
+- **Web UI (Streamlit)** with 2 pages: Run Experiment and Experiment History (AgGrid).
 - **PDF report generation** per experiment, including metric cards, confusion matrix, ROC curve, learning curve, feature importance, and classification report.
 - **Containerized deployment** via Docker Compose. Three services: `ids_ui`, `ids_worker`, `ids_redis`.
 - **Test suite** of 196 collected tests, including parametrized cross-pipeline reproducibility checks.
@@ -128,6 +128,37 @@ All four EVE pipelines share an identical Phase 1–9 preprocessing chain (`pipe
 | Container runtime | Docker + Docker Compose v2; Python 3.11-slim base image |
 
 Full dependency list lives in [`requirements.txt`](requirements.txt).
+
+---
+
+## Runtime Environment
+
+The platform runs on **Python 3.11** (the `python:3.11-slim` Docker base image; local development supports Python 3.10 or 3.11). Key library versions from a reference Docker run:
+
+| Component | Version (reference run) |
+|---|---|
+| Python | 3.11.x |
+| scikit-learn | 1.9.x |
+| pandas | 3.0.x |
+| numpy | 2.4.x |
+| Platform | Linux (WSL2) inside Docker |
+
+Exact versions are pinned by the ranges in [`requirements.txt`](requirements.txt) and resolved at image-build time, so they can drift within those bounds between builds.
+
+**Checking the runtime versions of a given experiment.** Every experiment records its full environment in its artifact `metadata.json` under the `environment` key — Python version, scikit-learn / pandas / numpy versions, platform string, and Docker status. Inspect it with, e.g.:
+
+```powershell
+# View the environment block captured for one experiment
+type storage\artifacts\<experiment_id>\metadata.json
+```
+
+To read the live versions from a running container:
+
+```powershell
+docker compose exec ui python -c "import sys, sklearn, pandas, numpy; print(sys.version); print('sklearn', sklearn.__version__, '| pandas', pandas.__version__, '| numpy', numpy.__version__)"
+```
+
+**Docker note.** Running the stack via `docker compose up` isolates these versions inside the image, which is what makes every recorded metric reproducible on another machine: as long as the Docker image (hence library versions), the pipeline code, and the dataset SHA-256 hash match, the results are bit-identical. Running locally (non-Docker) uses whatever versions are installed in your virtual environment, so pin them against `requirements.txt` if you need to match a recorded run.
 
 ---
 
@@ -230,7 +261,7 @@ Dataset files are **never written to** at runtime. They are hashed (SHA-256) and
 ### Via the Streamlit UI
 
 1. Open **http://localhost:8501**.
-2. Use the sidebar to navigate (Tutorial, Run Experiment, History, Environment Info).
+2. Use the sidebar to navigate (Run Experiment, History).
 3. In **Run Experiment**: pick a dataset type, choose a file detected from `storage/datasets/`, click **Validate Dataset**, then pick a compatible pipeline and click **Run Experiment**.
 4. Watch the live progress panel; on completion, metrics, charts, and a **Download PDF Report** button appear.
 5. Browse past runs in **History** (AgGrid table with filtering and re-run).
@@ -276,10 +307,8 @@ All `n_jobs` parameters across pipelines are pinned to `2` (not `-1`). This is a
 ├── ui/                            Streamlit application
 │   ├── app.py                     Entry point (sidebar routing)
 │   └── views/
-│       ├── tutorial.py            Usage guide
 │       ├── run_experiment.py      Run + monitor experiments
 │       ├── view_results.py        History (AgGrid) + detail view
-│       ├── environment_info.py    Python, deps, paths
 │       └── _artifact_browser.py   Read-only artifact viewer
 ├── orchestrator/                  Business logic
 │   ├── experiment_service.py      Only DB-writing facade

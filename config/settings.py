@@ -12,7 +12,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 STORAGE_DIR = BASE_DIR / "storage"
 ARTIFACTS_DIR = STORAGE_DIR / "artifacts"
 DATASETS_DIR = STORAGE_DIR / "datasets"
-DB_PATH = os.environ.get("DB_PATH", str(STORAGE_DIR / "experiments.db"))
+_DB_PATH_RAW = os.environ.get("DB_PATH", str(STORAGE_DIR / "experiments.db"))
+# Anchor the DB path to the project root so the file location never depends on
+# the process working directory. A relative DB_PATH (from a script/worker run
+# from a different CWD) would otherwise create a stray experiments.db in the
+# wrong folder — the root cause of the historical storage/datasets/experiments.db.
+# Absolute values (the default, and the Docker "/app/storage/experiments.db"
+# override) pass through unchanged.
+DB_PATH = _DB_PATH_RAW if os.path.isabs(_DB_PATH_RAW) else str((BASE_DIR / _DB_PATH_RAW).resolve())
 
 
 def get_environment_info() -> dict:
