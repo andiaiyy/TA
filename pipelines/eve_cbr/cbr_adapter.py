@@ -72,6 +72,44 @@ _RES = dict(
 _METHOD_PREFERENCE = ("MI", "RFE", "PCA")
 _METRIC_BASES = ("accuracy", "precision_attack", "recall_attack", "f1_attack", "auc")
 
+# ── Progress stages (Jenkins-style) ───────────────────────────────────────
+# The 14 internal cbr phases grouped into 7 conceptual stages, bracketed by the
+# adapter's own pre-split and metric-collection steps. This is the SINGLE SOURCE
+# OF TRUTH for the eve_cbr stage list; config/pipeline_registry.py imports
+# EVE_CBR_STAGES so the worker can resolve stage_index/stage_total. Progress is
+# pure observation — these strings never affect computation.
+_STAGE_SPLIT = "Splitting TLS from EVE dataset"
+_STAGE_COLLECT = "Collecting natural-holdout metrics"
+_STAGE_P12 = "Ingestion & validation (fase 1–2)"
+_STAGE_P34 = "Probing & label refinement (fase 3–4)"
+_STAGE_P56 = "Feature engineering (fase 5–6)"
+_STAGE_P7 = "Cleaning policy (fase 7)"
+_STAGE_P8 = "Export & train/test split (fase 8)"
+_STAGE_P910 = "Visualization & leakage analysis (fase 9–10)"
+_STAGE_P1114 = "Modeling & evaluation (fase 11–14)"
+
+EVE_CBR_STAGES = [
+    _STAGE_SPLIT,
+    _STAGE_P12, _STAGE_P34, _STAGE_P56, _STAGE_P7, _STAGE_P8, _STAGE_P910, _STAGE_P1114,
+    _STAGE_COLLECT,
+]
+
+# cbr phase number (1..14) -> conceptual stage label.
+_PHASE_STAGE = {
+    1: _STAGE_P12, 2: _STAGE_P12,
+    3: _STAGE_P34, 4: _STAGE_P34,
+    5: _STAGE_P56, 6: _STAGE_P56,
+    7: _STAGE_P7,
+    8: _STAGE_P8,
+    9: _STAGE_P910, 10: _STAGE_P910,
+    11: _STAGE_P1114, 12: _STAGE_P1114, 13: _STAGE_P1114, 14: _STAGE_P1114,
+}
+
+
+def phase_to_stage(phase: int) -> str:
+    """Map a cbr phase number to its conceptual progress stage label."""
+    return _PHASE_STAGE.get(int(phase), _STAGE_P1114)
+
 
 # ============================================================
 # Config building
@@ -465,7 +503,7 @@ class BaseCbrEvePipeline(BasePipeline):
         try:
             from pipelines.eve_cbr.cbr.pipeline import run_pipeline
 
-            self._emit_progress(progress, "Splitting TLS from EVE dataset")
+            self._emit_progress(progress, _STAGE_SPLIT)
             split_summary_tls = split_tls(dataset_path=pipeline_input.dataset_path, out_dir=split_dir)
 
             cfg = build_run_config(
@@ -473,10 +511,20 @@ class BaseCbrEvePipeline(BasePipeline):
                 archive_dir=archive_dir, summary_path=summary_path, random_state=rs,
             )
 
-            self._emit_progress(progress, "Running cbr 14-phase pipeline (TLS)")
-            run_pipeline(cfg)
+            # Bridge cbr's per-phase hook (1..14) to the 7 conceptual stages,
+            # emitting only when the stage changes so the UI advances cleanly.
+            # Pure observation — no effect on the cbr run.
+            _last = {"stage": None}
 
-            self._emit_progress(progress, "Collecting natural-holdout metrics")
+            def _phase_bridge(phase_no: int, _phase_name: str) -> None:
+                stage = phase_to_stage(phase_no)
+                if stage != _last["stage"]:
+                    _last["stage"] = stage
+                    self._emit_progress(progress, stage)
+
+            run_pipeline(cfg, progress=_phase_bridge)
+
+            self._emit_progress(progress, _STAGE_COLLECT)
             result = collect_result(cfg=cfg, algo=algo, split_summary_tls=split_summary_tls)
             return result
         finally:

@@ -1,22 +1,26 @@
-"""Experiment History page — AgGrid table with grouped columns, metric
-highlighting, status badges, relative timestamps, and row-click detail."""
+"""Progress & Status page (main dashboard) — live progress of all in-flight
+experiments on top, then the history table (AgGrid) below with a pop-up (dialog)
+detail view built from the shared result components."""
 from datetime import datetime, timezone
+import time
 
 import streamlit as st
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
 
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
 from orchestrator.result_service import (
     list_all_experiments, get_full_experiment, get_experiment_metrics,
 )
-from orchestrator.experiment_service import rerun_experiment, cancel_experiment
+from orchestrator.experiment_service import (
+    rerun_experiment, cancel_experiment, get_experiment_status,
+)
 from ui.views._artifact_browser import (
     render_file_browser, make_json_loader, make_text_loader, make_bytes_reader,
+)
+from ui.components.result_views import normalize_result_payload, render_results
+from ui.components.dashboard import (
+    select_running, progress_view, elapsed_seconds, format_elapsed,
 )
 
 
@@ -271,226 +275,258 @@ def _build_grid_options(df: pd.DataFrame) -> dict:
 
 # ─── Page ──────────────────────────────────────────────────────────────────
 
-def render():
-    st.title("Experiment History")
-
-    experiments = list_all_experiments()
-    if not experiments:
-        st.info("Belum ada eksperimen. Buka halaman 'Run Experiment' untuk membuat satu.")
-        st.session_state.pop("selected_experiment_id", None)
-        return
-
-    st.caption(
-        f"{len(experiments)} eksperimen. Klik satu baris untuk membuka detail. "
-        "Grup Metrics dan Config dapat di-collapse lewat ikon di header grup."
-    )
-
-    df = _build_grid_df(experiments)
-    grid_options = _build_grid_options(df)
-
-    grid_response = AgGrid(
-        df,
-        gridOptions=grid_options,
-        allow_unsafe_jscode=True,
-        theme="streamlit",
-        update_mode=GridUpdateMode.SELECTION_CHANGED,
-        fit_columns_on_grid_load=False,
-        height=440,
-        key="experiment_history_grid",
-    )
-
-    # Resolve selection. AgGrid may return a DataFrame or a list depending on
-    # version; handle both. Persist in session_state so the detail panel stays
-    # visible across reruns triggered by detail-panel buttons.
-    selected_id = None
-    sel = grid_response.get("selected_rows")
-    if isinstance(sel, pd.DataFrame):
-        if not sel.empty and "_full_id" in sel.columns:
-            selected_id = sel.iloc[0]["_full_id"]
-    elif isinstance(sel, list) and sel:
-        selected_id = sel[0].get("_full_id")
-
-    if selected_id:
-        st.session_state["selected_experiment_id"] = selected_id
-    selected_id = st.session_state.get("selected_experiment_id")
-
-    if not selected_id:
-        st.info("Pilih satu eksperimen pada tabel di atas untuk melihat detailnya.")
-        return
-
-    st.markdown("---")
-    _render_detail(selected_id)
+@st.cache_data(ttl=4, show_spinner=False)
+def _dash_health(nonce: int) -> dict:
+    """Cache infra health briefly so the running dashboard does not probe the
+    broker on every rerun. Never raises."""
+    try:
+        from orchestrator.health_service import check_execution_health
+        return check_execution_health()
+    except Exception:
+        return {"mode": "async", "broker_ok": False, "worker_ok": False,
+                "can_run": False, "message": ""}
 
 
-def _render_detail(selected_id: str):
-    """Render full detail for one experiment. Logic preserved from the prior
-    selectbox-based version; only the selection source changed."""
-    full = get_full_experiment(selected_id)
-    if not full:
-        st.error("Eksperimen tidak ditemukan.")
-        st.session_state.pop("selected_experiment_id", None)
-        return
+def _render_running_section(experiments) -> tuple:
+    """Dashboard of ALL in-flight (RUNNING/QUEUED) experiments — one card each
+    with progress bar + running stage + cancel. Returns (running, auto, interval).
 
-    exp = full["experiment"]
-    metrics = full.get("metrics")
-    metadata = full.get("metadata")
+    Progress is read cross-session via get_experiment_status (task_id → Celery
+    AsyncResult); when granular data is unavailable (QUEUED, or broker down) the
+    card shows status + elapsed only — never a fabricated percentage."""
+    running = select_running(experiments)
 
-    st.subheader(f"Experiment Detail — {exp['id'][:8]}")
+    head = st.columns([3, 1, 1])
+    head[0].subheader("Sedang Berjalan")
+    if hasattr(head[1], "toggle"):
+        auto = head[1].toggle("Auto-refresh", value=True, key="_dash_auto")
+    else:
+        auto = head[1].checkbox("Auto-refresh", value=True, key="_dash_auto")
+    if head[2].button("Perbarui", use_container_width=True, key="_dash_refresh"):
+        st.session_state["_dash_nonce"] = st.session_state.get("_dash_nonce", 0) + 1
+        st.rerun()
 
-    with st.expander("Metadata", expanded=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"**ID:** `{exp['id']}`")
-            st.markdown(f"**Dataset:** {exp['dataset_type']}")
-            st.markdown(f"**Pipeline:** {exp['pipeline_id']}")
-            st.markdown(f"**Status:** {exp['status']}")
-        with c2:
-            st.markdown(f"**Created:** {exp.get('created_at', 'N/A')}")
-            st.markdown(f"**Completed:** {exp.get('completed_at', 'N/A')}")
-            if exp.get("dataset_hash"):
-                st.markdown(f"**Hash:** `{exp['dataset_hash'][:16]}...`")
-            if metadata and metadata.get("feature_names"):
-                st.markdown(f"**Features:** {', '.join(metadata['feature_names'])}")
+    if not running:
+        st.info("Tidak ada eksperimen yang sedang berjalan. "
+                "Buka **Run Experiment** dari menu di sidebar untuk memulai.")
+        return running, bool(auto), 6
 
-    if exp["status"] == "FINISHED" and metrics:
-        with st.expander("Metrics", expanded=True):
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Accuracy", f"{metrics.get('accuracy', 0):.4f}")
-            c2.metric("Precision", f"{metrics.get('precision', 0):.4f}")
-            c3.metric("Recall", f"{metrics.get('recall', 0):.4f}")
-            c4.metric("F1", f"{metrics.get('f1_score', 0):.4f}")
-            if "roc_auc" in metrics:
-                st.metric("ROC-AUC", f"{metrics['roc_auc']:.4f}")
+    health = _dash_health(st.session_state.get("_dash_nonce", 0))
+    async_mode = health.get("mode") == "async"
+    can_read_progress = (not async_mode) or bool(health.get("broker_ok"))
+    if async_mode and not health.get("broker_ok", True):
+        st.warning("Broker (Redis) tidak tersambung — progres granular tidak tersedia; "
+                   "menampilkan status & elapsed saja.")
 
-            # Confusion Matrix + Feature Importance side by side to save
-            # vertical space. Pipelines without feature importance (e.g. KNN)
-            # get a caption in the right column instead of an empty plot.
-            has_cm = "confusion_matrix" in metrics
-            has_fi = bool(metrics.get("feature_importance"))
-            if has_cm or has_fi:
-                col_left, col_right = st.columns(2)
-                if has_cm:
-                    with col_left:
-                        cm = np.array(metrics["confusion_matrix"])
-                        labels = []
-                        if metadata and metadata.get("label_mapping"):
-                            labels = sorted(
-                                metadata["label_mapping"].keys(),
-                                key=lambda k: metadata["label_mapping"][k],
-                            )
-                        fig, ax = plt.subplots(figsize=(5, 4))
-                        ax.imshow(cm, cmap='Blues')
-                        if labels:
-                            ax.set_xticks(range(len(labels)))
-                            ax.set_yticks(range(len(labels)))
-                            ax.set_xticklabels(labels, rotation=45, ha='right')
-                            ax.set_yticklabels(labels)
-                        for i in range(cm.shape[0]):
-                            for j in range(cm.shape[1]):
-                                ax.text(j, i, format(cm[i, j], 'd'), ha="center", va="center",
-                                        color="white" if cm[i, j] > cm.max() / 2 else "black")
-                        ax.set_ylabel("Actual")
-                        ax.set_xlabel("Predicted")
-                        fig.tight_layout()
-                        st.pyplot(fig)
-                        plt.close(fig)
-                if has_fi:
-                    with col_right:
-                        fi_full = metrics["feature_importance"]
-                        n_total = len(fi_full)
-                        top_n = 20
-                        fi = fi_full[:top_n]
-                        fig, ax = plt.subplots(figsize=(5, max(4, len(fi) * 0.3)))
-                        ax.barh(
-                            [x["feature"] for x in reversed(fi)],
-                            [x["importance"] for x in reversed(fi)],
-                            color="#2563EB",
-                        )
-                        ax.set_xlabel("Importance")
-                        title = f"Top {len(fi)} Feature Importance"
-                        if n_total > len(fi):
-                            title += f" (of {n_total} total)"
-                        ax.set_title(title, fontsize=11)
-                        fig.tight_layout()
-                        st.pyplot(fig)
-                        plt.close(fig)
-                elif has_cm:
-                    with col_right:
-                        st.caption("Feature importance tidak tersedia untuk algoritma ini.")
+    for e in running:
+        eid = e["id"]
+        status_data = None
+        if can_read_progress:
+            try:
+                status_data = get_experiment_status(eid)
+            except Exception:
+                status_data = None
+        status_data = status_data or e
+        pv = progress_view(status_data)
+        el = elapsed_seconds(e.get("started_at") or e.get("created_at"))
+        cur_status = status_data.get("status", e.get("status", "-"))
 
-            if "classification_report" in metrics:
-                report = metrics["classification_report"]
-                rows = {k: v for k, v in report.items() if isinstance(v, dict)}
-                if rows:
-                    st.dataframe(pd.DataFrame(rows).T.round(4), use_container_width=True)
-
-        # Process Log — captured pipeline stdout, persisted in metrics.json
-        if "process_log" in metrics and metrics["process_log"]:
-            with st.expander("Process Log", expanded=False):
-                st.code(metrics["process_log"], language=None)
-
-    elif exp["status"] in ("QUEUED", "RUNNING"):
-        st.info(f"Experiment is {exp['status'].lower()}. Refresh to see updates.")
-        if st.button("Cancel Experiment", key=f"cancel_{selected_id}"):
-            r = cancel_experiment(selected_id)
-            if r["success"]:
-                st.warning("Experiment cancelled.")
-                st.rerun()
+        with st.container(border=True):
+            top = st.columns([3, 1])
+            top[0].markdown(f"**{e.get('pipeline_id', '?')}** · {e.get('dataset_type', '?')}")
+            top[1].markdown(f"`{cur_status}`")
+            st.caption(f"Mulai {(e.get('started_at') or e.get('created_at') or '-')[:19]} · "
+                       f"Elapsed {format_elapsed(el)}")
+            if pv["overall_percent"] is not None:
+                st.progress(min(max(pv["overall_percent"], 0), 100) / 100.0,
+                            text=f"Progres keseluruhan: {pv['overall_percent']}%")
+            if pv["stage_label"]:
+                st.markdown(f"**{pv['stage_label']}**")
+            elif e.get("status") == "QUEUED":
+                st.caption("Menunggu worker mengambil tugas…")
             else:
-                st.error(r["message"])
+                st.caption("Progres granular tidak tersedia untuk eksperimen ini.")
+            if st.button("Batalkan", key=f"dash_cancel_{eid}"):
+                r = cancel_experiment(eid)
+                if r.get("success"):
+                    st.warning("Eksperimen dibatalkan.")
+                else:
+                    st.error(r.get("message", "Gagal membatalkan."))
+                st.rerun()
 
-    elif exp["status"] == "FAILED":
-        error_msg = exp.get("error_message", "Unknown")
-        if error_msg == "Cancelled by user":
-            st.warning("Experiment was cancelled by user.")
-        else:
-            st.error(f"Failed: {error_msg}")
+    return running, bool(auto), 6
 
-    # === PDF Download Button ===
-    if exp["status"] == "FINISHED" and metrics:
+
+def _pdf_download_button(exp: dict, metrics: dict, metadata: dict, key: str) -> None:
+    """PDF download for a FINISHED experiment (unchanged generator path)."""
+    try:
         from utils.report_generator import generate_report
         from orchestrator.execution_service import get_pipeline_info
-
-        pipe_info = get_pipeline_info(exp["pipeline_id"]) or {}
-
         pdf_bytes = generate_report(
             experiment_id=exp["id"],
             dataset_type=exp["dataset_type"],
             dataset_path=exp["dataset_path"],
             dataset_hash=exp.get("dataset_hash", "N/A"),
             pipeline_id=exp["pipeline_id"],
-            pipeline_info=pipe_info,
+            pipeline_info=get_pipeline_info(exp["pipeline_id"]) or {},
             metrics=metrics,
             metadata=metadata,
-            label_mapping=metadata.get("label_mapping") if metadata else None,
-            feature_names=metadata.get("feature_names") if metadata else None,
+            label_mapping=(metadata or {}).get("label_mapping"),
+            feature_names=(metadata or {}).get("feature_names"),
         )
-
         st.download_button(
-            label="Download PDF Report",
-            data=pdf_bytes,
+            "Download PDF Report", data=pdf_bytes,
             file_name=f"experiment_report_{exp['id'][:8]}.pdf",
-            mime="application/pdf",
-            key=f"pdf_{selected_id}",
+            mime="application/pdf", key=key,
+        )
+    except Exception as e:  # never break the dialog on a PDF failure
+        st.caption(f"PDF tidak dapat dibuat: {type(e).__name__}")
+
+
+@st.dialog("Detail Eksperimen", width="large")
+def _detail_dialog(experiment_id: str) -> None:
+    """Pop-up detail view. Renders the SHARED interactive result component
+    (zero duplication): confusion matrix, feature importance, ROC, learning
+    curve / dual-holdout, static-figures expander — all defensive cases
+    preserved for HIKARI and EVE-cbr."""
+    full = get_full_experiment(experiment_id)
+    if not full:
+        st.error("Eksperimen tidak ditemukan.")
+        if st.button("Tutup", key=f"dlg_close_missing_{experiment_id}"):
+            st.session_state.pop("_detail_id", None)
+            st.rerun()
+        return
+
+    exp = full["experiment"]
+    metrics = full.get("metrics")
+    metadata = full.get("metadata")
+
+    st.markdown(f"**{exp['pipeline_id']}** · {exp['dataset_type']} · `{exp['status']}`")
+    st.caption(f"ID `{exp['id']}` · Created {(exp.get('created_at') or '-')[:19]} · "
+               f"Completed {(exp.get('completed_at') or '-')[:19]}")
+
+    if exp["status"] == "FINISHED" and metrics:
+        payload = normalize_result_payload(
+            experiment_id=exp["id"], metrics=metrics, metadata=metadata,
+            pipeline_id=exp.get("pipeline_id"), dataset_type=exp.get("dataset_type"),
+        )
+        render_results(payload, key=f"dlg_{exp['id']}", pipeline_id=exp.get("pipeline_id", ""))
+        _pdf_download_button(exp, metrics, metadata, key=f"dlgpdf_{exp['id']}")
+        with st.expander("Artifact Viewer", expanded=False):
+            files = _build_artifact_files(exp["id"])
+            if files:
+                render_file_browser(files, state_key=f"dlg_artifacts_{exp['id']}")
+            else:
+                st.info("Artefak belum tersedia atau direktori artefak kosong.")
+    elif exp["status"] == "FAILED":
+        em = exp.get("error_message", "Unknown")
+        if em == "Cancelled by user":
+            st.warning("Eksperimen dibatalkan oleh pengguna.")
+        else:
+            st.error(f"Gagal: {em}")
+    else:
+        st.info(f"Eksperimen berstatus {exp['status']}. Hasil belum tersedia.")
+
+    st.markdown("---")
+    act = st.columns(3)
+    if exp["status"] in ("QUEUED", "RUNNING"):
+        if act[0].button("Batalkan", key=f"dlg_cancel_{exp['id']}"):
+            cancel_experiment(exp["id"])
+            st.session_state.pop("_detail_id", None)
+            st.rerun()
+    if act[1].button("Re-run", key=f"dlg_rerun_{exp['id']}"):
+        r = rerun_experiment(exp["id"])
+        if r.get("success"):
+            st.success(f"Baru: `{r['experiment_id'][:8]}…` — tutup dan segarkan.")
+        else:
+            st.error(r.get("error", "Gagal."))
+    if act[2].button("Tutup", key=f"dlg_close_{exp['id']}"):
+        st.session_state.pop("_detail_id", None)
+        st.rerun()
+
+
+def _render_selected_actions(selected_id: str) -> None:
+    """Compact action bar for the row selected in the history table."""
+    full = get_full_experiment(selected_id)
+    if not full:
+        st.session_state.pop("selected_experiment_id", None)
+        return
+    exp = full["experiment"]
+    st.markdown(f"**Terpilih:** `{exp['id'][:8]}` — {exp['pipeline_id']} · `{exp['status']}`")
+    cols = st.columns(3)
+    if cols[0].button("Lihat detail", key=f"open_{selected_id}", type="primary",
+                      use_container_width=True):
+        st.session_state["_detail_id"] = selected_id
+        st.rerun()
+    if cols[1].button("Re-run", key=f"rerun_{selected_id}", use_container_width=True):
+        r = rerun_experiment(selected_id)
+        if r.get("success"):
+            st.success(f"Baru: `{r['experiment_id'][:8]}…` — segarkan tabel.")
+        else:
+            st.error(r.get("error", "Gagal."))
+    if exp["status"] in ("QUEUED", "RUNNING"):
+        if cols[2].button("Batalkan", key=f"cancel_{selected_id}", use_container_width=True):
+            cancel_experiment(selected_id)
+            st.rerun()
+
+
+def render():
+    st.title("Progress & Status")
+
+    experiments = list_all_experiments()
+
+    # ── Sedang Berjalan (live dashboard of ALL in-flight experiments) ──
+    running, auto, interval = _render_running_section(experiments)
+
+    st.markdown("---")
+    st.subheader("Riwayat Eksperimen")
+
+    if not experiments:
+        st.info("Belum ada eksperimen. Buka halaman 'Run Experiment' untuk membuat satu.")
+        st.session_state.pop("selected_experiment_id", None)
+    else:
+        st.caption(
+            f"{len(experiments)} eksperimen. Pilih satu baris lalu klik "
+            "**Lihat detail** untuk membuka hasil sebagai pop-up. Grup Metrics/Config "
+            "dapat di-collapse lewat ikon header grup."
+        )
+        df = _build_grid_df(experiments)
+        grid_options = _build_grid_options(df)
+        grid_response = AgGrid(
+            df,
+            gridOptions=grid_options,
+            allow_unsafe_jscode=True,
+            theme="streamlit",
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            fit_columns_on_grid_load=False,
+            height=440,
+            key="experiment_history_grid",
         )
 
-    # === Artifact Viewer ===
-    st.markdown("---")
-    st.subheader("Artifact Viewer")
-    if exp["status"] == "FINISHED":
-        artifact_files = _build_artifact_files(exp["id"])
-        if artifact_files:
-            render_file_browser(artifact_files, state_key="selected_file_artifact_view")
-        else:
-            st.info("Artefak belum tersedia atau direktori artefak kosong.")
-    else:
-        st.info(f"Artefak belum tersedia. Eksperimen berstatus {exp['status']}.")
+        selected_id = None
+        sel = grid_response.get("selected_rows")
+        if isinstance(sel, pd.DataFrame):
+            if not sel.empty and "_full_id" in sel.columns:
+                selected_id = sel.iloc[0]["_full_id"]
+        elif isinstance(sel, list) and sel:
+            selected_id = sel[0].get("_full_id")
 
-    st.markdown("---")
-    if st.button("Re-run", key=f"rerun_{selected_id}"):
-        with st.spinner("Re-running..."):
-            r = rerun_experiment(selected_id)
-            if r["success"]:
-                st.success(f"New: `{r['experiment_id'][:8]}...` — refresh to see.")
-            else:
-                st.error(r["error"])
+        if selected_id:
+            st.session_state["selected_experiment_id"] = selected_id
+        selected_id = st.session_state.get("selected_experiment_id")
+
+        if selected_id:
+            _render_selected_actions(selected_id)
+        else:
+            st.info("Pilih satu eksperimen pada tabel untuk aksi & detail.")
+
+    # ── Detail pop-up (flag pattern so interactive controls inside work) ──
+    if st.session_state.get("_detail_id"):
+        _detail_dialog(st.session_state["_detail_id"])
+
+    # ── Auto-refresh the running dashboard (adaptive; paused while a detail
+    #    dialog is open so the pop-up is not disrupted). Broker is not probed
+    #    on every rerun — health is cached. No forced parallel execution. ──
+    if running and auto and not st.session_state.get("_detail_id"):
+        time.sleep(interval)
+        st.rerun()

@@ -14,6 +14,13 @@ from pipelines.eve_cbr.rfc_pipeline import EveCbrRFCPipeline
 from pipelines.eve_cbr.lsvc_pipeline import EveCbrLSVCPipeline
 from pipelines.eve_cbr.xgb_pipeline import EveCbrXGBPipeline
 
+# EVE/Suricata cbr progress stages — the 14 internal cbr phases grouped into the
+# 7 conceptual stages, bracketed by the adapter's pre-split and metric-collection
+# steps. The cbr adapter is the single source of truth (it emits exactly these
+# strings, see cbr_adapter.phase_to_stage); the worker uses this ordered list to
+# resolve stage_index/stage_total for the granular progress payload.
+from pipelines.eve_cbr.cbr_adapter import EVE_CBR_STAGES as _EVE_CBR_STAGES
+
 PIPELINE_REGISTRY = {
     "hikari2021.rfc_pipeline": {
         "dataset_type": "HIKARI2021",
@@ -103,11 +110,7 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
         "algorithm": "Random Forest",
         "class": EveCbrRFCPipeline,
-        "stages": [
-            "Splitting TLS from EVE dataset",
-            "Running cbr 14-phase pipeline (TLS)",
-            "Collecting natural-holdout metrics",
-        ],
+        "stages": _EVE_CBR_STAGES,
     },
     "eve_cbr.dt": {
         "dataset_type": "EVE_SURICATA",
@@ -115,11 +118,7 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
         "algorithm": "Decision Tree",
         "class": EveCbrDTPipeline,
-        "stages": [
-            "Splitting TLS from EVE dataset",
-            "Running cbr 14-phase pipeline (TLS)",
-            "Collecting natural-holdout metrics",
-        ],
+        "stages": _EVE_CBR_STAGES,
     },
     "eve_cbr.lsvc": {
         "dataset_type": "EVE_SURICATA",
@@ -127,11 +126,7 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
         "algorithm": "Linear SVC",
         "class": EveCbrLSVCPipeline,
-        "stages": [
-            "Splitting TLS from EVE dataset",
-            "Running cbr 14-phase pipeline (TLS)",
-            "Collecting natural-holdout metrics",
-        ],
+        "stages": _EVE_CBR_STAGES,
     },
     "eve_cbr.xgb": {
         "dataset_type": "EVE_SURICATA",
@@ -139,11 +134,7 @@ PIPELINE_REGISTRY = {
         "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
         "algorithm": "XGBoost",
         "class": EveCbrXGBPipeline,
-        "stages": [
-            "Splitting TLS from EVE dataset",
-            "Running cbr 14-phase pipeline (TLS)",
-            "Collecting natural-holdout metrics",
-        ],
+        "stages": _EVE_CBR_STAGES,
     },
 }
 

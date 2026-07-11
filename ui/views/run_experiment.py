@@ -9,10 +9,6 @@ import streamlit as st
 
 logger = logging.getLogger(__name__)
 import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib
-matplotlib.use('Agg')
 
 from orchestrator.experiment_service import (
     validate_dataset_for_ui, create_and_run_experiment, get_experiment_status,
@@ -24,6 +20,7 @@ from orchestrator.validation_service import get_available_datasets
 from orchestrator.result_service import get_experiment_metrics, get_full_experiment, get_experiment_metadata
 from config.settings import DATASETS_DIR
 from ui.views._artifact_browser import render_file_browser, format_size
+from ui.components.result_views import normalize_result_payload, render_results
 from streamlit_option_menu import option_menu
 from contracts.dataset_schemas import get_schema
 
@@ -81,8 +78,16 @@ def _compute_progress_state(status_data: dict, stages: list, session_state, expe
     """
     status = status_data.get("status", "")
     celery_stage = status_data.get("celery_stage") or ""
+    payload = status_data.get("celery_progress") or {}
     started_at = status_data.get("started_at")
     total = len(stages)
+
+    def _base(fraction, label, *, stage_index=None, hint="", stage_percent=0):
+        return {
+            "fraction": fraction, "label": label, "elapsed_text": elapsed_text,
+            "hint": hint, "stage_index": stage_index, "stage_total": total,
+            "stage_percent": stage_percent,
+        }
 
     # Real elapsed time from the DB-recorded started_at — honest display.
     # This is purely for the caption; it does NOT replace any runtime field.
@@ -101,48 +106,116 @@ def _compute_progress_state(status_data: dict, stages: list, session_state, expe
 
     # Terminal / pre-run states first
     if status == "QUEUED":
-        return {"fraction": 0.0, "label": "Queued — waiting for worker", "elapsed_text": elapsed_text, "hint": ""}
+        return _base(0.0, "Queued — waiting for worker", stage_index=0)
     if status == "FAILED":
-        return {"fraction": 0.0, "label": "Failed", "elapsed_text": elapsed_text, "hint": ""}
+        return _base(0.0, "Failed", stage_index=None)
     if status == "FINISHED":
-        return {"fraction": 1.0, "label": "Complete", "elapsed_text": elapsed_text, "hint": ""}
+        return _base(1.0, "Complete", stage_index=total)
 
     # Worker-injected wrapper stages (celery_worker._safe_update_state calls)
     if celery_stage == "Executing pipeline...":
-        return {"fraction": 0.02, "label": "Starting pipeline...", "elapsed_text": elapsed_text, "hint": ""}
+        return _base(0.02, "Starting pipeline...", stage_index=0)
     if celery_stage == "Saving results...":
         # Pin at 98% — bar must NOT hit 100% until status is truly FINISHED in DB
-        return {"fraction": 0.98, "label": "Saving results...", "elapsed_text": elapsed_text, "hint": ""}
+        return _base(0.98, "Saving results...", stage_index=total)
 
     if total == 0:
-        return {"fraction": 0.05, "label": celery_stage or "Running...", "elapsed_text": elapsed_text, "hint": ""}
+        return _base(0.05, celery_stage or "Running...", stage_index=None)
 
-    try:
-        idx = stages.index(celery_stage)
-    except ValueError:
+    # Resolve the current 0-based stage index: prefer the granular payload's
+    # stage_index (authoritative), fall back to matching the stage string.
+    idx = None
+    p_idx = payload.get("stage_index")
+    if isinstance(p_idx, int) and 1 <= p_idx <= total:
+        idx = p_idx - 1
+    else:
+        try:
+            idx = stages.index(celery_stage)
+        except ValueError:
+            idx = None
+    if idx is None:
         # Unknown stage — never fabricate a position
-        return {"fraction": 0.05, "label": celery_stage or "Running...", "elapsed_text": elapsed_text, "hint": ""}
+        return _base(0.05, celery_stage or "Running...", stage_index=None)
+
+    stage_name = payload.get("stage_name") or celery_stage or (stages[idx] if idx < total else "")
 
     # Track stage entry time in session_state — cosmetic, never persisted.
     start_key = f"_pb_stage_start_{experiment_id}"
     prev_key = f"_pb_prev_stage_{experiment_id}"
     now_ts = datetime.now(timezone.utc).timestamp()
-    if session_state.get(prev_key) != celery_stage:
+    if session_state.get(prev_key) != stage_name:
         session_state[start_key] = now_ts
-        session_state[prev_key] = celery_stage
+        session_state[prev_key] = stage_name
     in_stage_sec = max(0.0, now_ts - session_state.get(start_key, now_ts))
 
-    base = idx / total
-    is_training = ("Training" in celery_stage) or ("Computing learning curve" in celery_stage)
+    # Global bar floor: use the worker's monotonic overall_percent when present,
+    # else the completed-stage floor idx/total. Within-stage time creep animates
+    # on top, capped just below the next stage so the bar never jumps ahead.
+    p_overall = payload.get("overall_percent")
+    base = (p_overall / 100.0) if isinstance(p_overall, (int, float)) else (idx / total)
+    base = max(base, idx / total)
+    is_training = ("Training" in stage_name) or ("Computing learning curve" in stage_name) or ("Modeling" in stage_name)
     estimate_sec = _PB_TRAINING_ESTIMATE_SEC if is_training else _PB_DEFAULT_ESTIMATE_SEC
     within = min(in_stage_sec / estimate_sec, 0.95)
-    # Hard cap at 95% of the slot allocated to this stage. The bar advances to
-    # the next stage's floor only when celery_stage actually transitions.
     fraction = min(base + within / total, (idx + 0.95) / total)
 
-    label = f"Step {idx + 1}/{total}: {celery_stage}"
-    hint = "training step — within-step % is estimated" if is_training and in_stage_sec > 3 else ""
-    return {"fraction": fraction, "label": label, "elapsed_text": elapsed_text, "hint": hint}
+    label = f"Fase {idx + 1}/{total} — {stage_name}"
+    hint = "estimasi progres dalam-fase (berbasis waktu)" if is_training and in_stage_sec > 3 else ""
+    return _base(fraction, label, stage_index=idx + 1, hint=hint,
+                 stage_percent=int(round(within * 100)))
+
+
+_STAGE_PALETTE = {
+    # state: (background, foreground, icon, label)
+    "done":    ("#dcfce7", "#166534", "✅", "selesai"),
+    "running": ("#dbeafe", "#1e40af", "▶️", "berjalan"),
+    "waiting": ("#f1f5f9", "#64748b", "⏳", "menunggu"),
+}
+
+
+def _render_stage_columns(stages: list, view: list, running_percent: int = 0) -> None:
+    """Jenkins-style HORIZONTAL stage view: each stage is a column showing its
+    name, duration, and a colored status block (green=done, blue=running with a
+    small progress bar + %, grey=waiting). Wraps to multiple rows when there are
+    many stages so columns stay readable. Display only — never persisted.
+
+    ``view`` is the list from workers.progress_util.build_stage_view (one entry
+    per stage, in order). ``running_percent`` is the in-stage % for the running
+    column (time-estimated by the UI).
+    """
+    from workers.progress_util import format_duration
+
+    if not stages:
+        return
+    n = len(stages)
+    per_row = 5 if n > 6 else n  # wrap wide pipelines (EVE) to keep width usable
+    rp = int(min(max(running_percent, 0), 100))
+
+    for start in range(0, n, per_row):
+        chunk = list(range(start, min(start + per_row, n)))
+        cols = st.columns(len(chunk))
+        for col, i in zip(cols, chunk):
+            name = stages[i]
+            v = view[i] if i < len(view) else {"state": "waiting", "duration_sec": None}
+            state = v.get("state", "waiting")
+            bg, fg, icon, label = _STAGE_PALETTE.get(state, _STAGE_PALETTE["waiting"])
+            dur = format_duration(v.get("duration_sec"))
+            pct_txt = f" {rp}%" if state == "running" else ""
+            with col:
+                st.markdown(
+                    f"<div style='border-radius:8px; overflow:hidden; margin-bottom:6px; "
+                    f"border:1px solid {fg}33;'>"
+                    f"<div style='background:{bg}; color:{fg}; padding:8px 8px 10px 8px; "
+                    f"min-height:82px;'>"
+                    f"<div style='font-size:0.72rem; font-weight:600; line-height:1.15; "
+                    f"min-height:2.3em;'>{i + 1}. {name}</div>"
+                    f"<div style='font-size:0.70rem; margin-top:6px;'>{icon} {label}{pct_txt}</div>"
+                    f"<div style='font-size:0.70rem; opacity:0.85; margin-top:2px;'>⏱ {dur}</div>"
+                    f"</div></div>",
+                    unsafe_allow_html=True,
+                )
+                if state == "running":
+                    st.progress(rp / 100.0)
 
 
 # ── Pipeline Config Viewer support ─────────────────────────────────────────
@@ -405,29 +478,36 @@ def _render_file_picker(dtype: str) -> None:
         st.rerun()
 
 
-def _pipeline_dataset_confirmation(dataset_type: str) -> str | None:
-    """Dynamic, dataset_type-derived note about the input the selected pipeline
-    expects. Informational only — it does NOT replace the dataset validation
-    performed elsewhere. ``dataset_type`` comes from the selected pipeline's
-    registry entry and the label column from the schema, so there is no brittle
-    pipeline->dataset hardcoding here."""
+def _dataset_info_lines(dataset_type: str) -> list[str]:
+    """Structured dataset facts shown inside the 'Tentang Research Pipeline'
+    expander (previously a separate blue st.info box, now consolidated here).
+
+    Derived from the schema (label column, file format) plus a single curated
+    description per dataset_type — kept in ONE place so the information does not
+    get scattered across the UI. ``dataset_type`` comes from the selected
+    pipeline's registry entry, so there is no brittle pipeline->dataset
+    hardcoding. Informational only; it does NOT replace dataset validation and
+    does not touch any computation. Returns a list of markdown bullet strings."""
     schema = get_schema(dataset_type) or {}
     label_col = schema.get("label_column") or "label"
     if dataset_type == "HIKARI2021":
-        return (
-            f"**Pipeline ini menerima dataset:** HIKARI2021 (varian ALLFLOWMETER) berformat "
-            f"**CSV**, dengan kolom label `{label_col}` (0 = benign, 1 = malicious) dan "
-            f"puluhan kolom fitur numerik berbasis *flow*."
-        )
+        return [
+            "**Format berkas:** CSV (varian ALLFLOWMETER)",
+            f"**Kolom label:** `{label_col}` — 0 = benign, 1 = malicious",
+            "**Sifat fitur:** puluhan kolom fitur numerik berbasis *flow* "
+            "(statistik payload, hitungan header/paket, atribut koneksi).",
+        ]
     if dataset_type == "EVE_SURICATA":
-        return (
-            f"**Pipeline ini menerima dataset:** EVE Suricata berformat **NDJSON** (satu objek "
-            f"JSON per baris). Pipeline cbr memfokuskan analisis pada **trafik TLS** dan "
-            f"menurunkan label dari **alert Suricata** (disempurnakan secara konservatif); "
-            f"berkas mentah tidak perlu memiliki kolom `{label_col}`/label eksplisit."
-        )
+        return [
+            "**Format berkas:** NDJSON (satu objek JSON per baris)",
+            f"**Kolom label:** `{label_col}` — diturunkan dari **alert Suricata** "
+            "(disempurnakan secara konservatif); berkas mentah tidak perlu kolom "
+            "label eksplisit.",
+            "**Sifat fitur:** fitur aliran (*flow*) hasil pipeline cbr 14 fase; "
+            "analisis difokuskan pada **trafik TLS**.",
+        ]
     # Unknown/future dataset type: stay honest and generic, still derived.
-    return f"**Pipeline ini menerima dataset bertipe:** {dataset_type} (kolom label `{label_col}`)."
+    return [f"**Tipe dataset:** {dataset_type} (kolom label `{label_col}`)."]
 
 
 def _all_dataset_options() -> list[tuple[str, str]]:
@@ -474,6 +554,58 @@ def _dataset_preview(path: str, dataset_type: str, n: int = 5):
     if not records:
         return None
     return pd.json_normalize(records, max_level=1)
+
+
+# ── Execution-status panel (async-only UI; mode shown, never toggled) ──────
+
+@st.cache_data(ttl=5, show_spinner=False)
+def _cached_health(nonce: int) -> dict:
+    """Cache the infra health for a few seconds (and per manual re-check nonce)
+    so the broker is not probed on every Streamlit rerun. Never raises."""
+    try:
+        from orchestrator.health_service import check_execution_health
+        return check_execution_health()
+    except Exception:
+        return {"mode": "async", "broker_ok": False, "worker_ok": False,
+                "worker_count": 0, "queue_depth": None, "can_run": False,
+                "message": "Pemeriksaan kesehatan gagal."}
+
+
+def _render_execution_status_panel() -> dict:
+    """Read-only status panel: execution mode + broker/worker/queue indicators +
+    a manual 'Periksa ulang' button. Returns the health dict so the caller can
+    guard the Run button. This panel NEVER changes USE_ASYNC — mode is shown as
+    information, not as a control."""
+    nonce = st.session_state.get("_health_nonce", 0)
+    health = _cached_health(nonce)
+
+    with st.container(border=True):
+        top = st.columns([2, 1])
+        top[0].markdown("**Status Eksekusi**")
+        if top[1].button("Periksa ulang", key="recheck_health", use_container_width=True):
+            st.session_state["_health_nonce"] = nonce + 1
+            st.rerun()
+
+        if health.get("mode") == "sync":
+            cols = st.columns(2)
+            cols[0].metric("Mode", "Sinkron")
+            cols[1].success("Local worker (in-process)")
+            st.caption("Broker/worker tidak diperlukan pada mode sinkron.")
+            return health
+
+        cols = st.columns(4)
+        cols[0].metric("Mode", "Asinkron")
+        if health.get("broker_ok"):
+            cols[1].success("Broker: tersambung")
+        else:
+            cols[1].error("Broker: terputus")
+        if health.get("worker_ok"):
+            cols[2].success(f"Worker: {health.get('worker_count', 0)} aktif")
+        else:
+            cols[2].error("Worker: tidak terdeteksi")
+        qd = health.get("queue_depth")
+        cols[3].metric("Antrian", qd if qd is not None else "—")
+    return health
 
 
 def render():
@@ -606,31 +738,43 @@ def render():
     if research:
         algo_to_pid = research_groups[research]
         _rep_pid = next(iter(algo_to_pid.values()))  # representative for shared info
-
-        # Dynamic dataset confirmation (research/dataset-level) — separate element.
         _pdtype = pipelines.get(_rep_pid, {}).get("dataset_type")
-        _confirm = _pipeline_dataset_confirmation(_pdtype) if _pdtype else None
-        if _confirm:
-            st.info(_confirm)
 
-        # Research-level info (shared across the algorithms of this research).
-        rep_info = get_pipeline_info(_rep_pid)
-        if rep_info:
-            with st.expander("Tentang Research Pipeline (Read-Only)", expanded=True):
-                st.markdown(f"**Research:** {research_display.get(research, research)}")
-                st.markdown(f"**Dataset type:** `{research}`")
-                if rep_info.get("paper"):
-                    st.markdown(f"**Paper:** {rep_info['paper']}")
-                if rep_info.get("anti_leakage"):
-                    st.markdown("**Anti-leakage:**")
-                    for a in rep_info["anti_leakage"]:
-                        st.markdown(f"  - {a}")
-                if rep_info.get("metrics_policy"):
-                    st.markdown(f"**Metrics policy:** {rep_info['metrics_policy']}")
-                st.caption(
-                    "Pilih algoritma di bawah untuk melihat preprocessing & "
-                    "hyperparameter spesifik algoritma tersebut."
-                )
+        # Research-level info consolidated in ONE read-only expander (the former
+        # separate blue st.info dataset box is merged in here). All fields are
+        # derived from structured sources: registry (name/dataset_type/paper),
+        # get_info() (feature_selection/app/anti_leakage/metrics_policy), and the
+        # dataset schema (via _dataset_info_lines). Nothing here is editable and
+        # nothing affects computation.
+        rep_info = get_pipeline_info(_rep_pid) or {}
+        with st.expander("Tentang Research Pipeline (Read-Only)", expanded=True):
+            st.markdown(f"**Research:** {research_display.get(research, research)}")
+            st.markdown(f"**Dataset type:** `{research}`")
+            if rep_info.get("paper"):
+                st.markdown(f"**Paper:** {rep_info['paper']}")
+
+            # Dataset info (moved out of the old blue box).
+            if _pdtype:
+                st.markdown("**Dataset:**")
+                for _line in _dataset_info_lines(_pdtype):
+                    st.markdown(f"- {_line}")
+
+            # Extra descriptive fields from the structured get_info(), when present.
+            if rep_info.get("feature_selection"):
+                st.markdown(f"**Feature selection:** {rep_info['feature_selection']}")
+            if rep_info.get("app"):
+                st.markdown(f"**Fokus aplikasi/trafik:** {rep_info['app']}")
+            if rep_info.get("anti_leakage"):
+                st.markdown("**Anti-leakage:**")
+                for a in rep_info["anti_leakage"]:
+                    st.markdown(f"  - {a}")
+            if rep_info.get("metrics_policy"):
+                st.markdown(f"**Metrics policy:** {rep_info['metrics_policy']}")
+
+            st.caption(
+                "Pilih algoritma di bawah untuk melihat preprocessing & "
+                "hyperparameter spesifik algoritma tersebut."
+            )
 
         # Algorithm selector within the chosen research (algorithm names only —
         # the research name is already clear from the level above). Horizontal
@@ -689,7 +833,18 @@ def render():
 
     if selected:
         st.header("Execute")
-        if st.button("Run Experiment", type="primary"):
+        health = _render_execution_status_panel()
+        can_run = health.get("can_run", True)
+        if not can_run:
+            st.error(
+                "**Eksekusi asinkron belum siap.** "
+                + (health.get("message") or "Broker/worker tidak tersedia.")
+                + " Jika eksperimen tetap dijalankan, ia akan tertahan di antrian dan "
+                "berpotensi ditandai **FAILED (stale)** setelah 120 menit. "
+                "Pastikan service **ids_worker** dan **ids_redis** berjalan, lalu klik "
+                "**Periksa ulang**."
+            )
+        if st.button("Run Experiment", type="primary", disabled=not can_run):
             _run_with_status(dataset_type, dataset_path, selected)
 
     # Results (sync path)
@@ -783,30 +938,50 @@ def _poll_experiment(experiment_id: str):
         _reg_entry = _get_pipeline_entry(status_data.get("pipeline_id", "")) or {}
         _stages_list = _reg_entry.get("stages", []) or []
         _pb = _compute_progress_state(status_data, _stages_list, st.session_state, experiment_id)
-        st.progress(_pb["fraction"])
-        st.markdown(f"**{_pb['label']}**")
-        _bottom_parts = []
+        # Single GLOBAL progress bar (monotonic 0→100, never reset per stage).
+        _pct = int(round(_pb["fraction"] * 100))
+        st.progress(_pb["fraction"], text=f"Progres keseluruhan: {_pct}%")
+        # Summary line: "Fase i/N — name · Elapsed 2m 14s".
+        _summary = f"**{_pb['label']}**"
         if _pb["elapsed_text"]:
-            _bottom_parts.append(f"Elapsed: {_pb['elapsed_text']}")
+            _summary += f" · Elapsed {_pb['elapsed_text']}"
+        st.markdown(_summary)
         if _pb["hint"]:
-            _bottom_parts.append(_pb["hint"])
-        if _bottom_parts:
-            st.caption(" — ".join(_bottom_parts))
+            st.caption(_pb["hint"])
 
-        with st.status(f"Experiment {status.lower()}...", expanded=True):
+        # Jenkins-style HORIZONTAL stage view (columns): done / running / waiting
+        # with per-stage duration. Per-stage start timestamps live in
+        # session_state so durations survive Streamlit reruns during polling.
+        if _stages_list:
+            from workers.progress_util import build_stage_view
+            _starts_key = f"_stage_starts_{experiment_id}"
+            _starts = st.session_state.setdefault(_starts_key, {})
+            _now = datetime.now(timezone.utc).timestamp()
+            _ci = _pb.get("stage_index")
+            if isinstance(_ci, int) and _ci >= 1:
+                _starts.setdefault(_ci, _now)  # first time we observe this stage
+            _view = build_stage_view(len(_stages_list), _ci, status, _starts, _now)
+            st.markdown("**Tahapan pipeline**")
+            _render_stage_columns(_stages_list, _view, _pb.get("stage_percent", 0))
+
+        with st.status(f"Experiment {status.lower()}...", expanded=False):
             st.write(f"**Experiment ID:** `{experiment_id[:8]}...`")
             st.write(f"**Status:** {status}")
             if status == "QUEUED":
                 st.write("Waiting for worker to pick up the task...")
             else:
-                # Show coarse celery stage if the worker reported one;
-                # fall back to the existing static text otherwise.
-                celery_stage = status_data.get("celery_stage")
-                if celery_stage:
-                    st.write(f"**Current step:** {celery_stage}")
+                # Show the last reported stage message if the worker sent one.
+                # Suppress internal [DIAG] scaffolding strings from the UI.
+                _cp = status_data.get("celery_progress") or {}
+                _msg = _cp.get("message") or status_data.get("celery_stage")
+                if _msg and str(_msg).startswith("[DIAG]"):
+                    _msg = "Menyiapkan eksekusi…"
+                if _msg:
+                    st.write(f"**Current step:** {_msg}")
                 else:
                     st.write("Pipeline is executing. This may take several minutes...")
-            st.write("This page auto-refreshes every 5 seconds.")
+            _iv = _get_poll_interval(status_data.get("pipeline_id", ""))
+            st.write(f"This page auto-refreshes about every {_iv} seconds.")
         if st.button("Cancel Experiment", key=f"cancel_poll_{experiment_id}"):
             r = cancel_experiment(experiment_id)
             if r["success"]:
@@ -916,149 +1091,24 @@ def _render_diag_block(experiment_id: str, status_data: dict) -> None:
 
 
 def _display_results(result: dict):
-    """Render all metrics and charts."""
-    st.header("4. Results")
-    m = result["metrics"]
+    """Render all metrics and charts via the shared interactive result view."""
+    st.header("Results")
     eid = result["experiment_id"]
 
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Accuracy", f"{m.get('accuracy', 0):.4f}")
-    c2.metric("Precision", f"{m.get('precision', 0):.4f}")
-    c3.metric("Recall", f"{m.get('recall', 0):.4f}")
-    c4.metric("F1-Score", f"{m.get('f1_score', 0):.4f}")
+    # Unify this page's in-memory PipelineResult with the persisted metrics.json,
+    # then render through the SAME shared component the History page uses.
+    metrics = get_experiment_metrics(eid) or result.get("metrics") or {}
+    payload = normalize_result_payload(
+        experiment_id=eid,
+        metrics=metrics,
+        label_mapping=result.get("label_mapping"),
+        feature_names=result.get("feature_names"),
+        pipeline_id=st.session_state.get("selected_pipeline"),
+        dataset_type=st.session_state.get("dataset_type"),
+    )
+    render_results(payload, key=eid, pipeline_id=st.session_state.get("selected_pipeline", ""))
 
-    full = get_experiment_metrics(eid) or m
-
-    # Confusion Matrix + Feature Importance side by side to save vertical
-    # space and prevent the feature-importance chart from sprawling.
-    has_cm = "confusion_matrix" in m
-    has_fi = bool(full.get("feature_importance"))
-    if has_cm or has_fi:
-        st.subheader("Confusion Matrix & Feature Importance")
-        col_cm, col_fi = st.columns(2)
-        if has_cm:
-            with col_cm:
-                cm = np.array(m["confusion_matrix"])
-                lm = result.get("label_mapping", {})
-                labels = sorted(lm.keys(), key=lambda k: lm[k]) if lm else []
-                fig, ax = plt.subplots(figsize=(5, 4))
-                im = ax.imshow(cm, cmap='Blues')
-                plt.colorbar(im, ax=ax)
-                if labels:
-                    ax.set_xticks(range(len(labels)))
-                    ax.set_yticks(range(len(labels)))
-                    ax.set_xticklabels([str(l) for l in labels], rotation=45, ha='right')
-                    ax.set_yticklabels([str(l) for l in labels])
-                for i in range(cm.shape[0]):
-                    for j in range(cm.shape[1]):
-                        ax.text(j, i, format(cm[i, j], 'd'), ha="center", va="center",
-                                color="white" if cm[i, j] > cm.max() / 2 else "black")
-                ax.set_ylabel("Actual")
-                ax.set_xlabel("Predicted")
-                fig.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-        if has_fi:
-            with col_fi:
-                fi_full = full["feature_importance"]
-                n_total = len(fi_full)
-                top_n = 20
-                fi = fi_full[:top_n]
-                fig, ax = plt.subplots(figsize=(5, max(4, len(fi) * 0.3)))
-                ax.barh(
-                    [x["feature"] for x in reversed(fi)],
-                    [x["importance"] for x in reversed(fi)],
-                    color="#2563EB",
-                )
-                ax.set_xlabel("Importance")
-                title = f"Top {len(fi)} Feature Importance"
-                if n_total > len(fi):
-                    title += f" (of {n_total} total)"
-                ax.set_title(title, fontsize=11)
-                fig.tight_layout()
-                st.pyplot(fig)
-                plt.close(fig)
-        elif has_cm:
-            with col_fi:
-                st.caption("Feature importance tidak tersedia untuk algoritma ini.")
-
-    # ROC Curve
-    if "roc_auc" in full:
-        st.subheader("ROC Curve")
-        col1, col2 = st.columns([3, 1])
-        with col1:
-            fig, ax = plt.subplots(figsize=(6, 5))
-            if "roc_curve" in full:
-                fpr = full["roc_curve"]["fpr"]
-                tpr = full["roc_curve"]["tpr"]
-                if isinstance(fpr, list):
-                    ax.plot(fpr, tpr, label=f"AUC = {full['roc_auc']:.4f}", linewidth=2)
-                elif isinstance(fpr, dict):
-                    for cls in fpr:
-                        ax.plot(fpr[cls], tpr[cls], label=cls, linewidth=1.5)
-            elif "roc_curves_per_class" in full:
-                for cls, curve in full["roc_curves_per_class"].items():
-                    ax.plot(curve["fpr"], curve["tpr"], label=str(cls), linewidth=1.5)
-            ax.plot([0, 1], [0, 1], 'k--', alpha=0.5)
-            ax.set_xlabel("FPR")
-            ax.set_ylabel("TPR")
-            ax.legend(loc="lower right")
-            fig.tight_layout()
-            st.pyplot(fig)
-            plt.close(fig)
-        with col2:
-            st.metric("ROC-AUC", f"{full['roc_auc']:.4f}")
-
-    # (Feature Importance moved into the Confusion Matrix block above to
-    # share a two-column row; this avoids duplicate rendering here.)
-
-    # Per-Class Report
-    if "classification_report" in full:
-        st.subheader("Per-Class Report")
-        report = full["classification_report"]
-        class_rows = {k: v for k, v in report.items() if isinstance(v, dict)}
-        if class_rows:
-            df = pd.DataFrame(class_rows).T.round(4)
-            if "support" in df.columns:
-                df["support"] = df["support"].astype(int)
-            st.dataframe(df, use_container_width=True)
-
-    # Learning Curve
-    if "learning_curve" in full and "error" not in full.get("learning_curve", {}):
-        st.subheader("Learning Curve")
-        lc = full["learning_curve"]
-        tr_std = lc.get("train_scores_std", [0] * len(lc["train_sizes"]))
-        val_mean = lc.get("val_scores_mean", [])
-        val_std = lc.get("val_scores_std", [0] * len(lc["train_sizes"]))
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.fill_between(
-            lc["train_sizes"],
-            [m - s for m, s in zip(lc["train_scores_mean"], tr_std)],
-            [m + s for m, s in zip(lc["train_scores_mean"], tr_std)],
-            alpha=0.1, color="blue",
-        )
-        if val_mean:
-            ax.fill_between(
-                lc["train_sizes"],
-                [mv - s for mv, s in zip(val_mean, val_std)],
-                [mv + s for mv, s in zip(val_mean, val_std)],
-                alpha=0.1, color="orange",
-            )
-        ax.plot(lc["train_sizes"], lc["train_scores_mean"], 'o-', color="blue", label="Train", linewidth=2)
-        if val_mean:
-            ax.plot(lc["train_sizes"], val_mean, 'o-', color="orange", label="Validation", linewidth=2)
-        ax.set_xlabel("Training Size")
-        ax.set_ylabel("F1 (Weighted)")
-        ax.legend()
-        ax.grid(alpha=0.3)
-        fig.tight_layout()
-        st.pyplot(fig)
-        plt.close(fig)
-
-    # Process Log (captured stdout from local_worker / Celery worker)
-    if "process_log" in full and full["process_log"]:
-        with st.expander("Process Log", expanded=False):
-            st.code(full["process_log"], language=None)
+    full = metrics  # PDF/download section below reads the same unified metrics
 
     # PDF Download
     st.markdown("---")
