@@ -344,6 +344,16 @@ def get_experiment_status(experiment_id: str) -> dict | None:
                 stage = info.get("stage")
                 if stage:
                     exp["celery_stage"] = stage
+                # Pass through the granular progress payload (stage_index,
+                # stage_total, stage_percent, overall_percent, stage_name,
+                # message) so the UI can render the Jenkins-style stage view.
+                # Backward compatible: absent for old/coarse emitters.
+                exp["celery_progress"] = {
+                    k: info[k] for k in (
+                        "stage_name", "stage_index", "stage_total",
+                        "stage_percent", "overall_percent", "message",
+                    ) if k in info
+                }
         except Exception:
             logger.debug(
                 "Could not read Celery PROGRESS meta for %s — omitting celery_stage",
