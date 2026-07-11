@@ -79,11 +79,12 @@ st.markdown(
 # of the repo without the dep installed), fall back to a plain radio so the
 # app stays usable and the user gets a clear hint to install it.
 
-_PAGES = ("Run Experiment", "History")
-_PAGE_ICONS = ("play-circle", "clock-history")
-# Landing page shown when the app first opens. Index is resolved by name so
-# menu order can change freely without breaking the default.
-_DEFAULT_PAGE = "Run Experiment"
+_PAGES = ("Progress & Status", "Run Experiment")
+_PAGE_ICONS = ("speedometer2", "play-circle")
+# Landing page shown when the app first opens. "Progress & Status" is the main
+# dashboard (all experiments + live progress); index is resolved by name so menu
+# order can change freely without breaking the default.
+_DEFAULT_PAGE = "Progress & Status"
 
 try:
     from streamlit_option_menu import option_menu
@@ -141,9 +142,9 @@ def _select_page() -> str:
 page = _select_page()
 
 # ── Page routing ──────────────────────────────────────────────────────────
-if page == "Run Experiment":
-    from ui.views.run_experiment import render
-    render()
-elif page == "History":
+if page == "Progress & Status":
     from ui.views.view_results import render
+    render()
+elif page == "Run Experiment":
+    from ui.views.run_experiment import render
     render()

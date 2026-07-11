@@ -871,7 +871,7 @@ def _cleanup_app_if_requested(cfg: RunConfig, app: str, *, archived: bool) -> No
 # Per-app and full pipeline
 # ============================================================
 
-def run_app_pipeline(cfg: RunConfig, app: str) -> dict[str, Any]:
+def run_app_pipeline(cfg: RunConfig, app: str, progress: Optional[Callable[[int, str], None]] = None) -> dict[str, Any]:
     app = str(app).strip().lower()
     started_at = datetime.now()
     t0 = time.perf_counter()
@@ -891,6 +891,13 @@ def run_app_pipeline(cfg: RunConfig, app: str) -> dict[str, Any]:
 
     try:
         for phase in range(1, 15):
+            # Observation-only progress hook fired BEFORE the phase runs. Wrapped
+            # so a broken reporter can never perturb the pipeline or its result.
+            if progress is not None:
+                try:
+                    progress(phase, PHASE_NAMES.get(phase, f"phase{phase}"))
+                except Exception:
+                    pass
             phase_statuses[f"phase{phase}"] = _run_phase(
                 cfg,
                 app,
@@ -957,12 +964,16 @@ def run_app_pipeline(cfg: RunConfig, app: str) -> dict[str, Any]:
     return app_summary
 
 
-def run_pipeline(cfg: RunConfig) -> dict[str, Any]:
+def run_pipeline(cfg: RunConfig, progress: Optional[Callable[[int, str], None]] = None) -> dict[str, Any]:
     """
     Run the configured CBR pipeline.
 
     Expected precondition:
         pre-pipeline split has already produced eve_<app>.jsonl files.
+
+    ``progress`` is an OPTIONAL observation-only hook ``progress(phase_no, phase_name)``
+    fired just before each of the 14 phases. It defaults to None (byte-identical
+    behaviour to before) and must never influence computation, ordering, or seeds.
     """
     _ensure_base_dirs(cfg)
 
@@ -994,7 +1005,7 @@ def run_pipeline(cfg: RunConfig) -> dict[str, Any]:
 
     try:
         for app in apps:
-            app_results[app] = run_app_pipeline(cfg, app)
+            app_results[app] = run_app_pipeline(cfg, app, progress=progress)
 
     except Exception as exc:
         status = "failed"

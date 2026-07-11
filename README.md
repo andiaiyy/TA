@@ -7,7 +7,7 @@
 [![Docker](https://img.shields.io/badge/runtime-Docker%20Compose-2496ED?logo=docker&logoColor=white)](https://docs.docker.com/compose/)
 [![Celery](https://img.shields.io/badge/async-Celery%20%2B%20Redis-37814A?logo=celery&logoColor=white)](https://docs.celeryq.dev/)
 [![scikit-learn](https://img.shields.io/badge/ML-scikit--learn-F7931E?logo=scikit-learn&logoColor=white)](https://scikit-learn.org/)
-[![tests](https://img.shields.io/badge/tests-196%20collected-success)](#testing)
+[![tests](https://img.shields.io/badge/tests-225%20passed%20%2F%202%20skipped-success)](#testing)
 [![status](https://img.shields.io/badge/status-research%20%2F%20academic-orange)](#academic-context)
 [![license](https://img.shields.io/badge/license-TBD-lightgrey)](#license)
 
@@ -21,7 +21,7 @@ Given a CSV/NDJSON dataset and a pipeline selection, the system:
 
 1. Validates the file against a known schema and computes its SHA-256 hash.
 2. Trains the model using **locked, hard-coded hyperparameters** (no user-configurable knobs).
-3. Evaluates with standard metrics (accuracy, precision, recall, F1, ROC-AUC, confusion matrix, per-class report) plus a learning curve.
+3. Evaluates with standard metrics (accuracy, precision, recall, F1, ROC-AUC, confusion matrix). HIKARI2021 pipelines also produce a per-class report and a learning curve; EVE-cbr pipelines instead report a dual-holdout comparison (natural vs balanced).
 4. Persists the trained model, all metrics, and metadata to disk under a per-experiment artifact directory.
 5. Records the run in a local SQLite database, browsable through a Streamlit UI with downloadable PDF reports.
 
@@ -34,35 +34,36 @@ This is not a production IDS, not a real-time detector, and not a multi-tenant s
 - **Locked pipelines, no UI hyperparameter tuning.** Every algorithm parameter is hard-coded in source. This is the platform's core methodological contribution.
 - **10 registered ML pipelines** across 2 dataset families (see [Pipelines](#pipelines)).
 - **Reproducibility by construction**: every stochastic step uses `random_state=42`, every split is `stratify=y`, every dataset is SHA-256 hashed and the hash is persisted to the experiment record.
-- **Dual execution modes**: synchronous (in-process) or asynchronous (Celery + Redis). Toggled via `USE_ASYNC` environment variable.
-- **Web UI (Streamlit)** with 2 pages: Run Experiment and Experiment History (AgGrid).
-- **PDF report generation** per experiment, including metric cards, confusion matrix, ROC curve, learning curve, feature importance, and classification report.
+- **Dual execution modes**: synchronous (in-process `local_worker`) or asynchronous (Celery + Redis). Selected via the `USE_ASYNC` environment variable — **the Docker deployment sets `USE_ASYNC=true`, so containers run asynchronously**; the synchronous path remains in the code for local development and the test suite. The UI does not toggle the mode; it shows an execution-status panel (broker/worker health) and blocks submit if the async worker is unavailable.
+- **Web UI (Streamlit)** with 2 pages: **Progress & Status** (the default landing dashboard — live progress of all in-flight experiments + history table with a pop-up result dialog) and **Run Experiment** (create/monitor a new run).
+- **Interactive results in the UI** (confusion matrix, feature importance, ROC, learning curve) plus a **PDF report** per experiment (academic-paper style: numbered captions, muted palette, computed security interpretation, reproducibility block).
 - **Containerized deployment** via Docker Compose. Three services: `ids_ui`, `ids_worker`, `ids_redis`.
-- **Test suite** of 196 collected tests, including parametrized cross-pipeline reproducibility checks.
+- **Test suite** of 227 tests (**225 passed, 2 skipped** on a run without the optional EVE NDJSON fixture), including parametrized cross-pipeline reproducibility checks.
 - **Cross-environment path fallback** so an experiment dispatched from one OS resolves dataset files correctly on a worker running in another (e.g., Docker worker reading a Windows-style path).
 
 ---
 
 ## Architecture
 
-The codebase is organized into strict layers with one-way import boundaries:
+The system is best described as **five sequential layers plus a shared kernel**, with one-way import boundaries:
 
 ```
-ui/                ← Streamlit views; talks only to orchestrator/ + config/
-orchestrator/      ← Business logic; only DB-writing layer
-workers/           ← Sync (local) and async (Celery) executors
-pipelines/         ← Pure ML; no DB, no UI, no orchestrator imports
-contracts/         ← Cross-layer dataclasses (PipelineInput, PipelineResult)
-database/          ← SQLite CRUD + migrations
-config/            ← Paths, settings, pipeline registry, Celery config
-utils/             ← Hashing, artifact saving, PDF generator, logging, sanitizer
-storage/           ← Datasets (input) and artifacts (output); mounted as volume
-tests/             ← pytest suite
-docker/            ← UI and worker Dockerfiles
-run_pipeline.py    ← CLI runner (alternative to UI)
+        UI  →  Orchestrator  →  Workers  →  Pipelines  →  Storage      (request/execution flow)
+              └──────────────  shared kernel: contracts/  +  config/  ──────────────┘
 ```
 
-**Hard import rule:** `pipelines/` must never import from `database/`, `ui/`, `orchestrator/`, or `workers/`. `orchestrator/experiment_service.py` is the only file that writes to the database.
+| Layer | Directory | Role |
+|---|---|---|
+| **UI** | `ui/` | Streamlit views (`ui/views/`) + shared result/dashboard components (`ui/components/`); talks to `orchestrator/` + `config/` |
+| **Orchestrator** | `orchestrator/` | Validation, dispatch, experiment lifecycle, result read, infra health check |
+| **Workers** | `workers/` | `local_worker` (sync, in-process) and `celery_worker` (async task) |
+| **Pipelines** | `pipelines/` | Pure ML (HIKARI2021 + EVE-cbr); no DB/UI/worker imports |
+| **Storage** | `storage/` | Datasets (input) + artifacts (output) + SQLite DB; mounted as a volume |
+| **Shared kernel** | `contracts/`, `config/` | Cross-layer dataclasses (`PipelineInput`/`PipelineResult`, schemas) and settings/registry/Celery config — imported by every layer, so they sit *beside* the stack, not as a sequential step |
+
+Supporting: `database/` (SQLite CRUD + migrations), `utils/` (hashing, artifact saving, PDF generator, sanitizer), `tests/`, `docker/`, and `run_pipeline.py` (CLI runner).
+
+**Hard import rule:** `pipelines/` never imports from `database/`, `ui/`, `orchestrator/`, or `workers/` — only from `contracts/`. **DB writes:** within the orchestrator layer, `orchestrator/experiment_service.py` is the sole writer and the only place that creates a record (INSERT); on the async path `workers/celery_worker.py` also writes status updates (`RUNNING`/`FINISHED`/`FAILED`) from the worker process, and `database/` init (DDL) runs at UI startup.
 
 ### Component flow
 
@@ -98,20 +99,22 @@ All HIKARI2021 pipelines use a stratified 70/30 train/test split.
 | `hikari2021.nbgc_pipeline` | Gaussian Naive Bayes | None |
 | `hikari2021.lr_pipeline` | Logistic Regression | StandardScaler + PCA(95% variance), both **fit on train only** (no leakage) |
 
-### EVE Suricata (4 pipelines)
+### EVE/Suricata cbr (4 pipelines)
 
-All four EVE pipelines share an identical Phase 1–9 preprocessing chain (`pipelines/eve_suricata/phase_runner.py`); only `_train_and_extract()` differs per pipeline.
+The four EVE pipelines wrap the **`cbr` 14-phase anti-leakage pipeline** (`pipelines/eve_cbr/`) via a shared adapter (`pipelines/eve_cbr/cbr_adapter.py`); only the algorithm differs per pipeline. Analysis is focused on **TLS** traffic, and **metrics are reported on the natural holdout (attack class)** — reflecting the original class distribution.
 
-| Pipeline ID | Algorithm | Features used |
+| Pipeline ID | Algorithm | Notes |
 |---|---|---|
-| `eve_suricata.rfc` | Random Forest (100 trees) | RFE top-25 |
-| `eve_suricata.dt`  | Decision Tree | RFE top-25 |
-| `eve_suricata.knn` | K-Nearest Neighbors (k=5) + StandardScaler | MI top-25 |
-| `eve_suricata.xgb` | XGBoost (100 trees) | MI top-25 |
+| `eve_cbr.rfc`  | Random Forest | 14-phase cbr, TLS, natural-holdout (attack-class) |
+| `eve_cbr.dt`   | Decision Tree | idem |
+| `eve_cbr.lsvc` | Linear SVC | idem |
+| `eve_cbr.xgb`  | XGBoost | idem |
 
-**Shared phase chain (1–9):** Load & Label (NDJSON, 2-pass disk-backed) → Feature Engineering → Computed Features → Aggressive Cleaning → Correlation Analysis → Stratified Train/Test Split → Feature Selection (MI + RFE + PCA).
+**14-phase chain (grouped):** ingestion & pre-split validation (P1–2) → probing analysis + conservative label refinement with a row-level conversion cap (P3–4) → feature engineering, computed features, cleaning policy (P5–7) → export + stratified train/test split (P8) → visualization + correlation/leakage screening (P9–10) → modeling-split prep + feature selection MI/RFE/PCA, train-only (P11–12) → balanced-train training + **dual holdout** natural (primary) + balanced (secondary) evaluation (P13–14). Labels are **derived from Suricata alerts** (`Target` refined from `alert.severity`) — not external ground truth.
 
-> XGBoost is a soft dependency. If the `xgboost` package is unavailable, only `eve_suricata.xgb` raises `ImportError`; other pipelines are unaffected.
+> The legacy 7/9-phase `eve_suricata.*` pipelines were archived (recoverable) under `pipelines/_archive/eve_suricata_7phase/` and are no longer registered.
+>
+> XGBoost is a soft dependency; if unavailable, only `eve_cbr.xgb` is affected.
 
 ---
 
@@ -133,17 +136,21 @@ Full dependency list lives in [`requirements.txt`](requirements.txt).
 
 ## Runtime Environment
 
-The platform runs on **Python 3.11** (the `python:3.11-slim` Docker base image; local development supports Python 3.10 or 3.11). Key library versions from a reference Docker run:
+This section replaces the former **Environment Info** UI page (removed from the app; the same information now lives here and in each experiment's `metadata.json`).
 
-| Component | Version (reference run) |
+The platform runs on **Python 3.11** (the `python:3.11-slim` Docker base image; local development supports Python 3.10 or 3.11). Verified library versions from the running containers:
+
+| Component | Version (verified in the running images) |
 |---|---|
-| Python | 3.11.x |
-| scikit-learn | 1.9.x |
-| pandas | 3.0.x |
-| numpy | 2.4.x |
+| Python | 3.11.15 |
+| scikit-learn | 1.9.0 |
+| pandas | 3.0.3 |
+| numpy | 2.4.6 |
+| Streamlit | 1.59.1 |
+| Celery | 5.6.3 |
 | Platform | Linux (WSL2) inside Docker |
 
-Exact versions are pinned by the ranges in [`requirements.txt`](requirements.txt) and resolved at image-build time, so they can drift within those bounds between builds.
+**Two Docker images, identical dependency set.** The stack builds two images — the UI (`docker/Dockerfile`) and the Celery worker (`docker/worker.Dockerfile`) — but **both install from the same [`requirements.txt`](requirements.txt)**, so their library versions match. Verified: `ids_ui` and `ids_worker` report identical `scikit-learn 1.9.0 / pandas 3.0.3 / numpy 2.4.6` (no version drift between images). Exact versions are pinned by the ranges in `requirements.txt` and resolved at image-build time, so they can drift within those bounds between separate builds — rebuild both images together to keep them in lockstep.
 
 **Checking the runtime versions of a given experiment.** Every experiment records its full environment in its artifact `metadata.json` under the `environment` key — Python version, scikit-learn / pandas / numpy versions, platform string, and Docker status. Inspect it with, e.g.:
 
@@ -260,11 +267,10 @@ Dataset files are **never written to** at runtime. They are hashed (SHA-256) and
 
 ### Via the Streamlit UI
 
-1. Open **http://localhost:8501**.
-2. Use the sidebar to navigate (Run Experiment, History).
-3. In **Run Experiment**: pick a dataset type, choose a file detected from `storage/datasets/`, click **Validate Dataset**, then pick a compatible pipeline and click **Run Experiment**.
-4. Watch the live progress panel; on completion, metrics, charts, and a **Download PDF Report** button appear.
-5. Browse past runs in **History** (AgGrid table with filtering and re-run).
+1. Open **http://localhost:8501**. The default page is **Progress & Status**.
+2. Use the sidebar to navigate (**Progress & Status**, **Run Experiment**).
+3. **Progress & Status** (dashboard): a "Sedang Berjalan" section shows *all* in-flight experiments (progress bar + running stage + cancel), and below it a history table (AgGrid, paginated). Select a row and click **Lihat detail** to open the results as a **pop-up dialog** (interactive confusion matrix, feature importance, ROC, learning curve / dual-holdout, PDF download, artifact viewer, re-run).
+4. **Run Experiment**: pick a dataset type, choose a file detected from `storage/datasets/`, click **Validate Dataset**, then pick a compatible pipeline and click **Run Experiment**. An execution-status panel shows broker/worker health; **Run is disabled if the async worker is unavailable**. Watch the live stage view; on completion, interactive results + a **Download PDF Report** button appear.
 
 ### Via the CLI runner
 
@@ -294,6 +300,8 @@ This is the platform's design center. The following invariants are enforced proj
 
 A "test it twice and compare" pattern is enforced in the test suite (`test_reproducibility` style cases) for each pipeline.
 
+**Determinism scope.** Bit-identical results are guaranteed *within the same environment* — the same Docker image (hence identical library versions), the same pipeline code, and a matching dataset SHA-256. Because `random_state=42` is fixed and every experiment's `metadata.json` records its `dataset_hash` and full library environment, two runs of the same pipeline on the same data (in the same image) produce identical metrics; a changed dataset or a different library version is detectable from the recorded hash/environment.
+
 ### Computation parallelism note
 
 All `n_jobs` parameters across pipelines are pinned to `2` (not `-1`). This is a deliberate choice for memory safety on smaller dev/CI machines and consistent narrative across all runs. `n_jobs` is a computation knob, not a model hyperparameter; changing it does not affect the trained model or its metrics — only wall-clock time.
@@ -305,46 +313,50 @@ All `n_jobs` parameters across pipelines are pinned to `2` (not `-1`). This is a
 ```
 .
 ├── ui/                            Streamlit application
-│   ├── app.py                     Entry point (sidebar routing)
-│   └── views/
-│       ├── run_experiment.py      Run + monitor experiments
-│       ├── view_results.py        History (AgGrid) + detail view
-│       └── _artifact_browser.py   Read-only artifact viewer
+│   ├── app.py                     Entry point (sidebar routing: Progress & Status, Run Experiment)
+│   ├── views/
+│   │   ├── run_experiment.py      Create + monitor a run (stage view, exec-status panel)
+│   │   ├── view_results.py        "Progress & Status" dashboard + history + detail dialog
+│   │   └── _artifact_browser.py   Read-only artifact viewer
+│   └── components/                Shared UI (zero duplication)
+│       ├── result_views.py        Interactive result renderers + normalize_result_payload
+│       └── dashboard.py           Pure dashboard helpers (running list, progress view)
 ├── orchestrator/                  Business logic
-│   ├── experiment_service.py      Only DB-writing facade
+│   ├── experiment_service.py      DB-writing facade (creates records; dispatch)
 │   ├── execution_service.py       Pipeline dispatch
 │   ├── validation_service.py      Schema validation
 │   ├── result_service.py          Read-only result retrieval
+│   ├── health_service.py          Broker/worker health check (async guard)
 │   ├── dataset_parser.py          CSV / NDJSON parsing
 │   └── validator.py               Column-set check
 ├── workers/
 │   ├── local_worker.py            Synchronous executor
-│   └── celery_worker.py           Async Celery task
+│   ├── celery_worker.py           Async Celery task (writes status on async path)
+│   └── progress_util.py           Granular progress payload helpers
 ├── pipelines/
 │   ├── base.py                    BasePipeline abstract class
 │   ├── hikari2021/                6 paper-faithful pipelines
-│   └── eve_suricata/
-│       ├── phase_runner.py        Shared 11-phase chain
-│       ├── phases/                phase1..phase9 modules
-│       ├── rfc_pipeline.py
-│       ├── dt_pipeline.py
-│       ├── knn_pipeline.py
-│       └── xgb_pipeline.py
+│   ├── eve_cbr/                   4 EVE pipelines (cbr 14-phase, TLS)
+│   │   ├── cbr_adapter.py         BasePipeline adapter over the cbr core
+│   │   ├── cbr/                   14-phase pipeline + phases/ (phase1..phase14)
+│   │   ├── rfc_pipeline.py  dt_pipeline.py  lsvc_pipeline.py  xgb_pipeline.py
+│   │   └── split/                 deterministic per-app (TLS) splitter
+│   └── _archive/                  legacy eve_suricata_7phase (unregistered, recoverable)
 ├── database/
 │   ├── models.py                  Schema constants (one table: experiments)
-│   ├── db.py                      sqlite3 CRUD
+│   ├── db.py                      sqlite3 CRUD (WAL, retry-on-locked)
 │   └── migration.py               Schema versioning
 ├── contracts/
 │   ├── pipeline_contracts.py      PipelineInput / PipelineResult
 │   └── dataset_schemas.py
 ├── config/
-│   ├── settings.py                Paths, env detection
-│   ├── pipeline_registry.py       Registry of all pipelines
+│   ├── settings.py                Paths, env detection, DB_PATH
+│   ├── pipeline_registry.py       Registry of all 10 pipelines
 │   └── celery_config.py           Broker / backend / USE_ASYNC
 ├── utils/
 │   ├── hashing.py                 SHA-256 with cross-env path fallback
 │   ├── artifact_saver.py          Write model + metrics + metadata
-│   ├── report_generator.py        Modular PDF report (9 sections)
+│   ├── report_generator.py        Academic-style PDF report (ReportLab)
 │   ├── error_sanitizer.py         Strip absolute paths from error strings
 │   ├── timestamps.py
 │   └── logging_config.py
@@ -352,11 +364,11 @@ All `n_jobs` parameters across pipelines are pinned to `2` (not `-1`). This is a
 │   ├── datasets/                  Input files (gitignored)
 │   ├── artifacts/{exp_id}/        model.pkl, metrics.json, metadata.json
 │   └── experiments.db             SQLite (WAL mode)
-├── tests/                         pytest suite (196 collected)
+├── tests/                         pytest suite (227 tests)
 ├── docker/
 │   ├── Dockerfile                 UI image
 │   └── worker.Dockerfile          Celery worker image
-├── docker-compose.yml             Three-service stack
+├── docker-compose.yml             Three-service stack (redis, worker, ui)
 ├── requirements.txt
 ├── pyproject.toml
 └── run_pipeline.py                CLI runner
@@ -388,29 +400,38 @@ SQLite is opened in WAL mode for safer concurrent read-while-write.
 
 ## Testing
 
+`tests/` is **excluded from the Docker images** (see `.dockerignore`), so run the suite from a local checkout — a venv on the host, or by copying `tests/` into a running container first.
+
 ```powershell
-# Full suite
+# Local venv (host — tests/ is present in the checkout)
 .\venv\Scripts\python.exe -m pytest tests/ -q
+
+# Or inside the running stack: copy tests in first (they are not baked into the image)
+docker cp tests ids_ui:/app/tests
+docker compose exec -e USE_ASYNC=false ui python -m pytest tests/ -q
 
 # Focused subsets (examples)
 pytest tests/test_db.py tests/test_migration.py -v
 pytest tests/test_validator.py tests/test_parser.py -v
-pytest tests/test_pipeline_rf.py -v
+pytest tests/test_pipeline_hikari.py -v
 pytest tests/test_hikari_all_pipelines.py -v
 pytest tests/test_eve_pipeline.py -v
-pytest tests/test_experiment_service.py -v
-pytest tests/test_path_fallback.py -v
+pytest tests/test_health_service.py tests/test_dashboard.py -v
 ```
 
-At the time of writing, `pytest --collect-only -q` reports **196 tests collected**. The suite covers:
+**Last verified run: `225 passed, 2 skipped` (227 collected), 0 failed.** The 2 skips are in `tests/test_eve_pipeline.py` (`test_parse_ndjson`, `test_validate_eve_dataset`): they need an optional NDJSON fixture at `storage/datasets/eve_100k.ndjson`, which is not staged by default — they are environment-gated, **not** failures. Stage that file to run them.
+
+> Run with `USE_ASYNC=false` (sync mode). In a container whose env sets `USE_ASYNC=true`, a few `test_experiment_service.py` cases take the async branch and fail — an environment artifact, not a regression.
+
+The suite covers:
 
 - Database CRUD + migrations (per-test isolated SQLite via `tmp_path`)
 - Schema validators and dataset parser
 - Each pipeline end-to-end on synthetic schema-conforming DataFrames (no real CSV needed)
-- A parametrized HIKARI2021 cross-pipeline test (multiple pipelines × multiple assertions)
-- Orchestrator services and execution service
-- Artifact saving + path-resolution fallback
-- Error sanitizer and Celery progress reporting
+- A parametrized HIKARI2021 cross-pipeline test (multiple pipelines × multiple assertions), incl. `test_reproducibility` (run twice, assert identical metrics)
+- Orchestrator services, execution service, and the async **health check** (fully mocked — no real Redis)
+- Artifact saving + path-resolution fallback; error sanitizer and Celery progress reporting
+- Granular progress schema, shared result-view helpers, dashboard helpers, and the PDF report generator (smoke + defensive)
 
 No mocked ML models — pipelines run real `sklearn` fits on synthetic data.
 
@@ -471,8 +492,9 @@ This is an honest list. The platform is intentionally scoped.
 - **Single-user, single-tenant.** No authentication, no per-user data isolation, no rate limiting. Intended for a single researcher on their own machine or a private VM.
 - **Batch-oriented, not real-time.** No streaming, no packet capture, no API for online inference. Each experiment is a one-shot offline run.
 - **Classical ML only.** No deep learning (LSTM, Transformer, GNN). The contracts and storage layer could be extended, but no DL pipeline currently exists.
-- **Pre-extracted features required.** Datasets must already be in CSV (HIKARI2021) or NDJSON (EVE Suricata) form. There is no pcap-to-feature extraction stage in this repo.
-- **EVE Suricata Phase 1 reads NDJSON only.** A CSV adapter is in progress (dotted-column → nested event reconstruction) but not yet wired end-to-end.
+- **Pre-extracted inputs required.** HIKARI2021 is a pre-extracted feature CSV; EVE-cbr ingests raw Suricata **EVE NDJSON/JSONL logs** and does its own feature engineering across the 14 phases. There is no pcap-to-feature extraction stage in this repo.
+- **EVE-cbr focuses on TLS traffic** and derives its `Target` label from Suricata alerts (not external ground truth); metrics are reported on the natural holdout. Other app protocols are split out but the registered pipelines process the TLS split.
+- **EVE memory profile.** The cbr adapter caps sampling/training rows (e.g. `modeling_train_rows=150000`) so a large EVE log stays within the worker's `mem_limit` (3500m); the cbr core default of 10M rows would OOM.
 - **Dataset files must be placed manually** in `storage/datasets/`. There is no file upload widget in the UI; this is a deliberate choice to keep dataset provenance traceable.
 - **No CI/CD.** Tests are run locally; there is no GitHub Actions / Jenkins / etc. pipeline configured at the time of writing.
 - **SQLite, not PostgreSQL.** Sufficient for a single-user research workload but not horizontally scalable.

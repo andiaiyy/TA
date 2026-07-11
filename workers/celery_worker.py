@@ -58,22 +58,33 @@ app.conf.update(
 )
 
 
-def _safe_update_state(task, stage: str) -> None:
+def _safe_update_state(task, stage: str, meta_extra: dict | None = None) -> None:
     """
-    Best-effort coarse progress reporter.
+    Best-effort progress reporter.
 
-    Emits a custom Celery state "PROGRESS" with a single ``stage`` string
-    in meta. Failures (broker down, serialization errors, etc.) are
-    logged and swallowed — progress reporting must NEVER cause an
-    experiment to fail.
+    Emits a custom Celery state "PROGRESS". ``meta`` always carries a ``stage``
+    string (backward compatible with the previous coarse reporter and with
+    tests/UI that read ``meta["stage"]``); ``meta_extra`` layers the granular
+    fields (stage_index, stage_total, stage_percent, overall_percent, message)
+    on top when a pipeline stage is being reported. Failures (broker down,
+    serialization errors, etc.) are logged and swallowed — progress reporting
+    must NEVER cause an experiment to fail.
+
+    Progress is emitted to the Celery result backend (Redis), NOT to SQLite,
+    so there is no DB-write amplification to throttle.
 
     The state name "PROGRESS" is deliberately distinct from Celery's
     built-in states (PENDING/STARTED/SUCCESS/FAILURE/REVOKED/RETRY/REJECTED)
     so we don't shadow them.
     """
     logger.info("[DIAG] _safe_update_state entry stage=%s", stage)
+    meta = {"stage": stage}
+    if meta_extra:
+        meta.update(meta_extra)
+        # keep the raw stage string authoritative even if meta_extra overrode it
+        meta["stage"] = stage
     try:
-        task.update_state(state="PROGRESS", meta={"stage": stage})
+        task.update_state(state="PROGRESS", meta=meta)
     except Exception:
         logger.exception("[DIAG] _safe_update_state swallowed exception")
         logger.exception("Progress update failed for stage=%r — continuing", stage)
@@ -103,12 +114,14 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
       6. Save artifacts (with orphan cleanup on DB failure)
       7. Set status FINISHED (or FAILED on error)
     """
-    # [DIAG] First statement in the task body — proves the worker actually
-    # picked up the task AND that update_state itself works, in one shot.
-    # The UI reads AsyncResult(task_id).info["stage"] back through the
-    # orchestrator's get_experiment_status() helper.
+    # First statement in the task body — proves the worker actually picked up
+    # the task AND that update_state itself works, in one shot. The diagnostic
+    # intent is kept in the log; the user-facing meta stage is a clean message
+    # (no "[DIAG]" scaffolding leaking into the UI). The UI reads
+    # AsyncResult(task_id).info back through get_experiment_status().
+    logger.info("[DIAG] worker task entered experiment_id=%s", experiment_id)
     try:
-        self.update_state(state="PROGRESS", meta={"stage": "[DIAG] worker task entered"})
+        self.update_state(state="PROGRESS", meta={"stage": "Menyiapkan eksekusi…"})
     except Exception:
         logger.exception("[DIAG] worker-entered update_state failed")
     try:
@@ -133,13 +146,31 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
         df = parse_dataset(dataset_path)
 
         _safe_update_state(self, "Executing pipeline...")
-        # Forward fine-grained pipeline stages to Celery PROGRESS state.
-        # _safe_update_state already swallows exceptions internally; the
-        # pipeline-side _emit_progress wrapper does so as well — a doubly
-        # safe path that cannot fail the experiment.
+        # Forward fine-grained pipeline stages to Celery PROGRESS state, enriched
+        # with granular stage_index/stage_total/overall_percent computed from the
+        # registry stage list. _safe_update_state already swallows exceptions
+        # internally; the pipeline-side _emit_progress wrapper does so as well —
+        # a doubly safe path that cannot fail the experiment. The enrichment is
+        # pure observation (workers/progress_util) and never touches computation.
+        from workers.progress_util import build_progress_meta
+        _prog_state = {"last_index": 0, "last_overall": 0}
+
         def _progress(stage: str) -> None:
             logger.info("[DIAG] celery callback invoked stage=%s", stage)
-            _safe_update_state(self, stage)
+            try:
+                meta = build_progress_meta(
+                    pipeline_id, stage,
+                    last_index=_prog_state["last_index"],
+                    last_overall=_prog_state["last_overall"],
+                )
+                if meta.get("stage_index"):
+                    _prog_state["last_index"] = meta["stage_index"]
+                _prog_state["last_overall"] = meta.get("overall_percent", _prog_state["last_overall"])
+                _safe_update_state(self, stage, meta_extra=meta)
+            except Exception:
+                # Never let enrichment break progress reporting; fall back to
+                # the plain stage string.
+                _safe_update_state(self, stage)
         result = execute_pipeline(
             pipeline_id, df, dataset_type, dataset_path=dataset_path, progress=_progress,
         )
