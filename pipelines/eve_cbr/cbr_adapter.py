@@ -31,6 +31,7 @@ from typing import Any, Optional
 
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 from pipelines.base import BasePipeline, ProgressCallback
+from config.research_attribution import research_paper_credit
 
 logger = logging.getLogger(__name__)
 
@@ -532,7 +533,7 @@ class BaseCbrEvePipeline(BasePipeline):
 
     def get_info(self) -> dict:
         return {
-            "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline (TLS)",
+            "paper": research_paper_credit("EVE_SURICATA"),
             "algorithm": self.ALGORITHM_LABEL,
             "app": "TLS",
             "dataset": "EVE/Suricata (eve_sample_1000000.jsonl), TLS split by port/app_proto/event_type",

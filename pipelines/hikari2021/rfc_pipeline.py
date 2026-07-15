@@ -28,6 +28,7 @@ from imblearn.under_sampling import RandomUnderSampler
 
 from pipelines.base import BasePipeline, ProgressCallback
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
+from config.research_attribution import research_paper_credit
 
 
 # Columns to drop — index artifacts, identifiers, non-numeric metadata
@@ -181,7 +182,7 @@ class HikariRFCPipeline(BasePipeline):
     def get_info(self) -> dict:
         """Return static pipeline metadata."""
         return {
-            "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant. Modular IDS ML Pipeline.",
+            "paper": research_paper_credit("HIKARI2021"),
             "algorithm": "Random Forest",
             "preprocessing_steps": [
                 "Drop index artifacts and identifier columns (Unnamed, uid, originh, responh, traffic_category)",

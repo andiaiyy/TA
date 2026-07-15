@@ -21,11 +21,16 @@ from pipelines.eve_cbr.xgb_pipeline import EveCbrXGBPipeline
 # resolve stage_index/stage_total for the granular progress payload.
 from pipelines.eve_cbr.cbr_adapter import EVE_CBR_STAGES as _EVE_CBR_STAGES
 
+# Reproduced-study credit — single structured source (display/attribution text
+# only, no effect on computation). The registry `paper` field reads from here so
+# the credit is not duplicated as a literal.
+from config.research_attribution import research_paper_credit as _paper_credit
+
 PIPELINE_REGISTRY = {
     "hikari2021.rfc_pipeline": {
         "dataset_type": "HIKARI2021",
         "name": "Random Forest + RandomUnderSampler — HIKARI2021",
-        "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
+        "paper": _paper_credit("HIKARI2021"),
         "algorithm": "Random Forest",
         "class": HikariRFCPipeline,
         "stages": [
@@ -38,7 +43,7 @@ PIPELINE_REGISTRY = {
     "hikari2021.dt_pipeline": {
         "dataset_type": "HIKARI2021",
         "name": "Decision Tree — HIKARI2021",
-        "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
+        "paper": _paper_credit("HIKARI2021"),
         "algorithm": "Decision Tree",
         "class": HikariDTPipeline,
         "stages": [
@@ -51,7 +56,7 @@ PIPELINE_REGISTRY = {
     "hikari2021.knn_pipeline": {
         "dataset_type": "HIKARI2021",
         "name": "K-Nearest Neighbors + RandomUnderSampler — HIKARI2021",
-        "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
+        "paper": _paper_credit("HIKARI2021"),
         "algorithm": "K-Nearest Neighbors",
         "class": HikariKNNPipeline,
         "stages": [
@@ -64,7 +69,7 @@ PIPELINE_REGISTRY = {
     "hikari2021.svc_pipeline": {
         "dataset_type": "HIKARI2021",
         "name": "Support Vector Classifier — HIKARI2021",
-        "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
+        "paper": _paper_credit("HIKARI2021"),
         "algorithm": "SVC",
         "class": HikariSVCPipeline,
         "stages": [
@@ -78,7 +83,7 @@ PIPELINE_REGISTRY = {
     "hikari2021.nbgc_pipeline": {
         "dataset_type": "HIKARI2021",
         "name": "Gaussian Naive Bayes — HIKARI2021",
-        "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
+        "paper": _paper_credit("HIKARI2021"),
         "algorithm": "Gaussian Naive Bayes",
         "class": HikariNBGCPipeline,
         "stages": [
@@ -90,7 +95,7 @@ PIPELINE_REGISTRY = {
     "hikari2021.lr_pipeline": {
         "dataset_type": "HIKARI2021",
         "name": "Logistic Regression + PCA — HIKARI2021",
-        "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant",
+        "paper": _paper_credit("HIKARI2021"),
         "algorithm": "Logistic Regression",
         "class": HikariLRPipeline,
         "stages": [
@@ -107,7 +112,7 @@ PIPELINE_REGISTRY = {
     "eve_cbr.rfc": {
         "dataset_type": "EVE_SURICATA",
         "name": "Random Forest — EVE/Suricata cbr (TLS, anti-leakage)",
-        "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
+        "paper": _paper_credit("EVE_SURICATA"),
         "algorithm": "Random Forest",
         "class": EveCbrRFCPipeline,
         "stages": _EVE_CBR_STAGES,
@@ -115,7 +120,7 @@ PIPELINE_REGISTRY = {
     "eve_cbr.dt": {
         "dataset_type": "EVE_SURICATA",
         "name": "Decision Tree — EVE/Suricata cbr (TLS, anti-leakage)",
-        "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
+        "paper": _paper_credit("EVE_SURICATA"),
         "algorithm": "Decision Tree",
         "class": EveCbrDTPipeline,
         "stages": _EVE_CBR_STAGES,
@@ -123,7 +128,7 @@ PIPELINE_REGISTRY = {
     "eve_cbr.lsvc": {
         "dataset_type": "EVE_SURICATA",
         "name": "Linear SVC — EVE/Suricata cbr (TLS, anti-leakage)",
-        "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
+        "paper": _paper_credit("EVE_SURICATA"),
         "algorithm": "Linear SVC",
         "class": EveCbrLSVCPipeline,
         "stages": _EVE_CBR_STAGES,
@@ -131,7 +136,7 @@ PIPELINE_REGISTRY = {
     "eve_cbr.xgb": {
         "dataset_type": "EVE_SURICATA",
         "name": "XGBoost — EVE/Suricata cbr (TLS, anti-leakage)",
-        "paper": "EVE/Suricata IDS — cbr 14-phase anti-leakage pipeline",
+        "paper": _paper_credit("EVE_SURICATA"),
         "algorithm": "XGBoost",
         "class": EveCbrXGBPipeline,
         "stages": _EVE_CBR_STAGES,

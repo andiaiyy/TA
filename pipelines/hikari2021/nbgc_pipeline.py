@@ -12,6 +12,7 @@ from sklearn.metrics import (
 from pipelines.base import BasePipeline, ProgressCallback
 from pipelines.hikari2021._common import common_preprocess, _LABEL_NAMES
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
+from config.research_attribution import research_paper_credit
 
 
 class HikariNBGCPipeline(BasePipeline):
@@ -91,7 +92,7 @@ class HikariNBGCPipeline(BasePipeline):
 
     def get_info(self) -> dict:
         return {
-            "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant. Gaussian Naive Bayes classifier.",
+            "paper": research_paper_credit("HIKARI2021"),
             "algorithm": "Gaussian Naive Bayes",
             "preprocessing_steps": [
                 "Drop index artifacts and identifier columns",
