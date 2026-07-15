@@ -13,6 +13,7 @@ from sklearn.metrics import (
 from pipelines.base import BasePipeline, ProgressCallback
 from pipelines.hikari2021._common import common_preprocess, _LABEL_NAMES
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
+from config.research_attribution import research_paper_credit
 
 
 class HikariSVCPipeline(BasePipeline):
@@ -113,7 +114,7 @@ class HikariSVCPipeline(BasePipeline):
 
     def get_info(self) -> dict:
         return {
-            "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant. Support Vector Classifier.",
+            "paper": research_paper_credit("HIKARI2021"),
             "runtime_warning": "⚠️ SVC has O(n²) complexity. On datasets larger than 50K rows, execution may take 30+ minutes. Consider using a subset for initial testing.",
             "algorithm": "Support Vector Classifier (SVC)",
             "preprocessing_steps": [

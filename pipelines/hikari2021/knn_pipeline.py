@@ -14,6 +14,7 @@ from imblearn.under_sampling import RandomUnderSampler
 from pipelines.base import BasePipeline, ProgressCallback
 from pipelines.hikari2021._common import common_preprocess, _LABEL_NAMES
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
+from config.research_attribution import research_paper_credit
 
 
 class HikariKNNPipeline(BasePipeline):
@@ -102,7 +103,7 @@ class HikariKNNPipeline(BasePipeline):
 
     def get_info(self) -> dict:
         return {
-            "paper": "HIKARI2021 IDS Dataset — ALLFLOWMETER variant. K-Nearest Neighbors classifier.",
+            "paper": research_paper_credit("HIKARI2021"),
             "algorithm": "K-Nearest Neighbors",
             "preprocessing_steps": [
                 "Drop index artifacts and identifier columns",

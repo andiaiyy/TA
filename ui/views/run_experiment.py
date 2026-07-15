@@ -19,6 +19,7 @@ from orchestrator.execution_service import get_pipeline_info
 from orchestrator.validation_service import get_available_datasets
 from orchestrator.result_service import get_experiment_metrics, get_full_experiment, get_experiment_metadata
 from config.settings import DATASETS_DIR
+from config.research_attribution import get_research_display_name, get_research_attribution
 from ui.views._artifact_browser import render_file_browser, format_size
 from ui.components.result_views import normalize_result_payload, render_results
 from streamlit_option_menu import option_menu
@@ -174,48 +175,73 @@ _STAGE_PALETTE = {
 
 
 def _render_stage_columns(stages: list, view: list, running_percent: int = 0) -> None:
-    """Jenkins-style HORIZONTAL stage view: each stage is a column showing its
-    name, duration, and a colored status block (green=done, blue=running with a
-    small progress bar + %, grey=waiting). Wraps to multiple rows when there are
-    many stages so columns stay readable. Display only — never persisted.
+    """Jenkins-style HORIZONTAL stage view: all stages laid out in a SINGLE row
+    inside a flex container that scrolls horizontally when they don't all fit.
+    Each card shows number + name, colored status (green=done, blue=running with
+    a small progress bar + %, grey=waiting), and duration. Display only — never
+    persisted.
 
     ``view`` is the list from workers.progress_util.build_stage_view (one entry
     per stage, in order). ``running_percent`` is the in-stage % for the running
-    column (time-estimated by the UI).
+    card (time-estimated by the UI). Stage names are HTML-escaped.
     """
+    import html
     from workers.progress_util import format_duration
 
     if not stages:
         return
     n = len(stages)
-    per_row = 5 if n > 6 else n  # wrap wide pipelines (EVE) to keep width usable
     rp = int(min(max(running_percent, 0), 100))
+    # Fit-vs-scroll: when the pipeline has few stages let the cards stretch to
+    # fill the row; when many, fix each card's width and scroll horizontally so
+    # long stage titles remain readable (Jenkins Stage View pattern).
+    grow_shrink = "1 1 160px" if n <= 6 else "0 0 180px"
 
-    for start in range(0, n, per_row):
-        chunk = list(range(start, min(start + per_row, n)))
-        cols = st.columns(len(chunk))
-        for col, i in zip(cols, chunk):
-            name = stages[i]
-            v = view[i] if i < len(view) else {"state": "waiting", "duration_sec": None}
-            state = v.get("state", "waiting")
-            bg, fg, icon, label = _STAGE_PALETTE.get(state, _STAGE_PALETTE["waiting"])
-            dur = format_duration(v.get("duration_sec"))
-            pct_txt = f" {rp}%" if state == "running" else ""
-            with col:
-                st.markdown(
-                    f"<div style='border-radius:8px; overflow:hidden; margin-bottom:6px; "
-                    f"border:1px solid {fg}33;'>"
-                    f"<div style='background:{bg}; color:{fg}; padding:8px 8px 10px 8px; "
-                    f"min-height:82px;'>"
-                    f"<div style='font-size:0.72rem; font-weight:600; line-height:1.15; "
-                    f"min-height:2.3em;'>{i + 1}. {name}</div>"
-                    f"<div style='font-size:0.70rem; margin-top:6px;'>{icon} {label}{pct_txt}</div>"
-                    f"<div style='font-size:0.70rem; opacity:0.85; margin-top:2px;'>⏱ {dur}</div>"
-                    f"</div></div>",
-                    unsafe_allow_html=True,
-                )
-                if state == "running":
-                    st.progress(rp / 100.0)
+    cards: list[str] = []
+    for i in range(n):
+        name = stages[i]
+        v = view[i] if i < len(view) else {"state": "waiting", "duration_sec": None}
+        state = v.get("state", "waiting")
+        bg, fg, icon, label = _STAGE_PALETTE.get(state, _STAGE_PALETTE["waiting"])
+        dur = format_duration(v.get("duration_sec"))
+        safe_name = html.escape(str(name))
+        safe_dur = html.escape(str(dur))
+        title_attr = html.escape(f"{i + 1}. {name}", quote=True)
+
+        if state == "running":
+            status_line = (
+                f"<div style='font-size:0.70rem; margin-top:6px;'>{icon} {label} {rp}%</div>"
+                f"<div style='height:4px; margin-top:4px; border-radius:2px; "
+                f"background:{fg}22; overflow:hidden;'>"
+                f"<div style='width:{rp}%; height:100%; background:{fg};'></div>"
+                f"</div>"
+            )
+        else:
+            status_line = (
+                f"<div style='font-size:0.70rem; margin-top:6px;'>{icon} {label}</div>"
+            )
+
+        cards.append(
+            f"<div style='flex:{grow_shrink}; min-width:160px; "
+            f"border-radius:8px; overflow:hidden; border:1px solid {fg}33; "
+            f"background:{bg}; color:{fg};'>"
+            f"<div style='padding:8px 8px 10px 8px; min-height:92px; "
+            f"display:flex; flex-direction:column;'>"
+            f"<div title='{title_attr}' style='font-size:0.72rem; font-weight:600; "
+            f"line-height:1.15; min-height:2.3em;'>{i + 1}. {safe_name}</div>"
+            f"{status_line}"
+            f"<div style='font-size:0.70rem; opacity:0.85; margin-top:auto; "
+            f"padding-top:4px;'>⏱ {safe_dur}</div>"
+            f"</div></div>"
+        )
+
+    st.markdown(
+        "<div style='display:flex; flex-wrap:nowrap; gap:8px; overflow-x:auto; "
+        "padding:2px 2px 8px 2px; margin-bottom:6px;'>"
+        + "".join(cards)
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ── Pipeline Config Viewer support ─────────────────────────────────────────
@@ -709,12 +735,14 @@ def render():
         return
 
     # Two-level selection (DISPLAY/grouping only): research pipeline → algorithm.
-    # Group key = dataset_type (robust, 1:1 with a research); display label is
-    # derived from the registry `name` suffix; the algorithm name comes from the
-    # registry `algorithm` field. Each (research, algorithm) resolves back to a
-    # REAL registered pipeline_id, dispatched exactly as before. compatible_pipelines
-    # is already filtered by the selected dataset's dataset_type, so the research
-    # filter is preserved — just applied one level up.
+    # Group key = dataset_type (robust, 1:1 with a research); the research display
+    # label comes from the SINGLE structured attribution source
+    # (config/research_attribution.py) so the reproduced-study credit lives in one
+    # place; the algorithm name comes from the registry `algorithm` field. Each
+    # (research, algorithm) resolves back to a REAL registered pipeline_id,
+    # dispatched exactly as before. compatible_pipelines is already filtered by the
+    # selected dataset's dataset_type, so the research filter is preserved — just
+    # applied one level up.
     research_groups: dict[str, dict[str, str]] = {}
     research_display: dict[str, str] = {}
     for pid, info in pipelines.items():
@@ -722,8 +750,7 @@ def render():
         algo = info.get("algorithm") or info.get("name", pid)
         research_groups.setdefault(dt, {})[algo] = pid
         if dt not in research_display:
-            nm = info.get("name", "")
-            research_display[dt] = nm.split("—")[-1].strip() if "—" in nm else dt
+            research_display[dt] = get_research_display_name(dt)
 
     research_keys = list(research_groups.keys())
     research = st.selectbox(
@@ -750,6 +777,43 @@ def render():
         with st.expander("Tentang Research Pipeline (Read-Only)", expanded=True):
             st.markdown(f"**Research:** {research_display.get(research, research)}")
             st.markdown(f"**Dataset type:** `{research}`")
+
+            # ── Atribusi penelitian sumber (read-only, terstruktur) ─────────
+            # Dibaca dari config/research_attribution.py (sumber tunggal), agar
+            # kredit penelitian tidak tersebar. Membedakan sumber PIPELINE dari
+            # sumber DATASET (khusus HIKARI). Tidak ada nilai yang bisa diubah di
+            # sini dan tidak memengaruhi komputasi.
+            _attr = get_research_attribution(research)
+            _psrc = _attr.get("pipeline_source") or {}
+            if _psrc:
+                st.markdown("**Penelitian sumber (pipeline):**")
+                if _psrc.get("type"):
+                    st.markdown(f"  - **Jenis:** {_psrc['type']}")
+                if _psrc.get("authors"):
+                    st.markdown(f"  - **Penulis:** {_psrc['authors']}")
+                if _psrc.get("title"):
+                    st.markdown(f"  - **Judul:** \"{_psrc['title']}\"")
+                if _psrc.get("institution"):
+                    st.markdown(f"  - **Institusi:** {_psrc['institution']}")
+                # Tahun tidak pernah dikarang: tampilkan tahun terkonfirmasi, atau
+                # catatan "belum dikonfirmasi" secara eksplisit bila year=None.
+                if _psrc.get("year"):
+                    st.markdown(f"  - **Tahun:** {_psrc['year']}")
+                elif _psrc.get("year_note"):
+                    st.markdown(f"  - **Tahun:** _{_psrc['year_note']}_")
+            _dsrc = _attr.get("dataset_source") or {}
+            if _dsrc:
+                st.markdown("**Sumber dataset:**")
+                _dline = _dsrc.get("name", "")
+                if _dsrc.get("attribution"):
+                    _dline = f"{_dline} — {_dsrc['attribution']}" if _dline else _dsrc["attribution"]
+                if _dline:
+                    st.markdown(f"  - {_dline}")
+                if _dsrc.get("note"):
+                    st.markdown(f"  - _{_dsrc['note']}_")
+            if _attr.get("scope"):
+                st.markdown(f"**Cakupan penelitian sumber:** {_attr['scope']}")
+
             if rep_info.get("paper"):
                 st.markdown(f"**Paper:** {rep_info['paper']}")
 
