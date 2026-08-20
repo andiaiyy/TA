@@ -68,16 +68,29 @@ def create_experiment(
     pipeline_id: str,
     created_at: str,
     db_path: str | None = None,
+    owner: str | None = None,
+    pipeline_version: int | None = None,
+    pipeline_hash: str | None = None,
 ) -> None:
-    """Insert new experiment with status QUEUED."""
+    """Insert new experiment with status QUEUED.
+
+    ``owner`` adalah username pencatat, atau None bila eksperimen dijalankan
+    tanpa login (mode pengunjung). NULL diperlakukan sebagai "eksperimen
+    sistem" — sama seperti record lama sebelum autentikasi ada — dan TIDAK
+    pernah dipakai untuk menyaring tampilan.
+
+    ``pipeline_version``/``pipeline_hash`` hanya terisi untuk pipeline
+    TERUNGGAH; pipeline bawaan membiarkannya NULL karena definisinya ada di git.
+    """
     conn = get_connection(db_path)
     try:
         conn.execute(
             """INSERT INTO experiments (id, dataset_type, dataset_path, dataset_hash,
-               pipeline_id, status, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+               pipeline_id, status, created_at, owner, pipeline_version, pipeline_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (experiment_id, dataset_type, dataset_path, dataset_hash,
-             pipeline_id, STATUS_QUEUED, created_at),
+             pipeline_id, STATUS_QUEUED, created_at, owner,
+             pipeline_version, pipeline_hash),
         )
         conn.commit()
     finally:

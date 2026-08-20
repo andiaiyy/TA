@@ -20,6 +20,24 @@ init_db()
 
 
 @st.cache_resource
+def _seed_admin_once():
+    """Buat admin pertama dari environment (idempoten, sekali per server).
+
+    Tidak pernah menimpa akun yang sudah ada, dan tidak membuat apa pun bila
+    ADMIN_PASSWORD tidak diset — lihat orchestrator/auth_service.py.
+    """
+    try:
+        from orchestrator.auth_service import ensure_admin_seed
+        return bool(ensure_admin_seed())
+    except Exception:
+        logger.warning("Seed admin gagal dijalankan", exc_info=True)
+        return False
+
+
+_seed_admin_once()
+
+
+@st.cache_resource
 def _startup_cleanup():
     """Run once per server lifetime — not on every Streamlit rerun."""
     from orchestrator.experiment_service import cleanup_stale_experiments
@@ -69,6 +87,14 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# ── Identitas (TANPA gerbang) ─────────────────────────────────────────────
+# Aplikasi terbuka langsung dalam mode pengunjung: tidak ada login yang
+# memblokir halaman mana pun. Melihat riwayat dan menjalankan eksperimen bebas
+# dilakukan siapa saja; yang dibatasi hanyalah aksi berisiko (unggah/setujui/
+# kelola pengguna), diperiksa di titik aksinya masing-masing lewat
+# orchestrator.auth_service. Switch mode dirender setelah menu halaman.
+from ui.views.login import maybe_render_auth_dialog, render_mode_switch
+
 # ── Sidebar navigation ────────────────────────────────────────────────────
 # Centralised routing: option_menu returns the selected label, and a single
 # dispatch table below routes to each page's render() function. The two
@@ -79,8 +105,8 @@ st.markdown(
 # of the repo without the dep installed), fall back to a plain radio so the
 # app stays usable and the user gets a clear hint to install it.
 
-_PAGES = ("Progress & Status", "Run Experiment")
-_PAGE_ICONS = ("speedometer2", "play-circle")
+_PAGES = ("Progress & Status", "Run Experiment", "Add Pipeline & Dataset")
+_PAGE_ICONS = ("speedometer2", "play-circle", "plus-square")
 # Landing page shown when the app first opens. "Progress & Status" is the main
 # dashboard (all experiments + live progress); index is resolved by name so menu
 # order can change freely without breaking the default.
@@ -98,6 +124,19 @@ except Exception as _e:
 _ACCENT = "#2563eb"  # consistent with the accent already used in other UI
 
 
+_CURRENT_PAGE_KEY = "_current_page"
+
+
+def _remembered_index() -> int:
+    """Indeks halaman yang sedang dibuka, supaya rerun (mis. setelah masuk
+    lewat switch mode di sidebar) mengembalikan pengguna ke halaman yang SAMA —
+    bukan melempar ke halaman default."""
+    current = st.session_state.get(_CURRENT_PAGE_KEY, _DEFAULT_PAGE)
+    if current not in _PAGES:
+        current = _DEFAULT_PAGE
+    return _PAGES.index(current)
+
+
 def _select_page() -> str:
     if _OPTION_MENU_AVAILABLE:
         with st.sidebar:
@@ -106,7 +145,7 @@ def _select_page() -> str:
                 options=list(_PAGES),
                 icons=list(_PAGE_ICONS),
                 menu_icon="list",
-                default_index=_PAGES.index(_DEFAULT_PAGE),
+                default_index=_remembered_index(),
                 styles={
                     "container": {"padding": "4px 0", "background-color": "transparent"},
                     "icon": {"font-size": "16px"},
@@ -136,10 +175,30 @@ def _select_page() -> str:
         "Catatan: streamlit-option-menu belum terpasang. Jalankan "
         "`pip install streamlit-option-menu` untuk tampilan menu yang lengkap."
     )
-    return st.sidebar.radio("Navigation", _PAGES, index=_PAGES.index(_DEFAULT_PAGE))
+    return st.sidebar.radio("Navigation", _PAGES, index=_remembered_index())
 
 
 page = _select_page()
+# Ingat halaman aktif supaya rerun apa pun (login/logout, aksi di sidebar)
+# tidak memindahkan pengguna dari konteks yang sedang ia kerjakan.
+st.session_state[_CURRENT_PAGE_KEY] = page
+
+# Switch mode: di BAWAH menu halaman, dipisahkan garis. Pengunjung melihat
+# status + tombol Masuk; pengguna yang sudah masuk melihat nama, peran, dan
+# tombol Keluar. Berpindah identitas tidak menyentuh data maupun state
+# eksperimen yang sedang berjalan.
+render_mode_switch()
+
+# Modal masuk/daftar dipanggil dari ALUR UTAMA — di luar blok `with st.sidebar`
+# dan bukan dari callback, sesuai pola dialog yang sudah bekerja di halaman
+# lain. Tombol mana pun (sidebar atau ajakan masuk di halaman) hanya menulis
+# flag; di sinilah flag itu dibaca.
+#
+# `page` ikut dikirim supaya modal tidak terbawa saat pengguna berpindah
+# halaman: bila halaman berbeda dari run sebelumnya, flag dibuang sebelum
+# diperiksa. Tanpa ini modal akan terbuka lagi di halaman mana pun yang dibuka
+# berikutnya.
+maybe_render_auth_dialog(page)
 
 # ── Page routing ──────────────────────────────────────────────────────────
 if page == "Progress & Status":
@@ -147,4 +206,7 @@ if page == "Progress & Status":
     render()
 elif page == "Run Experiment":
     from ui.views.run_experiment import render
+    render()
+elif page == "Add Pipeline & Dataset":
+    from ui.views.contribute import render
     render()

@@ -193,6 +193,11 @@ cd <repo>
 # 2. Place dataset files
 #    See "Preparing Datasets" below. storage/datasets/ is mounted into both containers.
 
+# 2b. Set the first admin account (see "Authentication" below)
+#     Create a .env file next to docker-compose.yml — never commit real passwords:
+#       ADMIN_USERNAME=admin
+#       ADMIN_PASSWORD=<a strong password, at least 8 characters>
+
 # 3. Build the images
 docker compose build
 
@@ -242,6 +247,107 @@ streamlit run ui/app.py           # synchronous mode (USE_ASYNC unset / false)
 ```
 
 Async mode locally requires Redis on `localhost:6379`. The default broker URL in [`config/celery_config.py`](config/celery_config.py) is `redis://localhost:6379/0`, overridden in Docker by `CELERY_BROKER_URL=redis://redis:6379/0`.
+
+---
+
+## Authentication
+
+The platform opens **without a login**. Protection is *per action*, not per
+access: reading results and running experiments are open to everyone; adding
+code or data — and approving it — requires an account.
+
+| | Visitor (not signed in) | Kontributor | Research Admin |
+|---|---|---|---|
+| View every experiment | ✔ | ✔ | ✔ |
+| Run an experiment | ✔ | ✔ | ✔ |
+| Cancel / re-run | ✔ | ✔ | ✔ |
+| Upload dataset or pipeline | ✖ | ✔ | ✔ |
+| Approve uploads *(phase 3)* | ✖ | ✖ | ✔ |
+| Manage users | ✖ | ✖ | ✔ |
+
+### Getting an account
+
+Anyone can request one: press **Daftar** at the bottom of the sidebar, next to
+**Masuk**. The account is created immediately but starts **pending**:
+
+```
+Daftar  →  status "pending" (nol hak)  →  Research Admin mengaktifkan  →  Kontributor
+```
+
+A pending account may sign in — so its owner can see that the request is
+waiting — but it has **no rights at all**: it cannot upload and cannot approve,
+exactly like a visitor. Sign-up always produces the `contributor` role; the
+`research_admin` role is only ever granted by another Research Admin from
+**Kelola Pengguna**, never through the sign-up form.
+
+A Research Admin activates accounts in **Add Pipeline & Dataset → Kelola
+Pengguna**, which lists every waiting request with its username, sign-up time,
+and stated purpose, and offers **Aktifkan** or **Tolak**. Who approved an
+account and when is recorded. A Research Admin cannot disable their own account.
+Experiments run without signing in are stored with `owner = NULL` and shown as
+"sistem", exactly like the records that predate authentication. **No view is
+ever filtered by owner** — everyone sees every experiment.
+
+Sign in from the **bottom of the sidebar**: it shows "Mode pengunjung" with a
+**Masuk** button, or your username, role, and a **Keluar** button once signed
+in. Permission checks live in one place (`orchestrator/auth_service.py`) and are
+enforced both in the UI and inside the action functions themselves, so a hidden
+button is never the only thing standing in the way.
+
+### First Research Admin
+
+The first Research Admin is created at startup from environment variables. No
+password is ever hardcoded:
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ADMIN_USERNAME` | `admin` | Optional |
+| `ADMIN_PASSWORD` | *(none)* | Required to create the account, min. 8 characters |
+
+```powershell
+# Docker: put these in a .env file beside docker-compose.yml (do not commit it)
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=<strong password>
+
+# Local venv (PowerShell)
+$env:ADMIN_PASSWORD = "<strong password>"
+streamlit run ui/app.py
+```
+
+If `ADMIN_PASSWORD` is not set, **no account is created** — the app logs a
+warning and the login page tells you to set it. A weak default account is never
+created. Seeding is idempotent: an existing admin is never overwritten, so
+changing `ADMIN_PASSWORD` later does **not** reset the password.
+
+### Logging in
+
+Open the sidebar, press **Masuk** at the bottom, and enter username and
+password. Failed attempts show a generic "Username atau password salah" so the
+form never reveals whether a username exists. Signing in or out never touches
+experiment data or a run in progress.
+
+Passwords are stored as PBKDF2-HMAC-SHA256 with a random per-user salt and
+260,000 iterations (`orchestrator/auth_service.py`) — never in plain text, and
+never written to logs.
+
+### Security limitations (read this)
+
+This is authentication for an **internal, controlled deployment** — not a
+public-facing application:
+
+- Streamlit has no real server-side session store. The signed-in identity lives
+  in `st.session_state`, so **refreshing the page logs you out** and the login
+  state is per browser tab. No cookies or persistent tokens are used.
+- Streamlit provides no CSRF protection, and the container image sets
+  `enableXsrfProtection = false`.
+- There is no transport encryption by default; put the app behind a reverse
+  proxy with TLS if it is reachable beyond localhost.
+- Because anyone can run experiments without signing in, the compute budget is
+  open to whoever can reach the app — another reason to keep it on an internal
+  network.
+- Uploaded pipelines are validated statically and staged for review; they are
+  **not** activated automatically. Registering them stays a manual, reviewed
+  code change.
 
 ---
 
@@ -468,12 +574,77 @@ class YourPipeline(BasePipeline):
     "paper": "Citation",
     "algorithm": "Algorithm name",
     "class": YourPipeline,
+    "stages": ["Preprocessing", "Training"],   # progress labels, in _emit_progress() order
 },
 ```
 
 3. Add a corresponding test file under `tests/`. New pipelines must include a reproducibility test (run twice, assert identical metrics).
 
-The UI and CLI pick up the new pipeline automatically.
+Once the entry exists, the UI and CLI pick the pipeline up automatically.
+
+### Two ways a pipeline gets registered
+
+| | Built-in | Uploaded |
+|---|---|---|
+| Defined in | `config/pipeline_registry.py` (static, in git) | `registered_pipelines` table + file under `storage/` |
+| Reviewed by | normal code review + git history | static validation **and** a Research Admin approval |
+| ID | `hikari2021.*`, `eve_cbr.*` | `uploaded.<name>@v<N>` |
+| Changing it | edit code, commit | **impossible** — approving again creates v2 |
+| Traceability | the git commit | `pipeline_version` + `pipeline_hash` on every experiment |
+
+The ten built-in pipelines are the basis of the thesis results and are **only**
+ever loaded from the static registry. The dynamic mechanism is additive: an
+upload lives in its own `uploaded.` namespace and can never shadow a built-in
+ID, and nothing regenerates or edits `config/pipeline_registry.py`.
+
+Uploaded pipelines are **immutable and versioned**. Approving the same name a
+second time registers `@v2` alongside `@v1` instead of replacing it — if the
+code behind one ID could change, older experiments would no longer be
+reproducible, which is the one claim this platform cannot afford to lose.
+
+Before an uploaded pipeline is loaded (in the UI *and* in the Celery worker,
+which shares the same code path), its file is re-hashed and compared with the
+SHA-256 recorded at approval. A changed or corrupted file is refused and the
+experiment fails with a clear message rather than running unknown code. A
+Research Admin can deactivate a registered pipeline at any time; the record and
+file are kept so past experiments stay traceable.
+
+**Limits, stated plainly:** static validation catches common problems — the
+contract, dangerous imports and calls — but it is not a guarantee. That is why
+approval by a human Research Admin is required, and why uploaded code runs with
+the same privileges as the platform. Keep the deployment internal.
+
+### Checking a script before you register it
+
+The Run Experiment page has a read-only helper — **"Tambah Research Pipeline
+(validasi)"** — that validates a `.py` file against the contract above without
+running it. Use it to catch problems before opening a pull request.
+
+What it does:
+
+| Step | Behaviour |
+|---|---|
+| Upload | `.py` only, max 1 MB, read as UTF-8 text |
+| Validate | Static analysis via `ast.parse` in [`orchestrator/pipeline_validator.py`](orchestrator/pipeline_validator.py) — structure (subclasses `BasePipeline`, implements `run()` + `get_info()`, `get_info()` returns a dict) and safety (forbidden imports such as `os`/`subprocess`/`socket`/`pickle`, forbidden calls such as `eval`/`exec`, sandbox-escape dunders, write-mode `open()`) |
+| Report | Verdict + primary cause + per-check detail with line numbers, grouped *Struktur* / *Keamanan* |
+| Download | Save the validated file to hand to a developer / commit |
+| Staging | Optional copy to `storage/uploaded_pipelines/` — a plain data folder that is **never imported** by the platform |
+| Registry snippet | A ready-to-paste `PIPELINE_REGISTRY` entry, generated from metadata read **statically** (class name, plus `algorithm`/`paper`/`dataset_type` and `_emit_progress()` stage labels when they appear as literals). Anything not readable from the source becomes a `PERLU_DIISI_…` placeholder — it is never guessed |
+
+**The uploaded file is never imported, executed, or written into `pipelines/`,
+and nothing is ever written to the registry.** Static validation filters common
+problems; it is not a guarantee. A pipeline becomes runnable only when a
+developer places the file, edits the registry, and commits — the same review the
+rest of the codebase gets. This keeps the registry static and the comparison
+between pipelines fair and reproducible.
+
+### Manual activation checklist
+
+1. Put the file in `pipelines/<research subdirectory>/`.
+2. Import the class at the top of `config/pipeline_registry.py`.
+3. Add the entry (fill in every `PERLU_DIISI_…` placeholder).
+4. Commit and review through git.
+5. Rebuild/restart the app and worker so the new entry is loaded.
 
 ---
 

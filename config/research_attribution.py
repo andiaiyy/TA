@@ -26,6 +26,10 @@ from __future__ import annotations
 RESEARCH_ATTRIBUTION: dict[str, dict] = {
     "HIKARI2021": {
         "display_name": "Rayyan (2024) — Klasifikasi Trafik Terenkripsi HIKARI2021",
+        # Nama pendek dataset untuk label ringkas (dropdown/kartu). Ditulis di
+        # sini, satu kali, karena tidak dapat diturunkan rapi dari dataset_type
+        # (mis. "EVE_SURICATA" -> "EVE Suricata").
+        "short_name": "HIKARI2021",
         "pipeline_source": {
             "type": "Skripsi",
             "authors": "A. Muh. Rayyan Eka Putra (NIM D121 19 1074)",
@@ -58,7 +62,8 @@ RESEARCH_ATTRIBUTION: dict[str, dict] = {
         ),
     },
     "EVE_SURICATA": {
-        "display_name": "Niswar dkk. — Feature Engineering Suricata EVE Logs",
+        "display_name": "Niswar dkk. (2026) — Feature Engineering Suricata EVE Logs",
+        "short_name": "EVE Suricata",
         "pipeline_source": {
             "type": "Artikel/preprint (submitted to Elsevier)",
             "authors": (
@@ -74,12 +79,8 @@ RESEARCH_ATTRIBUTION: dict[str, dict] = {
                 "Departemen Informatika, Fakultas Teknik, Universitas "
                 "Hasanuddin (afiliasi penulis pertama)"
             ),
-            # Publication year NOT yet confirmed — do not invent one.
-            # `None` renders as an explicit "belum dikonfirmasi" note in the UI.
-            "year": None,
-            "year_note": (
-                "Tahun terbit BELUM DIKONFIRMASI — mohon dilengkapi penulis."
-            ),
+            # Publication year confirmed by the authors: 2026.
+            "year": "2026",
         },
         "scope": (
             "Rekayasa fitur pada Suricata EVE log dengan seleksi fitur Mutual "
@@ -87,10 +88,9 @@ RESEARCH_ATTRIBUTION: dict[str, dict] = {
             "Principal Component Analysis (PCA) untuk deteksi trafik malicious."
         ),
         "paper_credit": (
-            "Reproduksi Niswar dkk. — \"Exploring Metadata-Rich Network Logs: "
-            "Feature Engineering in Suricata EVE Logs for Malicious Network "
-            "Traffic Detection\" (preprint, submitted to Elsevier). "
-            "Tahun terbit belum dikonfirmasi."
+            "Reproduksi Niswar dkk. (2026) — \"Exploring Metadata-Rich Network "
+            "Logs: Feature Engineering in Suricata EVE Logs for Malicious "
+            "Network Traffic Detection\" (preprint, submitted to Elsevier)."
         ),
     },
 }
@@ -109,6 +109,24 @@ def get_research_display_name(dataset_type: str) -> str:
     """
     entry = RESEARCH_ATTRIBUTION.get(dataset_type)
     return entry["display_name"] if entry else dataset_type
+
+
+def get_research_short_label(dataset_type: str) -> str:
+    """Label RINGKAS beratribusi: "Rayyan (2024) — HIKARI2021".
+
+    Untuk tempat sempit (dropdown, kartu, judul blok) di mana `display_name`
+    yang panjang tidak terbaca. Kredit penulisnya diambil dari `display_name`
+    yang sama — SATU sumber, jadi tidak ada string yang ditulis dua kali.
+    Nilai internal tetap dataset_type; ini murni label.
+
+    Tipe yang belum punya entri jatuh kembali ke dataset_type-nya sendiri.
+    """
+    entry = RESEARCH_ATTRIBUTION.get(dataset_type)
+    if not entry:
+        return dataset_type
+    credit = entry["display_name"].split("—")[0].strip()
+    short = entry.get("short_name") or dataset_type
+    return f"{credit} — {short}" if credit else short
 
 
 def research_paper_credit(dataset_type: str) -> str:
