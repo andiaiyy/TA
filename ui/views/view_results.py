@@ -158,6 +158,10 @@ def _build_grid_df(experiments: list[dict]) -> pd.DataFrame:
             "Pipeline": e.get("pipeline_id", "-"),
             "Dataset": e.get("dataset_type", "-"),
             "File": _dataset_basename(e.get("dataset_path")),
+            # Informasi saja — TIDAK dipakai untuk menyaring apa pun. Record
+            # tanpa pemilik (dijalankan tanpa login, termasuk seluruh record
+            # lama sebelum autentikasi ada) tampil sebagai "sistem".
+            "Pemilik": e.get("owner") or "sistem",
             "Status": e.get("status", "-"),
             "Accuracy": e.get("accuracy"),
             "Precision": e.get("precision_score"),
@@ -243,6 +247,7 @@ def _build_grid_options(df: pd.DataFrame) -> dict:
             {"headerName": "Dataset", "field": "Dataset", "width": 130},
             {"headerName": "File", "field": "File", "width": 200,
              "tooltipField": "File"},
+            {"headerName": "Pemilik", "field": "Pemilik", "width": 120},
             {"headerName": "Status", "field": "Status", "width": 120,
              "cellStyle": _STATUS_STYLE},
         ]},
@@ -404,6 +409,14 @@ def _detail_dialog(experiment_id: str) -> None:
     st.markdown(f"**{exp['pipeline_id']}** · {exp['dataset_type']} · `{exp['status']}`")
     st.caption(f"ID `{exp['id']}` · Created {(exp.get('created_at') or '-')[:19]} · "
                f"Completed {(exp.get('completed_at') or '-')[:19]}")
+    # Ketertelusuran pipeline TERUNGGAH: versi + SHA-256 berkasnya. Pipeline
+    # bawaan tidak menampilkan apa-apa di sini — definisinya ada di git.
+    if exp.get("pipeline_version") or exp.get("pipeline_hash"):
+        st.caption(
+            f"Pipeline terunggah · versi {exp.get('pipeline_version') or '-'} · "
+            f"SHA-256 `{(exp.get('pipeline_hash') or '-')[:16]}…` · "
+            f"dataset SHA-256 `{(exp.get('dataset_hash') or '-')[:16]}…`"
+        )
 
     if exp["status"] == "FINISHED" and metrics:
         payload = normalize_result_payload(

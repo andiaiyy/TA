@@ -25,6 +25,97 @@ MIGRATIONS = [
         "sql": "ALTER TABLE experiments ADD COLUMN task_id TEXT",
         "add_column": ("experiments", "task_id"),
     },
+    # v3-v4: fondasi autentikasi (Fase 1). Keduanya ADITIF — tabel experiments
+    # tidak pernah dibuat ulang, dan tidak ada data lama yang disentuh.
+    {
+        "version": 3,
+        "description": "Create users table (authentication phase 1)",
+        "sql": models.CREATE_USERS_TABLE,
+    },
+    {
+        "version": 4,
+        "description": "Add nullable owner column to experiments (prepared for phase 2)",
+        "sql": "ALTER TABLE experiments ADD COLUMN owner TEXT",
+        "add_column": ("experiments", "owner"),
+    },
+    # v5: penamaan peran Fase 2. Hanya MENGUBAH NILAI kolom role pada baris yang
+    # masih memakai nama lama — tidak ada pengguna yang dihapus, tidak ada tabel
+    # yang dibuat ulang, dan tabel experiments tidak tersentuh sama sekali.
+    {
+        "version": 5,
+        "description": "Rename legacy roles (admin -> research_admin, researcher -> contributor)",
+        "sql": (
+            "UPDATE users SET role = CASE role "
+            "WHEN 'admin' THEN 'research_admin' "
+            "WHEN 'researcher' THEN 'contributor' "
+            "ELSE role END "
+            "WHERE role IN ('admin', 'researcher')"
+        ),
+    },
+    # v6: antrean persetujuan (Fase 3). Tabel BARU — tidak menyentuh experiments
+    # maupun users, jadi seluruh data lama tidak terpengaruh sama sekali.
+    {
+        "version": 6,
+        "description": "Create submissions table (upload approval queue)",
+        "sql": models.CREATE_SUBMISSIONS_TABLE,
+    },
+    # v7-v9: registry dinamis (Fase 4). Satu tabel BARU + dua kolom nullable.
+    # Tabel experiments tidak dibuat ulang dan record lama tidak diisi mundur.
+    {
+        "version": 7,
+        "description": "Create registered_pipelines table (dynamic registry)",
+        "sql": models.CREATE_REGISTERED_PIPELINES_TABLE,
+    },
+    {
+        "version": 8,
+        "description": "Add nullable pipeline_version to experiments (traceability)",
+        "sql": "ALTER TABLE experiments ADD COLUMN pipeline_version INTEGER",
+        "add_column": ("experiments", "pipeline_version"),
+    },
+    {
+        "version": 9,
+        "description": "Add nullable pipeline_hash to experiments (traceability)",
+        "sql": "ALTER TABLE experiments ADD COLUMN pipeline_hash TEXT",
+        "add_column": ("experiments", "pipeline_hash"),
+    },
+    # v10-v15: registrasi mandiri + status akun. ADITIF seluruhnya, dan
+    # default 'active' memastikan akun yang SUDAH ADA (termasuk Research Admin
+    # hasil seed) tidak pernah mendadak menjadi pending.
+    {
+        "version": 10,
+        "description": "Add status column to users (default active for existing accounts)",
+        "sql": "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'",
+        "add_column": ("users", "status"),
+    },
+    {
+        "version": 11,
+        "description": "Mirror legacy is_active=0 accounts into status='disabled'",
+        "sql": "UPDATE users SET status = 'disabled' WHERE is_active = 0",
+    },
+    {
+        "version": 12,
+        "description": "Add requested_at to users (self sign-up metadata)",
+        "sql": "ALTER TABLE users ADD COLUMN requested_at TEXT",
+        "add_column": ("users", "requested_at"),
+    },
+    {
+        "version": 13,
+        "description": "Add reason to users (why access is requested)",
+        "sql": "ALTER TABLE users ADD COLUMN reason TEXT",
+        "add_column": ("users", "reason"),
+    },
+    {
+        "version": 14,
+        "description": "Add activated_by to users (who approved the account)",
+        "sql": "ALTER TABLE users ADD COLUMN activated_by TEXT",
+        "add_column": ("users", "activated_by"),
+    },
+    {
+        "version": 15,
+        "description": "Add activated_at to users (when the account was approved)",
+        "sql": "ALTER TABLE users ADD COLUMN activated_at TEXT",
+        "add_column": ("users", "activated_at"),
+    },
 ]
 
 CREATE_SCHEMA_VERSION_TABLE = """

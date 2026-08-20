@@ -11,7 +11,12 @@ storage/artifacts/*
 !storage/datasets/.gitkeep
 !storage/artifacts/.gitkeep
 *.pkl
-.streamlit/
+# Abaikan isi .streamlit/ (secrets.toml dll), KECUALI config.toml — di sana
+# server.maxUploadSize disetel sejalan dengan MAX_DATASET_UPLOAD_BYTES, jadi
+# batas unggahnya harus ikut ter-clone. (Pola "isi + negasi": git tidak bisa
+# me-recover berkas bila direktori induknya sendiri yang diabaikan.)
+.streamlit/*
+!.streamlit/config.toml
 .idea/
 .vscode/
 *.egg-info/

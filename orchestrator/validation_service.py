@@ -7,7 +7,7 @@ import pandas as pd
 from orchestrator.dataset_parser import parse_dataset, resolve_dataset_path
 from orchestrator.validator import validate_dataset, ValidationResult
 from contracts.dataset_schemas import get_schema, supported_datasets
-from config.pipeline_registry import get_pipelines_for_dataset
+from orchestrator.dynamic_registry import get_pipelines_for_dataset_merged
 from utils.hashing import sha256_file
 
 _FAILURE = dict(
@@ -108,7 +108,8 @@ def validate_for_experiment(dataset_type: str, dataset_path: str) -> dict:
         }
 
     dataset_hash = sha256_file(dataset_path)
-    pipelines = get_pipelines_for_dataset(dataset_type)
+    # Bawaan (registry statis) + pipeline terunggah yang sudah disetujui.
+    pipelines = get_pipelines_for_dataset_merged(dataset_type)
 
     return {
         "success": True,
@@ -130,4 +131,4 @@ def get_available_datasets() -> list[str]:
 
 def get_available_pipelines(dataset_type: str) -> dict:
     """Return pipelines compatible with a given dataset type."""
-    return get_pipelines_for_dataset(dataset_type)
+    return get_pipelines_for_dataset_merged(dataset_type)

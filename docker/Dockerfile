@@ -24,9 +24,12 @@ RUN pip install -e . --no-build-isolation
 # Create storage directories (will be overridden by volume mounts)
 RUN mkdir -p storage/datasets storage/artifacts
 
-# Streamlit config — disable telemetry, set server port
+# Streamlit config — disable telemetry, set server port.
+# maxUploadSize (MB) harus sejalan dengan MAX_DATASET_UPLOAD_BYTES di
+# ui/views/contribute.py; .streamlit/config.toml milik proyek (ikut ter-COPY di
+# atas) menimpa berkas ini, keduanya sengaja disetel sama.
 RUN mkdir -p /root/.streamlit
-RUN echo '[server]\nheadless = true\nport = 8501\nenableCORS = false\nenableXsrfProtection = false\n\n[browser]\ngatherUsageStats = false' > /root/.streamlit/config.toml
+RUN echo '[server]\nheadless = true\nport = 8501\nenableCORS = false\nenableXsrfProtection = false\nmaxUploadSize = 5120\n\n[browser]\ngatherUsageStats = false' > /root/.streamlit/config.toml
 
 EXPOSE 8501
 

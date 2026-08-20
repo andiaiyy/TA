@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 from orchestrator.validation_service import validate_for_experiment
 from orchestrator.execution_service import execute_pipeline
 from orchestrator.dataset_parser import parse_dataset
+from orchestrator.dynamic_registry import traceability_for
 from database.db import (
     create_experiment, set_running, set_finished, set_failed,
     cancel_experiment as db_cancel_experiment,
@@ -46,9 +47,15 @@ def create_and_run_experiment(
     dataset_type: str,
     dataset_path: str,
     pipeline_id: str,
+    owner: str | None = None,
 ) -> dict:
     """
     Create and execute an experiment.
+
+    ``owner`` (opsional, default None) hanyalah METADATA pencatatan: username
+    pengguna yang sedang masuk, atau None bila dijalankan tanpa login. Nilainya
+    TIDAK diteruskan ke worker maupun ke pipeline — jalur komputasi tidak
+    mengetahuinya — dan tidak pernah dipakai untuk menyaring tampilan.
 
     If USE_ASYNC is True:
       - Creates DB record (QUEUED)
@@ -91,6 +98,10 @@ def create_and_run_experiment(
             dataset_hash=dataset_hash,
             pipeline_id=pipeline_id,
             created_at=now_iso(),
+            owner=owner,
+            # Ketertelusuran pipeline terunggah: versi + SHA-256 berkasnya.
+            # Pipeline bawaan menghasilkan None/None (definisinya ada di git).
+            **traceability_for(pipeline_id),
         )
 
         if USE_ASYNC:

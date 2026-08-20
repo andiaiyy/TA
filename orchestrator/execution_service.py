@@ -1,14 +1,19 @@
 """
 Execution service — pipeline dispatch.
-No database access. Raises on errors (experiment_service catches).
+Raises on errors (experiment_service catches).
 """
+import logging
 from typing import Callable, Optional
 
 import pandas as pd
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 from contracts.dataset_schemas import get_schema
-from config.pipeline_registry import get_pipeline_instance
+from orchestrator.dynamic_registry import (
+    DynamicRegistryError, get_pipeline_instance_merged,
+)
 from workers.local_worker import run_pipeline
+
+logger = logging.getLogger(__name__)
 
 
 def execute_pipeline(
@@ -22,12 +27,24 @@ def execute_pipeline(
     Resolve pipeline, build input, execute, return result.
     Raises ValueError if pipeline or schema not found.
 
+    Pipeline bawaan diambil dari registry STATIS; pipeline terunggah yang sudah
+    disetujui dimuat dari berkasnya dengan verifikasi SHA-256 lebih dulu
+    (orchestrator/dynamic_registry). Karena worker Celery juga masuk lewat
+    fungsi ini, verifikasi hash itu berlaku di sisi worker juga; kegagalan
+    memuat menjadi ValueError sehingga eksperimen ditandai FAILED dengan pesan
+    jelas alih-alih menggantung.
+
     ``progress`` is an optional callback forwarded to the pipeline for
     coarse stage reporting. Pipelines must run identically when
     ``progress`` is None (default), which is the case for sync execution
     and all tests.
     """
-    instance = get_pipeline_instance(pipeline_id)
+    try:
+        instance = get_pipeline_instance_merged(pipeline_id)
+    except DynamicRegistryError as e:
+        # Hash tidak cocok / berkas hilang / kelas tidak sah. Jadikan kegagalan
+        # eksplisit supaya worker menandai eksperimen FAILED dengan alasannya.
+        raise ValueError(f"Pipeline tidak dapat dimuat: {e}") from e
     if instance is None:
         raise ValueError(f"Pipeline not found: {pipeline_id}")
 
@@ -45,8 +62,18 @@ def execute_pipeline(
 
 
 def get_pipeline_info(pipeline_id: str) -> dict | None:
-    """Get pipeline metadata for UI display. Returns None if not found."""
-    instance = get_pipeline_instance(pipeline_id)
+    """Get pipeline metadata for UI display. Returns None if not found.
+
+    Untuk pipeline terunggah, memanggil ini MEMUAT berkasnya (dengan verifikasi
+    hash). Kegagalan dikembalikan sebagai None + log, bukan exception, supaya
+    satu pipeline bermasalah tidak merusak halaman.
+    """
+    try:
+        instance = get_pipeline_instance_merged(pipeline_id)
+    except DynamicRegistryError:
+        logger.warning("Pipeline terunggah %s tidak dapat dimuat", pipeline_id,
+                       exc_info=True)
+        return None
     if instance is None:
         return None
     return instance.get_info()

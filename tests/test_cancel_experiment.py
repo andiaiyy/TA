@@ -238,9 +238,15 @@ def test_migrations_apply_cleanly_on_v1_db(tmp_path):
     conn.close()
     assert "task_id" not in cols_before
 
+    from database.migration import MIGRATIONS
+
     applied = apply_migrations(db)
-    assert applied == [2]
-    assert get_current_version(db) == 2
+    # Every migration newer than v1 runs, v2 included. Asserted against the
+    # MIGRATIONS list rather than a literal so adding a later migration does
+    # not break this test — what matters is that the v1 DB catches up fully.
+    assert 2 in applied
+    assert applied == [m["version"] for m in MIGRATIONS if m["version"] > 1]
+    assert get_current_version(db) == max(m["version"] for m in MIGRATIONS)
 
     conn = sqlite3.connect(db)
     cols_after = {row[1] for row in conn.execute("PRAGMA table_info(experiments)").fetchall()}

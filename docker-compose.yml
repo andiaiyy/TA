@@ -56,6 +56,12 @@ services:
       - CELERY_CONCURRENCY=1
       - JSON_LOGS=true
       - LOG_LEVEL=INFO
+      # Admin pertama (dipakai UI saat start; worker ikut membacanya agar
+      # environment kedua service konsisten). Nilai di bawah adalah default
+      # pengembangan; timpa lewat berkas .env untuk deployment sungguhan.
+      # Password minimal 8 karakter — bila lebih pendek, admin TIDAK dibuat.
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-Ai}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-pass1234}
     restart: unless-stopped
 
   # --- Streamlit UI ---
@@ -78,6 +84,14 @@ services:
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - USE_ASYNC=true
       - DB_PATH=/app/storage/experiments.db
+      # Admin pertama dibuat oleh service ini saat start, dari environment.
+      # Setel di berkas .env (jangan di repo):
+      #   ADMIN_USERNAME=admin
+      #   ADMIN_PASSWORD=<password kuat, minimal 8 karakter>
+      # Bila ADMIN_PASSWORD kosong, TIDAK ada admin yang dibuat (aplikasi
+      # menampilkan petunjuk di halaman login) — tidak ada password bawaan.
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-Ai}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-pass1234}
     restart: unless-stopped
 
 volumes:

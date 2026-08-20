@@ -1,0 +1,11 @@
+# Konfigurasi Streamlit tingkat proyek (dibaca dari CWD saat `streamlit run`,
+# dan menang atas ~/.streamlit/config.toml).
+#
+# maxUploadSize HARUS sejalan dengan MAX_DATASET_UPLOAD_BYTES di
+# ui/views/contribute.py — Streamlit menolak unggahan lebih besar dari nilai ini
+# di sisi server sebelum kode aplikasi sempat berjalan.
+[server]
+maxUploadSize = 5120        # MB (5 GB) — dataset EVE/HIKARI berukuran GB
+
+[browser]
+gatherUsageStats = false
