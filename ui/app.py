@@ -94,6 +94,15 @@ st.markdown(
 # kelola pengguna), diperiksa di titik aksinya masing-masing lewat
 # orchestrator.auth_service. Switch mode dirender setelah menu halaman.
 from ui.views.login import maybe_render_auth_dialog, render_mode_switch
+from ui.components import theme
+from ui.components.sidebar_progress import render_sidebar_progress
+from ui.components.sidebar_chrome import menu_styles, render_breadcrumb
+from ui.components.page_flags import drop_stale_page_flags
+
+# Gaya bersama seluruh aplikasi — didefinisikan sekali di
+# ui/components/theme.py dan disuntikkan di sini saja, sehingga tidak ada
+# salinan CSS yang tersebar di berkas view.
+theme.inject()
 
 # ── Sidebar navigation ────────────────────────────────────────────────────
 # Centralised routing: option_menu returns the selected label, and a single
@@ -121,8 +130,6 @@ except Exception as _e:
     logger.warning("streamlit-option-menu not available, falling back to radio: %s", _e)
 
 
-_ACCENT = "#2563eb"  # consistent with the accent already used in other UI
-
 
 _CURRENT_PAGE_KEY = "_current_page"
 
@@ -138,37 +145,21 @@ def _remembered_index() -> int:
 
 
 def _select_page() -> str:
+    """Menu tiga halaman. Perilakunya TIDAK berubah — urutan, halaman default,
+    dan mekanisme perpindahannya persis sama; yang diganti hanya gayanya
+    (lihat ui/components/sidebar_chrome.menu_styles).
+
+    Judul "Main Menu" dilepas karena jejak lokasi di atasnya sudah memberi tahu
+    pengguna ia sedang di mana — dua label berturut-turut hanya menambah bising.
+    """
     if _OPTION_MENU_AVAILABLE:
         with st.sidebar:
             return option_menu(
-                menu_title="Main Menu",
+                menu_title=None,
                 options=list(_PAGES),
                 icons=list(_PAGE_ICONS),
-                menu_icon="list",
                 default_index=_remembered_index(),
-                styles={
-                    "container": {"padding": "4px 0", "background-color": "transparent"},
-                    "icon": {"font-size": "16px"},
-                    "nav-link": {
-                        "font-size": "14px",
-                        "text-align": "left",
-                        "margin": "2px 0",
-                        "padding": "8px 12px",
-                        "border-radius": "6px",
-                        "--hover-color": "#eef2ff",
-                    },
-                    "nav-link-selected": {
-                        "background-color": _ACCENT,
-                        "color": "white",
-                        "font-weight": "600",
-                    },
-                    "menu-title": {
-                        "font-size": "13px",
-                        "font-weight": "600",
-                        "color": "#444",
-                        "padding": "4px 0 8px 0",
-                    },
-                },
+                styles=menu_styles(),
             )
     # Fallback path
     st.sidebar.caption(
@@ -178,12 +169,37 @@ def _select_page() -> str:
     return st.sidebar.radio("Navigation", _PAGES, index=_remembered_index())
 
 
+# Blok 1 dari sidebar: jejak lokasi lalu menu tiga halaman.
+#
+# Tempat jejak lokasi dipesan LEBIH DULU supaya ia tampil di atas menu,
+# sementara isinya baru ditulis setelah `option_menu` mengembalikan halaman yang
+# benar-benar terpilih pada run ini. Membacanya dari session_state sebelum menu
+# dirender akan menampilkan halaman run SEBELUMNYA setiap kali pengguna
+# berpindah.
+_breadcrumb_slot = st.sidebar.empty()
+
 page = _select_page()
 # Ingat halaman aktif supaya rerun apa pun (login/logout, aksi di sidebar)
 # tidak memindahkan pengguna dari konteks yang sedang ia kerjakan.
 st.session_state[_CURRENT_PAGE_KEY] = page
 
-# Switch mode: di BAWAH menu halaman, dipisahkan garis. Pengunjung melihat
+with _breadcrumb_slot:
+    render_breadcrumb(page)
+
+# Flag modal yang hanya sah di halamannya dibuang di sini, SEBELUM halaman
+# dirender. Sebuah view tidak dapat mendeteksi kepergiannya sendiri (render()-nya
+# tidak dipanggil saat pengguna ada di halaman lain), jadi pemeriksaannya harus
+# berada di alur yang jalan pada setiap halaman — di sini.
+drop_stale_page_flags(page)
+
+# Blok 2 dari sidebar: eksperimen yang sedang berjalan, di antara menu halaman
+# dan blok identitas. Memperbarui dirinya sendiri tiap 15 detik lewat
+# st.fragment — HANYA blok ini yang dijalankan ulang, sehingga formulir yang
+# sedang diisi, berkas yang sedang dipilih, dan modal yang sedang terbuka di
+# halaman tidak terganggu. Karena itu tidak ada rerun global berkala di sini.
+render_sidebar_progress()
+
+# Blok 3 (paling bawah): switch mode. Pengunjung melihat
 # status + tombol Masuk; pengguna yang sudah masuk melihat nama, peran, dan
 # tombol Keluar. Berpindah identitas tidak menyentuh data maupun state
 # eksperimen yang sedang berjalan.

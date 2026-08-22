@@ -117,21 +117,18 @@ def capability(user: dict | None) -> dict:
 
     may_upload, may_review = bool(can_upload(user)), bool(can_approve(user))
 
+    # Frasa, bukan kalimat — apa yang boleh dilakukan, tanpa kata pengisi.
     if not user:
         label = "Mode pengunjung"
-        what = ("Dapat membaca persyaratan dan menjalankan pemeriksaan. "
-                "Mengajukan pipeline atau dataset memerlukan akun.")
+        what = "membaca & menjalankan pemeriksaan"
     else:
         label = role_label(user.get("role")) or "Pengguna"
         if may_review:
-            what = ("Dapat mengajukan pipeline & dataset, serta meninjau "
-                    "pengajuan orang lain dan mengelola pengguna.")
+            what = "mengajukan, meninjau, mengelola pengguna"
         elif may_upload:
-            what = ("Dapat mengajukan pipeline & dataset untuk ditinjau "
-                    "Research Admin.")
+            what = "mengajukan pipeline & dataset"
         else:
-            what = ("Akun menunggu persetujuan Research Admin — pengajuan "
-                    "berkas belum terbuka untuk akun ini.")
+            what = "menunggu persetujuan — belum dapat mengajukan"
 
     return {"label": label, "what": what,
             "may_upload": may_upload, "may_review": may_review}
@@ -144,13 +141,11 @@ def render_capability(user: dict | None) -> None:
     cap = capability(user)
     st.markdown(f"**{cap['label']}** — {cap['what']}")
     if not user:
-        render_login_prompt(
-            "Masuk untuk mengajukan pipeline atau dataset. Melihat hasil dan "
-            "menjalankan eksperimen tetap tidak memerlukan akun.",
-            key="contrib_ctx_login",
-        )
+        # Keterangan WAJIB "kenapa aksi tak tersedia" — diringkas sependek
+        # mungkin; penunjuk jalur masuknya ditambahkan render_login_prompt.
+        render_login_prompt("Mengajukan berkas memerlukan akun.")
     elif not cap["may_upload"]:
-        st.caption("Halaman ini tetap dapat dibaca sepenuhnya selama menunggu.")
+        st.caption("Menunggu persetujuan — halaman tetap dapat dibaca.")
 
 
 # ── Apa yang terjadi setelah mengunggah ───────────────────────────────────
@@ -197,11 +192,7 @@ def render_after_upload(user: dict | None) -> None:
 
 def render_related_pages() -> None:
     """Kaitan ke halaman lain, satu baris."""
-    st.caption(
-        "Setelah **dataset** disetujui, berkasnya dapat dipilih di halaman "
-        "**Run Experiment**. Setelah **pipeline** disetujui dan diaktifkan, "
-        "pipeline-nya muncul sebagai pilihan research pipeline di halaman itu."
-    )
+    st.caption("Setelah disetujui, dataset & pipeline muncul di **Run Experiment**.")
 
 
 # ── Panel konteks (dipakai di tampilan awal halaman) ──────────────────────

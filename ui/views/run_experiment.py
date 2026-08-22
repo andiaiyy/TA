@@ -19,8 +19,12 @@ from orchestrator.execution_service import get_pipeline_info
 from orchestrator.validation_service import get_available_datasets
 from orchestrator.result_service import get_experiment_metrics, get_full_experiment, get_experiment_metadata
 from config.settings import DATASETS_DIR
-from config.research_attribution import get_research_display_name, get_research_attribution
+from config.research_attribution import (
+    get_research_attribution, get_research_display_name,
+    get_research_short_label,
+)
 from ui.views._artifact_browser import render_file_browser, format_size
+from ui.components import dialogs as dlg
 from ui.components.result_views import normalize_result_payload, render_results
 from streamlit_option_menu import option_menu
 from contracts.dataset_schemas import get_schema
@@ -30,7 +34,6 @@ from contracts.dataset_schemas import get_schema
 from orchestrator.dataset_diagnostics import required_format, sanitize_display_value
 
 # Accent color shared with the sidebar (kept in sync intentionally).
-_ACCENT = "#2563eb"
 
 _EXT_MAP: dict[str, tuple[str, ...]] = {
     "EVE_SURICATA": (".json", ".jsonl", ".ndjson"),
@@ -654,11 +657,7 @@ def _render_dataset_requirements(dataset_type: str) -> None:
 
     st.markdown("---")
     st.markdown("**Persyaratan Dataset**")
-    st.caption(
-        "Cocokkan dataset Anda dengan poin-poin di bawah sebelum menjalankan "
-        "eksperimen. Informasi ini mengikuti *research pipeline* (tipe dataset) "
-        "yang dipilih, bukan algoritmanya."
-    )
+    st.caption("Mengikuti research pipeline, bukan algoritmanya.")
 
     if not req:
         # Tipe dataset baru/tak dikenal: tetap jujur, tetap diturunkan.
@@ -1173,12 +1172,14 @@ def _compat_dialog_body(diag: dict, dataset_type: str, *, collapsible: bool = Tr
             st.markdown("**Rincian pemeriksaan**")
             _render_check_list(result, dataset_type)
 
+        # DUA catatan wajib (angka berbasis cuplikan + tidak menjalankan
+        # pipeline) digabung menjadi SATU baris penutup, bukan dua baris kecil
+        # bertumpuk. Keduanya tetap tampil utuh.
         note = _sample_note(diag)
-        if note:
-            st.caption(note)
         st.caption(
-            "Uji ini hanya membaca cuplikan berkas (tidak memuat seluruh "
-            "dataset) dan tidak menjalankan pipeline apa pun."
+            (f"{note} " if note else "")
+            + "Uji ini hanya membaca cuplikan berkas (tidak memuat seluruh "
+              "dataset) dan tidak menjalankan pipeline apa pun."
         )
 
     if st.button("Tutup", key=f"compat_close_{dataset_type}"):
@@ -1194,7 +1195,8 @@ def _compat_dialog_body(diag: dict, dataset_type: str, *, collapsible: bool = Tr
 _HAS_ST_DIALOG = hasattr(st, "dialog")
 
 if _HAS_ST_DIALOG:
-    _compat_dialog = st.dialog("Uji Kecocokan Dataset", width="large")(_compat_dialog_body)
+    _compat_dialog = dlg.dialog_decorator(
+        "Uji Kecocokan Dataset", dlg.COMPAT_KEY, width="large")(_compat_dialog_body)
 else:  # pragma: no cover - hanya untuk Streamlit < 1.37
     def _compat_dialog(diag: dict, dataset_type: str) -> None:
         with st.expander("Uji Kecocokan Dataset", expanded=True):
@@ -1208,12 +1210,12 @@ def _request_compat_check(dataset_type: str) -> None:
     membuka dialog. Fungsi ber-@st.dialog baru dipanggil dari ALUR UTAMA script
     di `_maybe_render_compat_dialog`, sesudah blok kotak dirender.
     """
-    st.session_state["_compat_check_type"] = dataset_type
+    dlg.open_dialog(dlg.COMPAT_KEY, dataset_type)
 
 
 def _close_compat_dialog() -> None:
     """Bersihkan flag lalu rerun agar dialog tidak terbuka lagi."""
-    st.session_state.pop("_compat_check_type", None)
+    dlg.close_dialog(dlg.COMPAT_KEY)
     st.rerun()
 
 
@@ -1223,12 +1225,12 @@ def _maybe_render_compat_dialog(diag: dict) -> None:
     Ini satu-satunya tempat fungsi ber-@st.dialog dipanggil: bukan dari
     on_click callback, bukan dari dalam kolom/container.
     """
-    dtype = st.session_state.get("_compat_check_type")
+    dtype = dlg.dialog_state(dlg.COMPAT_KEY)
     if not dtype:
         return
     if dtype not in (diag.get("results") or {}):
         # Dataset berganti sejak tombol ditekan — jangan tampilkan hasil basi.
-        st.session_state.pop("_compat_check_type", None)
+        dlg.close_dialog(dlg.COMPAT_KEY)
         return
     _compat_dialog(diag, dtype)
 
@@ -1257,8 +1259,7 @@ def _render_compat_boxes(diag: dict) -> None:
         # sehingga tombol tidak pernah menjalankan apa pun dari konteks bersarang.
         box = col.container(border=True)
         box.markdown(f"**{get_research_display_name(dtype)}**")
-        box.caption(f"`{dtype}`")
-        box.caption(_requirement_summary(dtype))
+        box.caption(f"`{dtype}` · {_requirement_summary(dtype)}")
         if box.button("Uji kecocokan", key=f"compat_test_{dtype}",
                       use_container_width=True):
             # Hanya set flag. Dialog dibuka di alur utama (setelah blok ini)
@@ -1321,9 +1322,427 @@ def _render_execution_status_panel() -> dict:
     return health
 
 
+# ─── Dua tampilan: KATALOG dan EKSEKUSI ────────────────────────────────────
+# Halaman dibuka dengan katalog. Yang menentukan kapan katalog TIDAK boleh
+# tampil adalah keadaan pemantauan eksperimen, bukan preferensi tampilan:
+# pengguna tidak boleh merasa eksperimennya hilang di balik katalog.
+
+_VIEW_KEY = "_run_view"
+VIEW_CATALOG = "catalog"
+VIEW_EXECUTE = "execute"
+
+# Pipeline yang dipilih dari katalog, menunggu diterapkan ke selectbox saat
+# dataset yang cocok sudah dipilih. Sengaja TERPISAH dari kunci widget
+# (`research_select`/`algorithm_select`) yang dibuang setiap kali dataset
+# berganti — dan agar nilai yang tidak cocok tidak pernah masuk ke widget.
+_PENDING_KEY = "_run_pending_pipeline"
+_PENDING_MISS_KEY = "_run_pending_missed"
+
+# Penanda per-run (di-reset di awal render) bahwa stage view sudah dirender.
+_POLL_RENDERED_KEY = "_run_poll_rendered"
+
+
+def _close_run_dialogs() -> None:
+    """Tutup SEMUA modal milik halaman ini sekaligus.
+
+    Berpindah antara katalog dan eksekusi mengubah konteks sepenuhnya, jadi
+    tidak ada modal yang masih relevan — termasuk uji kecocokan yang dibuka dari
+    alur eksekusi. Membersihkan satu per satu pernah menyisakan flag lain hidup.
+    """
+    dlg.close_dialog(*dlg.RUN_VIEW_KEYS)
+    for key in dlg.RUN_VIEW_KEYS:
+        dlg.clear_payload(key)
+
+
+def is_polling() -> bool:
+    """Ada eksperimen yang SEDANG BERJALAN dan dipantau sesi ini."""
+    return bool(st.session_state.get("polling_experiment_id"))
+
+
+def has_visible_result() -> bool:
+    """Hasil eksperimen sesi ini sedang ditampilkan."""
+    result = st.session_state.get("last_result")
+    return bool(isinstance(result, dict) and result.get("success"))
+
+
+def is_monitoring() -> bool:
+    """Pengguna sedang memantau/membaca eksperimennya sendiri."""
+    return is_polling() or has_visible_result()
+
+
+def current_view() -> str:
+    """Tampilan yang harus dirender sekarang.
+
+    Aturannya berlapis, dan pemantauan selalu menang atas preferensi:
+
+    * **polling aktif** → selalu EKSEKUSI. Eksperimen yang sedang berjalan tidak
+      boleh tersembunyi di balik katalog, jadi preferensi tampilan diabaikan.
+    * **hasil sedang ada** → EKSEKUSI secara bawaan, tetapi pengguna tetap boleh
+      berpindah ke katalog dengan sengaja (hasilnya tidak dihapus, jadi kembali
+      ke eksekusi akan menampilkannya lagi).
+    * selain itu → apa yang terakhir dipilih pengguna, bawaannya katalog.
+    """
+    if is_polling():
+        return VIEW_EXECUTE
+    view = st.session_state.get(_VIEW_KEY)
+    if view in (VIEW_CATALOG, VIEW_EXECUTE):
+        return view
+    return VIEW_EXECUTE if has_visible_result() else VIEW_CATALOG
+
+
+def go_to_execute(pipeline_id: str | None = None) -> None:
+    """Pindah ke tampilan eksekusi, opsional dengan pipeline sudah terpilih."""
+    st.session_state[_VIEW_KEY] = VIEW_EXECUTE
+    st.session_state.pop(_PENDING_MISS_KEY, None)
+    if pipeline_id:
+        st.session_state[_PENDING_KEY] = pipeline_id
+    _close_run_dialogs()
+
+
+def go_to_catalog() -> None:
+    """Kembali ke katalog. Tidak menghapus hasil maupun pilihan dataset."""
+    st.session_state[_VIEW_KEY] = VIEW_CATALOG
+    st.session_state.pop(_PENDING_KEY, None)
+    st.session_state.pop(_PENDING_MISS_KEY, None)
+    _close_run_dialogs()
+
+
+def _apply_pending_selection(research_groups: dict) -> None:
+    """Pasang pilihan dari katalog ke selectbox, bila memang cocok.
+
+    Hanya memasang pipeline yang BENAR-BENAR ada di antara pipeline kompatibel
+    dataset yang sedang dipilih — kalau tidak, nilai yang bukan salah satu opsi
+    akan membuat selectbox gagal. Yang tidak cocok dicatat agar pengguna diberi
+    tahu, bukan didiamkan.
+    """
+    pending = st.session_state.pop(_PENDING_KEY, None)
+    if not pending:
+        return
+    for dataset_type, algo_to_pid in (research_groups or {}).items():
+        for algorithm, pipeline_id in algo_to_pid.items():
+            if pipeline_id == pending:
+                st.session_state["research_select"] = dataset_type
+                st.session_state["algorithm_select"] = algorithm
+                st.session_state.pop(_PENDING_MISS_KEY, None)
+                return
+    st.session_state[_PENDING_MISS_KEY] = pending
+
+
+def _selected_pipeline_label() -> str:
+    """Penanda ringkas pipeline yang sedang terpilih, untuk kepala halaman."""
+    research = st.session_state.get("research_select")
+    algorithm = st.session_state.get("algorithm_select")
+    if research and algorithm:
+        return f"{get_research_short_label(research)} · {algorithm}"
+    if research:
+        return get_research_short_label(research)
+    return "belum ada pipeline terpilih"
+
+
+def _render_execute_header() -> None:
+    """Tombol kembali + penanda pipeline terpilih, di atas alur eksekusi."""
+    cols = st.columns([2, 6])
+    running = is_polling()
+    if cols[0].button("← Katalog", key="_run_back", use_container_width=True,
+                      disabled=running,
+                      help=("Selesaikan atau batalkan eksperimen yang sedang "
+                            "berjalan sebelum kembali." if running else
+                            "Kembali ke katalog pipeline.")):
+        go_to_catalog()
+        st.rerun()
+    with cols[1]:
+        st.caption(f"Pipeline: {_selected_pipeline_label()}")
+
+    if running:
+        # Bukan sekadar tombol mati: sebutkan alasannya supaya tidak terasa rusak.
+        st.caption("Eksperimen sedang berjalan — tampilan ini dikunci agar "
+                   "pantauannya tidak hilang.")
+    missed = st.session_state.get(_PENDING_MISS_KEY)
+    if missed:
+        st.info(f"`{missed}` tidak kompatibel dengan dataset yang dipilih, "
+                f"jadi pilihan dari katalog tidak dipasang. Pilih dataset yang "
+                f"sesuai, atau pilih pipeline lain di bawah.")
+
+
+# ─── Modal detail katalog ──────────────────────────────────────────────────
+# Pola yang sama dengan `_compat_dialog` di halaman ini dan `_detail_dialog` di
+# Progress & Status: tombol HANYA menulis flag, fungsi ber-@st.dialog didekorasi
+# sekali di tingkat modul, dan dipanggil dari ALUR UTAMA `render()` — bukan dari
+# dalam kolom/container/callback.
+
+CATALOG_DETAIL_KEY = dlg.CATALOG_DETAIL_KEY
+
+
+def request_catalog_detail(dataset_type: str) -> None:
+    """Tombol Detail hanya menyimpan flag; modalnya dibuka di alur utama."""
+    dlg.open_dialog(CATALOG_DETAIL_KEY, dataset_type)
+
+
+def close_catalog_detail() -> None:
+    """Bersihkan flag. Dipanggil dari tombol Tutup dan saat berpindah tampilan."""
+    dlg.close_dialog(CATALOG_DETAIL_KEY)
+    dlg.clear_payload(CATALOG_DETAIL_KEY)
+
+
+def _catalog_detail_body(group: dict) -> None:
+    """Isi modal + aksinya. Isinya disusun modul katalog; aksinya milik halaman."""
+    from ui.components.pipeline_catalog import render_modal_body
+
+    render_modal_body(group)
+
+    st.divider()
+    algorithms = group.get("algorithms") or []
+    cols = st.columns([3, 2])
+    with cols[0]:
+        choice = st.selectbox(
+            "Algoritma", [a["algorithm"] for a in algorithms],
+            index=0 if algorithms else None, key="_catalog_run_algo",
+            label_visibility="collapsed",
+            placeholder="Pilih algoritma…") if algorithms else None
+    run_clicked = cols[1].button("Jalankan pipeline ini", type="primary",
+                                 key="_catalog_run", use_container_width=True,
+                                 disabled=not algorithms)
+    if run_clicked and choice:
+        pipeline_id = next((a["pipeline_id"] for a in algorithms
+                            if a["algorithm"] == choice), None)
+        close_catalog_detail()
+        go_to_execute(pipeline_id)
+        st.rerun()
+
+    if st.button("Tutup", key="_catalog_close"):
+        close_catalog_detail()
+        st.rerun()
+
+
+if hasattr(st, "dialog"):
+    _catalog_detail_dialog = dlg.dialog_decorator(
+        "Detail Research Pipeline", CATALOG_DETAIL_KEY,
+        width="large")(_catalog_detail_body)
+else:                                       # pragma: no cover - Streamlit lama
+    def _catalog_detail_dialog(group):
+        with st.expander("Detail Research Pipeline", expanded=True):
+            _catalog_detail_body(group)
+
+
+def _maybe_render_catalog_detail(catalog) -> None:
+    """Buka modal bila ada flag. SATU-SATUNYA tempat dialog dipanggil.
+
+    Flag basi (dataset_type yang tidak lagi ada di katalog) dibuang tanpa
+    merender apa pun — pola yang sama dengan `_maybe_render_compat_dialog`.
+    """
+    dataset_type = dlg.dialog_state(CATALOG_DETAIL_KEY)
+    if not dataset_type:
+        return
+    group = next((g for g in catalog if g["dataset_type"] == dataset_type), None)
+    if group is None:
+        close_catalog_detail()
+        return
+    _catalog_detail_dialog(group)
+
+
+# ─── Alur "Run Pipeline" dari katalog ──────────────────────────────────────
+# Menekan tombolnya memeriksa dataset mana yang COCOK untuk research pipeline
+# itu, lalu membuka pop-up: daftar pilihan bila ada, atau keterangan syarat +
+# arahan mengunggah bila tidak ada.
+
+CATALOG_RUN_KEY = dlg.CATALOG_RUN_KEY
+
+
+def matching_datasets(dataset_type: str, *, options=None, diagnose=None,
+                      extensions=None) -> list[dict]:
+    """Dataset di server yang cocok untuk sebuah research pipeline.
+
+    Memakai diagnosa yang SUDAH ADA (`_diagnose_selected`, ber-cache dan hanya
+    mencuplik sebagian berkas) — tidak ada mekanisme kecocokan baru dan tidak
+    ada berkas yang dibaca ulang seutuhnya.
+
+    Dua lapis supaya tetap ringan saat folder berisi banyak berkas:
+
+    1. saring dulu berdasarkan EKSTENSI yang memang diterima skema — berkas yang
+       jelas salah format tidak perlu didiagnosa sama sekali;
+    2. baru diagnosa kandidat yang tersisa, dan kecocokannya dibaca pada tingkat
+       dataset_type (bukan per algoritma), sama seperti yang berlaku di alur
+       eksekusi.
+    """
+    options = _all_dataset_options() if options is None else options
+    diagnose = _diagnose_selected if diagnose is None else diagnose
+    allowed = tuple(_dataset_extensions(dataset_type) if extensions is None
+                    else extensions)
+
+    out: list[dict] = []
+    for path, _dtype in options:
+        if allowed and Path(path).suffix.lower() not in allowed:
+            continue                        # lapis 1: tidak perlu didiagnosa
+        try:
+            diag = diagnose(path)
+        except Exception:                   # berkas rusak != halaman rusak
+            continue
+        if dataset_type not in (diag.get("compatible_types") or []):
+            continue
+        try:
+            size = format_size(Path(path).stat().st_size)
+        except Exception:                   # pragma: no cover - defensif
+            size = "ukuran tidak diketahui"
+        out.append({"path": path, "name": Path(path).name, "size": size})
+    return out
+
+
+def request_catalog_run(dataset_type: str) -> None:
+    """Tombol "Run Pipeline": periksa kecocokan SEKALI, simpan hasilnya.
+
+    Pemeriksaannya dilakukan di sini — bukan di dalam badan pop-up — supaya
+    interaksi di dalam pop-up tidak memicu diagnosa berulang.
+    """
+    dlg.open_dialog(CATALOG_RUN_KEY, dataset_type)
+    dlg.store_payload(CATALOG_RUN_KEY, matching_datasets(dataset_type))
+
+
+def close_catalog_run() -> None:
+    dlg.close_dialog(CATALOG_RUN_KEY)
+    dlg.clear_payload(CATALOG_RUN_KEY)
+
+
+def _use_dataset(dataset_type: str, path: str) -> None:
+    """Bawa dataset & research pipeline terpilih ke tampilan eksekusi.
+
+    Menulis kunci widget yang SAMA dengan yang dipakai alur eksekusi, jadi
+    tampilan itu tidak perlu tahu pilihan ini datang dari katalog. Algoritma
+    sengaja tidak ikut dipilih — itu tetap keputusan pengguna di sana.
+    """
+    st.session_state["dataset_select"] = path
+    st.session_state["research_select"] = dataset_type
+    close_catalog_run()
+    go_to_execute()
+
+
+def _catalog_run_body(dataset_type: str, matches: list[dict]) -> None:
+    """Isi pop-up. Hanya MEMBACA hasil yang sudah dihitung saat dibuka."""
+    from ui.components.pipeline_catalog import run_requirements
+
+    st.markdown(f"**{get_research_short_label(dataset_type)}**")
+
+    if matches:
+        st.caption(f"{len(matches)} dataset di server cocok untuk research "
+                   f"pipeline ini. Pilih satu untuk melanjutkan.")
+        for item in matches:
+            cols = st.columns([5, 2])
+            cols[0].markdown(f"`{item['name']}`")
+            cols[0].caption(item["size"])
+            if cols[1].button("Pilih", key=f"catrun_{item['path']}",
+                              use_container_width=True):
+                _use_dataset(dataset_type, item["path"])
+                st.rerun()
+    else:
+        st.warning("Belum ada dataset di server yang cocok untuk research "
+                   "pipeline ini.")
+        st.markdown("**Syarat utamanya**")
+        for label, value in run_requirements(dataset_type):
+            st.markdown(f"- **{label}** — {value}")
+        st.caption("Unggah dataset yang memenuhi syarat di atas lewat halaman "
+                   "**Add Pipeline & Dataset**; berkasnya diperiksa otomatis "
+                   "terhadap tiap research pipeline setelah diunggah.")
+
+    st.divider()
+    if st.button("Tutup", key="_catalog_run_close"):
+        close_catalog_run()
+        st.rerun()
+
+
+if hasattr(st, "dialog"):
+    _catalog_run_dialog = dlg.dialog_decorator(
+        "Jalankan Research Pipeline", CATALOG_RUN_KEY)(_catalog_run_body)
+else:                                       # pragma: no cover - Streamlit lama
+    def _catalog_run_dialog(dataset_type, matches):
+        with st.expander("Jalankan Research Pipeline", expanded=True):
+            _catalog_run_body(dataset_type, matches)
+
+
+def _maybe_render_catalog_run(catalog) -> None:
+    """Buka pop-up bila ada flag. SATU-SATUNYA tempat dialognya dipanggil."""
+    dataset_type = dlg.dialog_state(CATALOG_RUN_KEY)
+    if not dataset_type:
+        return
+    if not any(g["dataset_type"] == dataset_type for g in catalog):
+        close_catalog_run()                 # flag basi
+        return
+    matches = dlg.payload(CATALOG_RUN_KEY)
+    if matches is None:                     # payload hilang (mis. sesi dimuat ulang)
+        matches = matching_datasets(dataset_type)
+        dlg.store_payload(CATALOG_RUN_KEY, matches)
+    _catalog_run_dialog(dataset_type, matches)
+
+
+def _render_catalog_view() -> None:
+    """Tampilan pembuka: blok ringkas per research pipeline.
+
+    Blok hanya memuat nama beratribusi, penjelasan singkat, dan daftar
+    algoritma. Keterangan selebihnya ada di modal detail, yang dipanggil dari
+    ALUR UTAMA di bawah — bukan dari dalam kolom tempat tombolnya berada.
+    """
+    from ui.components.pipeline_catalog import build_catalog, render_catalog
+
+    cols = st.columns([2, 6])
+    if cols[0].button("Run Experiment", type="primary", key="_run_go",
+                      use_container_width=True):
+        go_to_execute()
+        st.rerun()
+    with cols[1]:
+        st.caption("Menjalankan eksperimen: pilih dataset, lalu research "
+                   "pipeline & algoritmanya.")
+
+    catalog = build_catalog()
+    if render_catalog(catalog, on_detail=request_catalog_detail,
+                      on_run=request_catalog_run):
+        # Tombol hanya menulis flag; rerun agar modalnya dibuka dari alur utama
+        # pada run berikutnya.
+        st.rerun()
+    _maybe_render_catalog_detail(catalog)
+    _maybe_render_catalog_run(catalog)
+
+
 def render():
     st.title("Run Experiment")
 
+    if current_view() == VIEW_CATALOG:
+        _render_catalog_view()
+        return
+
+    # Sentinel per-run: dipakai jaring pengaman di bawah untuk tahu apakah
+    # stage view benar-benar tercapai.
+    st.session_state[_POLL_RENDERED_KEY] = False
+    _render_execute_header()
+    _render_execute()
+
+    # Jaring pengaman untuk ATURAN KRITIS. Titik polling di dalam alur eksekusi
+    # berada SESUDAH empat early-return (belum ada berkas dataset, dataset belum
+    # dipilih, validasi gagal, tidak ada pipeline kompatibel). Dalam pemakaian
+    # normal keempatnya tidak mungkin aktif saat polling — pilihan dataset
+    # bertahan di widget, dan berganti dataset justru membuang flag polling.
+    # Tetapi kalau sampai terjadi, eksperimen yang berjalan akan tak terlihat.
+    # Alih-alih menghapus early-return itu (alur lama dipertahankan apa adanya),
+    # stage view dirender di sini bila ternyata belum sempat tampil.
+    if is_polling() and not st.session_state.get(_POLL_RENDERED_KEY):
+        st.session_state[_POLL_RENDERED_KEY] = True
+        _poll_experiment(st.session_state["polling_experiment_id"])
+
+
+def _render_execute():
+    """Alur eksekusi — DIPINDAHKAN apa adanya dari render() sebelumnya.
+
+    Isi dan urutannya tidak berubah sedikit pun: pemilihan dataset (termasuk
+    diagnosa & profil), pemilihan research/algoritma, keterangan pipeline,
+    panel status eksekusi, tombol jalankan, stage view, lalu hasil. Seluruh
+    early-return aslinya juga dipertahankan pada posisi yang sama:
+
+      1. belum ada berkas dataset di storage/datasets/
+      2. dataset belum dipilih
+      3. validasi dataset gagal
+      4. tidak ada pipeline yang kompatibel
+      5. sedang memantau eksperimen (polling) — stage view mengambil alih
+
+    Yang ditambahkan hanya penerapan pilihan dari katalog tepat sebelum
+    selectbox research dibuat (lihat _apply_pending_selection).
+    """
     # Unggah & validasi script pipeline TIDAK lagi di halaman ini — seluruh
     # alurnya pindah ke halaman "Add Pipeline & Dataset" (ui/views/contribute.py)
     # agar hanya ada SATU pintu masuk kontribusi. Halaman ini kembali fokus
@@ -1469,6 +1888,11 @@ def render():
         research_groups.setdefault(dt, {})[algo] = pid
         if dt not in research_display:
             research_display[dt] = get_research_display_name(dt)
+
+    # Pilihan yang dibawa dari KATALOG diterapkan di sini — sesudah
+    # research_groups diketahui, sehingga hanya pipeline yang memang kompatibel
+    # dengan dataset terpilih yang dapat terpasang.
+    _apply_pending_selection(research_groups)
 
     research_keys = list(research_groups.keys())
     research = st.selectbox(
@@ -1626,6 +2050,7 @@ def render():
     # ── Execute (conditional — only after a pipeline is selected) ───────
     # Async polling view takes over while an experiment is in flight.
     if "polling_experiment_id" in st.session_state:
+        st.session_state[_POLL_RENDERED_KEY] = True
         _poll_experiment(st.session_state["polling_experiment_id"])
         return
 
@@ -1639,11 +2064,7 @@ def render():
         # lain tetap bebas, sehingga pengguna bisa berpindah ke pipeline yang cocok.
         if not _research_compatible:
             can_run = False
-            st.error(
-                "**Dataset belum cocok untuk pipeline ini.** Jalankan uji "
-                "kecocokan untuk melihat penyebab dan saran perbaikannya, atau "
-                "pilih research pipeline lain."
-            )
+            st.error("**Dataset belum cocok untuk pipeline ini.**")
             # Tombol ini berada SESUDAH titik pemanggilan dialog di alur utama,
             # jadi flag baru terbaca pada run berikutnya — rerun dari sini sah
             # karena berada di alur utama render(), bukan di dalam kolom.
@@ -1651,14 +2072,14 @@ def render():
                 _request_compat_check(dataset_type)
                 st.rerun()
         if not health.get("can_run", True):
-            st.error(
-                "**Eksekusi asinkron belum siap.** "
-                + (health.get("message") or "Broker/worker tidak tersedia.")
-                + " Jika eksperimen tetap dijalankan, ia akan tertahan di antrian dan "
-                "berpotensi ditandai **FAILED (stale)** setelah 120 menit. "
-                "Pastikan service **ids_worker** dan **ids_redis** berjalan, lalu klik "
-                "**Periksa ulang**."
-            )
+            # Satu kalimat inti; akibat & langkah perbaikan pindah ke tooltip.
+            st.error("**Eksekusi asinkron belum siap.** "
+                     + (health.get("message") or "Broker/worker tidak tersedia."))
+            st.caption(
+                "Eksperimen akan tertahan di antrean.",
+                help="Tugas yang tertahan ditandai **FAILED (stale)** setelah "
+                     "120 menit. Pastikan service **ids_worker** dan "
+                     "**ids_redis** berjalan, lalu klik **Periksa ulang**.")
         if st.button("Run Experiment", type="primary", disabled=not can_run):
             _run_with_status(dataset_type, dataset_path, selected)
 

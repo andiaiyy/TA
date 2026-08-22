@@ -73,8 +73,14 @@ def _flag(at):
     return at.session_state.filtered_state.get(login._DIALOG_KEY)
 
 
+# Label tombol pemilih mode: "Masuk sebagai <peran>". Menekannya HANYA membuka
+# modal — peran yang dipilih tidak pernah diberikan (lihat test di bawah).
+# Label pilihan kini PENDEK (hanya nama peran); penjelasannya di `help=`.
+_PICK_LABEL = "Kontributor"
+
+
 def _open_the_modal(at) -> None:
-    next(b for b in at.button if b.label == "Masuk").click().run()
+    next(b for b in at.button if b.label == _PICK_LABEL).click().run()
 
 
 def test_the_modal_stays_closed_until_the_button_is_pressed(app):
@@ -167,3 +173,72 @@ def test_reopening_after_a_page_change_still_works(app):
     _open_the_modal(app)                     # tekan lagi di halaman baru
     assert _dialog_is_open(app)
     assert _flag(app) == "login"
+
+
+# ── pemilih mode tidak pernah memberi hak ─────────────────────────────────
+
+@pytest.mark.parametrize("label", ["Kontributor", "Research Admin"])
+def test_picking_a_role_only_opens_the_modal(app, label):
+    """Memilih peran di sidebar TIDAK memberikan peran itu.
+
+    Yang boleh terjadi hanyalah flag modal terbuka; tidak ada identitas maupun
+    peran yang masuk ke session_state. Peran sebenarnya selalu ditentukan akun
+    & statusnya di basis data.
+    """
+    app.run()
+    next(b for b in app.button if b.label == label).click().run()
+
+    assert _flag(app) == "login"
+    state = app.session_state.filtered_state
+    assert login.SESSION_USER_KEY not in state, state
+    assert not any(v in ("contributor", "research_admin")
+                   for v in state.values() if isinstance(v, str)), state
+
+
+def test_the_picker_never_writes_a_role_into_the_session():
+    """Diperiksa pada sumbernya: `render_mode_switch` boleh MEMBACA peran untuk
+    ditampilkan, tetapi tidak boleh MENULIS apa pun yang memberi hak."""
+    import ast
+
+    src = Path(login.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
+              and n.name == "render_mode_switch")
+
+    # Tidak ada penulisan ke session_state sama sekali di dalam fungsi ini.
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for t in targets:
+                assert not isinstance(t, ast.Subscript), ast.dump(t)
+
+    # Tidak memanggil satu pun fungsi yang mengubah peran/status akun.
+    called = {getattr(c.func, "id", None) or getattr(c.func, "attr", None)
+              for c in ast.walk(fn) if isinstance(c, ast.Call)}
+    for granting in ("set_user_role", "set_user_status", "create_user",
+                     "create_user_as", "register_account"):
+        assert granting not in called, granting
+
+    # Satu-satunya jalur yang menyentuh session_state adalah pembuka modal.
+    assert "request_auth_dialog" in called
+
+
+def test_the_picker_offers_exactly_the_known_roles():
+    from database.models import ALL_ROLES
+
+    assert list(login._PICKABLE_ROLES) == list(ALL_ROLES)
+
+
+def test_a_signed_in_user_sees_their_role_and_a_way_out(app):
+    app.session_state["auth_user"] = {"username": "ai", "role": "research_admin",
+                                      "status": "active"}
+    app.run()
+    labels = [b.label for b in app.button]
+    # Kembali ke mode pengunjung = keluar dari akun (keterangannya di help=).
+    assert "Pengunjung" in labels
+    keluar = next(b for b in app.button if b.label == "Pengunjung")
+    assert "Keluar" in (keluar.help or "")
+
+    # Peran aktif tampil pada LABEL pemilih mode, bukan sebagai baris tambahan.
+    roles = [b for b in app.button if b.label == "Research Admin"]
+    assert roles and roles[0].disabled is True

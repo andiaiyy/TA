@@ -111,7 +111,8 @@ def test_the_real_platform_reports_plausible_numbers():
 # ── user status & rights come from the permission helpers ─────────────────
 
 @pytest.mark.parametrize("user, must_say", [
-    (VISITOR, "memerlukan akun"),
+    # Kini berupa FRASA pendek, bukan kalimat — isinya tetap sama.
+    (VISITOR, "membaca"),
     (PENDING, "menunggu persetujuan"),
     (CONTRIBUTOR, "mengajukan"),
     (ADMIN, "meninjau"),
@@ -137,8 +138,8 @@ def test_only_the_permitted_are_told_they_can_submit():
     """Kalimatnya mengikuti boolean, jadi akun pending tidak pernah dijanjikan
     dapat mengajukan."""
     assert capability(PENDING)["may_upload"] is False
-    assert "belum terbuka" in capability(PENDING)["what"].lower()
-    assert capability(CONTRIBUTOR)["what"].lower().startswith("dapat mengajukan")
+    assert "belum dapat mengajukan" in capability(PENDING)["what"].lower()
+    assert capability(CONTRIBUTOR)["what"].lower().startswith("mengajukan")
     assert capability(ADMIN)["may_review"] is True
 
 
