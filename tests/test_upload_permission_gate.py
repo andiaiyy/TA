@@ -234,9 +234,12 @@ def test_visitor_sees_disabled_upload_controls_and_a_sign_in_prompt(tmp_path, mo
     uploaders = at.get("file_uploader")
     assert uploaders, "kontrol unggah harus tetap terlihat"
     assert all(u.proto.disabled for u in uploaders)
-    assert any("Masuk" == b.label for b in at.button)
+    # Tombol "Masuk" sudah tidak ada di halaman ini; keterangannya tetap ada
+    # dan menunjuk ke pemilih mode di sidebar.
+    assert not any("Masuk" == b.label for b in at.button)
     prompts = " ".join(i.value for i in at.info)
     assert "Masuk sebagai Kontributor" in prompts
+    assert "pemilih mode" in prompts
 
 
 @pytest.mark.parametrize("mode, must_show", [

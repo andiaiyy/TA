@@ -19,7 +19,9 @@ import time
 
 import streamlit as st
 
-from database.models import role_label
+from database.models import ALL_ROLES, role_label
+from ui.components import dialogs as dlg
+from ui.components.sidebar_chrome import render_line
 from orchestrator.auth_service import (
     MAX_REASON_LENGTH, MAX_USERNAME_LENGTH, AuthError, authenticate,
     is_account_active, register_account,
@@ -40,7 +42,7 @@ _SIGNUP_DONE_KEY = "_auth_signup_done"
 # masing-masing sehingga tidak mungkin terbawa ke halaman lain. Karena itu flag
 # ini harus dibersihkan secara eksplisit di SETIAP jalur keluar, termasuk saat
 # dialog ditutup lewat tombol X/Esc dan saat pengguna berpindah halaman.
-_DIALOG_KEY = "_auth_dialog"
+_DIALOG_KEY = dlg.AUTH_KEY
 # Halaman yang sedang dirender pada run sebelumnya — pembanding untuk mendeteksi
 # perpindahan halaman. Diisi oleh `maybe_render_auth_dialog`, yang menerima
 # halaman aktif dari ui/app.py (bukan mengimpornya: app.py adalah script).
@@ -51,6 +53,34 @@ _MODE_SIGNUP = "signup"
 # Pembatasan sederhana untuk lingkungan internal: cukup menahan pendaftaran
 # beruntun dalam satu sesi. Tidak ada CAPTCHA / verifikasi surel (di luar lingkup).
 _SIGNUP_LIMIT = 5
+
+# Kalimat penunjuk jalur masuk. Satu tempat, dipakai halaman mana pun yang perlu
+# memberi tahu pengguna cara masuk — jadi arah yang ditunjuk tidak pernah
+# berbeda-beda antar halaman.
+SIGN_IN_HINT = "Masuk lewat pemilih mode di kiri bawah sidebar."
+
+# Peran yang DAPAT DIPILIH di pemilih mode sidebar. Daftar ini hanya menentukan
+# tombol mana yang tampil; memilihnya tidak pernah memberikan peran apa pun.
+_PICKABLE_ROLES = tuple(ALL_ROLES)
+
+# Label & keterangan pemilih mode. Labelnya PENDEK (satu kata/frasa); seluruh
+# penjelasan pindah ke tooltip supaya daftarnya tetap ringkas.
+_MODE_VISITOR = "Pengunjung"
+_ROLE_HELP = ("Membuka formulir masuk. Memilih di sini tidak memberikan peran "
+              "tersebut — peran ditentukan akun & statusnya.")
+_CURRENT_MODE_HELP = "Mode saat ini: membaca tanpa akun."
+_CURRENT_ROLE_HELP = "Peran akun Anda saat ini."
+_OTHER_ROLE_HELP = "Peran ditentukan akun & statusnya, bukan dipilih di sini."
+
+# Penanda tak terlihat yang menandai wadah blok mode. CSS terpusat
+# (ui/components/theme.py) mencari wadah yang MEMUAT penanda ini lalu
+# memberinya margin-top:auto, sehingga blok terdorong ke dasar sidebar.
+#
+# Harus berada DI DALAM st.container() yang sama dengan isi bloknya: Streamlit
+# membungkus tiap elemen dalam wadahnya sendiri, jadi <div> yang dibuka di satu
+# panggilan markdown dan ditutup di panggilan lain TIDAK pernah membungkus apa
+# pun (itu sebab percobaan sebelumnya gagal).
+_MODE_ANCHOR = '<span class="ids-mode-anchor"></span>'
 
 # Jeda kecil setelah beberapa kegagalan berturut-turut dalam satu session.
 # Sekadar memperlambat tebakan beruntun; bukan pengganti rate limiting nyata.
@@ -114,31 +144,62 @@ def render_mode_switch() -> None:
     ``ui/app.py``, di luar blok sidebar.
     """
     with st.sidebar:
-        st.divider()
-        user = current_user()
+        # SATU wadah untuk seluruh blok, ditandai jangkar tak terlihat. CSS
+        # terpusat memberi wadah ini margin-top:auto di dalam kolom fleksibel
+        # sidebar, sehingga ia terdorong ke dasar berapa pun panjang isi di
+        # atasnya. Blok ini juga HARUS dirender terakhir — lihat ui/app.py.
+        with st.container():
+            st.markdown(_MODE_ANCHOR, unsafe_allow_html=True)
+            st.divider()
+            user = current_user()
 
-        if user:
-            with st.container(border=True):
-                st.caption(f"**{user['username']}** · {role_label(user.get('role'))}")
-                if not is_account_active(user):
-                    # Penanda ringkas satu baris; penjelasan panjangnya ada di
-                    # halaman yang aksinya terkunci.
-                    st.caption("⏳ menunggu persetujuan")
-                if st.button("Keluar", key="auth_logout", use_container_width=True):
-                    logout()
-                    st.rerun()
-            return
-
-        with st.container(border=True):
-            st.caption("Mode pengunjung")
             if st.session_state.pop(_SIGNUP_DONE_KEY, False):
                 st.success("Pendaftaran diterima — menunggu persetujuan.")
-            if st.button("Masuk", key="auth_open_dialog", use_container_width=True,
-                         type="primary"):
-                # HANYA set flag. Memanggil st.dialog dari dalam blok sidebar
-                # adalah konteks yang tidak sah dan pernah menimbulkan error.
-                request_auth_dialog(_MODE_LOGIN)
-                st.rerun()
+
+            # `st.popover` membuka panel mengambang; karena blok ini elemen
+            # TERAKHIR di sidebar, panelnya membuka ke ATAS mengikuti ruang
+            # yang tersedia — tanpa perlu trik CSS posisi.
+            label = (f"{user['username']} · {role_label(user.get('role'))}"
+                     if user else "Mode pengunjung")
+            # Daftar pilihan sengaja RINGKAS: hanya nama mode, satu baris per
+            # pilihan, tanpa kalimat penjelas di dalamnya. Penjelasannya pindah
+            # ke `help=` masing-masing tombol (butir 9) — termasuk penegasan
+            # bahwa memilih peran TIDAK memberikan peran itu.
+            #
+            # `use_container_width` sengaja TIDAK dipakai di sini: tombol yang
+            # memuai membuat panel selebar sidebar. Lebarnya kini mengikuti
+            # isinya, dibatasi max-width di CSS terpusat.
+            with st.popover(label, use_container_width=True):
+                if user:
+                    if st.button(_MODE_VISITOR, key="auth_logout",
+                                 help="Keluar dan kembali membaca tanpa akun."):
+                        logout()
+                        st.rerun()
+                    for role in _PICKABLE_ROLES:
+                        st.button(role_label(role), key=f"auth_pick_{role}",
+                                  disabled=True,
+                                  help=_CURRENT_ROLE_HELP
+                                       if role == user.get("role")
+                                       else _OTHER_ROLE_HELP)
+                    if not is_account_active(user):
+                        # Status akun — WAJIB tetap tersampaikan, diringkas
+                        # menjadi dua kata.
+                        render_line("⏳ Menunggu persetujuan", muted=True,
+                                    small=True)
+                else:
+                    # Memilih peran di sini TIDAK memberikan peran itu — tombolnya
+                    # hanya membuka jalur masuk. Peran yang berlaku selalu datang
+                    # dari akun & statusnya di basis data, dibaca ulang oleh
+                    # orchestrator.auth_service pada setiap aksi berisiko. Karena
+                    # itu tidak ada satu pun penulisan peran ke session_state di
+                    # sini; yang ditulis hanya flag pembuka modal.
+                    st.button(_MODE_VISITOR, key="auth_pick_visitor",
+                              disabled=True, help=_CURRENT_MODE_HELP)
+                    for role in _PICKABLE_ROLES:
+                        if st.button(role_label(role), key=f"auth_pick_{role}",
+                                     help=_ROLE_HELP):
+                            request_auth_dialog(_MODE_LOGIN)
+                            st.rerun()
 
 
 # ── Siklus hidup flag modal ───────────────────────────────────────────────
@@ -166,7 +227,7 @@ def close_auth_dialog() -> None:
     Hanya flag yang dihapus — state widget di dalam modal dibiarkan Streamlit
     yang mengelola (menghapus kunci widget yang masih hidup berisiko error).
     """
-    st.session_state.pop(_DIALOG_KEY, None)
+    dlg.close_dialog(_DIALOG_KEY)
 
 
 # ── Modal masuk/daftar (satu dialog, dua tab) ─────────────────────────────
@@ -327,17 +388,13 @@ def maybe_render_auth_dialog(current_page: str | None = None) -> None:
     _auth_dialog()
 
 
-def render_login_prompt(message: str, *, key: str) -> None:
-    """Keterangan + pengarah login untuk aksi yang butuh akun.
+def render_login_prompt(message: str, *, key: str | None = None) -> None:
+    """Keterangan mengapa sebuah aksi belum tersedia.
 
-    Dipakai di tempat aksi (mis. panel unggah) supaya pengunjung tahu APA yang
-    kurang, bukan sekadar menemukan tombol mati.
-
-    Tombolnya membuka MODAL YANG SAMA dengan tombol di sidebar (flag yang
-    sama) — tidak ada formulir kedua di halaman. Halaman & jalur yang sedang
-    dibuka tidak berubah, jadi setelah masuk pengguna tetap di tempatnya.
+    TIDAK ADA tombol di sini. Jalur masuk satu-satunya adalah pemilih mode di
+    kiri bawah sidebar, jadi menaruh tombol kedua di badan halaman hanya
+    menduakan jalurnya; keterangannya menunjuk ke sana. ``key`` dipertahankan
+    agar pemanggil lama tidak perlu berubah, tetapi tidak lagi dipakai — tanpa
+    widget, tidak ada kunci yang perlu unik.
     """
-    st.info(message)
-    if st.button("Masuk", key=key):
-        request_auth_dialog(_MODE_LOGIN)
-        st.rerun()
+    st.info(f"{message} {SIGN_IN_HINT}")

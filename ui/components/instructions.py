@@ -215,9 +215,8 @@ def render_pipeline_instructions() -> None:
         render_chips(sorted(FORBIDDEN_MODULES), "no")
 
     render_note(
-        "🔒 Pemeriksaan bersifat <b>statis</b>: berkas dibaca dan diurai, "
-        "<b>tidak dijalankan</b>. Lolos pemeriksaan <b>bukan</b> berarti "
-        "langsung aktif — tetap perlu tinjauan Research Admin."
+        "🔒 Pemeriksaan <b>statis</b> — berkas dibaca, <b>tidak dijalankan</b>. "
+        "Lolos <b>bukan</b> berarti aktif: menunggu tinjauan Research Admin."
     )
 
     st.caption("Bentuk yang diharapkan")
@@ -228,18 +227,20 @@ def render_pipeline_instructions() -> None:
 
     with st.expander("Persyaratan lengkap — modul & pemanggilan", expanded=False):
         st.markdown("**Modul yang wajar dipakai**")
-        st.caption(", ".join(f"`{m}`" for m in sorted(ALLOWED_MODULES)))
-        st.caption("Modul lain di luar daftar ini tidak menggagalkan validasi, "
-                   "hanya ditandai untuk diperiksa manual.")
+        st.markdown(", ".join(f"`{m}`" for m in sorted(ALLOWED_MODULES)))
         st.markdown("**Modul yang dilarang**")
-        st.caption(", ".join(f"`{m}`" for m in sorted(FORBIDDEN_MODULES)))
+        st.markdown(", ".join(f"`{m}`" for m in sorted(FORBIDDEN_MODULES)))
         st.markdown("**Pemanggilan yang dilarang**")
-        st.caption(", ".join(f"`{c}()`" for c in sorted(FORBIDDEN_CALLS)))
-        st.caption("Termasuk pemanggilan pada modul terlarang (`os.system()`), "
-                   "`open()` mode tulis, dan atribut sandbox-escape "
-                   "(`__subclasses__`, `__globals__`, `__builtins__`).")
-        st.caption("Daftar ini dibaca dari konstanta validator, jadi selalu "
-                   "sama dengan aturan yang dijalankan.")
+        st.markdown(", ".join(f"`{c}()`" for c in sorted(FORBIDDEN_CALLS)))
+        # SATU baris penutup menggantikan tiga keterangan kecil yang sebelumnya
+        # tersebar di antara ketiga daftar di atas.
+        st.caption(
+            "Di luar daftar → ditandai, tidak menggagalkan. Sumber: konstanta "
+            "validator.",
+            help="Pemanggilan terlarang mencakup `os.system()`, `open()` mode "
+                 "tulis, dan atribut sandbox-escape (`__subclasses__`, "
+                 "`__globals__`, `__builtins__`).",
+        )
 
 
 # ── Contoh kerangka pipeline (dari konstanta kontrak) ─────────────────────
@@ -458,9 +459,8 @@ def render_dataset_instructions() -> None:
                                   for item in dataset_checklist(dtype)))
 
     render_note(
-        "🔍 Pemeriksaan membaca <b>cuplikan</b> berkas (bukan seluruh isinya), "
-        "jadi angka profil & distribusi kelas adalah angka cuplikan. Berkas "
-        "tidak langsung tersedia — menunggu tinjauan Research Admin."
+        "🔍 Angka berasal dari <b>cuplikan</b> berkas, bukan seluruh isinya. "
+        "Berkas menunggu tinjauan Research Admin."
     )
 
     render_mistakes(common_dataset_mistakes(),

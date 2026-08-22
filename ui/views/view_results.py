@@ -1,7 +1,7 @@
 """Progress & Status page (main dashboard) — live progress of all in-flight
 experiments on top, then the history table (AgGrid) below with a pop-up (dialog)
 detail view built from the shared result components."""
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import time
 
 import streamlit as st
@@ -22,6 +22,8 @@ from ui.components.result_views import normalize_result_payload, render_results
 from ui.components.dashboard import (
     select_running, progress_view, elapsed_seconds, format_elapsed,
 )
+from ui.components import experiment_table as et
+from ui.components import dialogs as dlg
 
 
 # ─── Time helpers ──────────────────────────────────────────────────────────
@@ -143,59 +145,48 @@ def _dataset_basename(path) -> str:
     return parts[-1] or "-"
 
 
-def _build_grid_df(experiments: list[dict]) -> pd.DataFrame:
-    rows = []
-    for e in experiments:
-        finished = e.get("status") == "FINISHED"
-        roc = _roc_auc(e["id"], e.get("completed_at")) if finished else None
-        rows.append({
-            "ID": e["id"][:8],
-            "_full_id": e["id"],
-            "Start Time": _relative_time(e.get("created_at")),
-            "_created_epoch": _epoch(e.get("created_at")),
-            "_created_abs": (e.get("created_at") or "-")[:19],
-            "Duration": _duration(e.get("started_at"), e.get("completed_at")),
-            "Pipeline": e.get("pipeline_id", "-"),
-            "Dataset": e.get("dataset_type", "-"),
-            "File": _dataset_basename(e.get("dataset_path")),
-            # Informasi saja — TIDAK dipakai untuk menyaring apa pun. Record
-            # tanpa pemilik (dijalankan tanpa login, termasuk seluruh record
-            # lama sebelum autentikasi ada) tampil sebagai "sistem".
-            "Pemilik": e.get("owner") or "sistem",
-            "Status": e.get("status", "-"),
-            "Accuracy": e.get("accuracy"),
-            "Precision": e.get("precision_score"),
-            "Recall": e.get("recall"),
-            "F1-score": e.get("f1_score"),
-            "ROC-AUC": roc,
-            "random_state": "42",
-            "test_split": "0.20",
-            "Hash": (e.get("dataset_hash") or "-")[:8],
-        })
-    df = pd.DataFrame(rows)
+@st.cache_data(show_spinner=False)
+def _pipeline_params() -> dict:
+    """{pipeline_id: {param: nilai}} dari get_info() setiap pipeline terdaftar.
 
-    # Per-column max flags for highlighting (ignores None/NaN robustly).
-    for col, flag in [
-        ("Accuracy", "_hi_accuracy"), ("Precision", "_hi_precision"),
-        ("Recall", "_hi_recall"), ("F1-score", "_hi_f1"), ("ROC-AUC", "_hi_roc"),
-    ]:
-        numeric = pd.to_numeric(df[col], errors="coerce")
-        col_max = numeric.max()
-        if pd.notna(col_max):
-            df[flag] = [bool(pd.notna(v) and v == col_max) for v in numeric]
-        else:
-            df[flag] = False
-    return df
+    Ini SATU-SATUNYA sumber parameter yang nyata: basis data dan artefak tidak
+    menyimpan hiperparameter per eksperimen (lihat et.PARAM_PROVENANCE).
+    Nilainya bersifat DEFINISI, karena itu asal-usulnya selalu dinyatakan di UI.
+    Di-cache karena membangun instance pipeline tidak gratis.
+    """
+    out: dict[str, dict] = {}
+    try:
+        from config.pipeline_registry import PIPELINE_REGISTRY
+    except Exception:                       # pragma: no cover - defensif
+        return out
+    for pid, meta in PIPELINE_REGISTRY.items():
+        try:
+            info = meta["class"]().get_info() or {}
+        except Exception:                   # pipeline rusak != tabel rusak
+            continue
+        params = info.get("fixed_params")
+        out[pid] = dict(params) if isinstance(params, dict) else {}
+    return out
+
+
+def _build_rows(experiments: list[dict]) -> list[dict]:
+    """Baris tabel — memakai penyusun MURNI, pembaca artefak disuntikkan."""
+    finished = {e.get("id"): e.get("completed_at") for e in experiments
+                if e.get("status") == "FINISHED"}
+
+    def _roc(eid):
+        if eid not in finished:
+            return None
+        return _roc_auc(eid, finished[eid])
+
+    rows = et.build_rows(experiments, roc_reader=_roc,
+                         params_reader=_pipeline_params)
+    return et.mark_best_within_family(rows)
 
 
 _METRIC_FORMATTER = JsCode(
     "function(p){ if(p.value===null||p.value===undefined||isNaN(p.value)){return '-';} "
     "return Number(p.value).toFixed(4); }"
-)
-
-_START_COMPARATOR = JsCode(
-    "function(a,b,nodeA,nodeB){ const x=(nodeA.data&&nodeA.data._created_epoch)||0; "
-    "const y=(nodeB.data&&nodeB.data._created_epoch)||0; return x-y; }"
 )
 
 _STATUS_STYLE = JsCode("""
@@ -212,70 +203,230 @@ function(params){
 
 
 def _hi_style(flag_field: str) -> JsCode:
+    """Sorot nilai terbaik. Flagnya dihitung PER KELUARGA pipeline di
+    ``et.mark_best_within_family`` — bukan juara lintas keluarga."""
     return JsCode(
         f"function(params){{ if(params.data && params.data.{flag_field}){{ "
         f"return {{'backgroundColor':'#cce5ff','fontWeight':'600'}}; }} return null; }}"
     )
 
 
-def _metric_col(header, field, hi_flag, group_open):
-    col = {
-        "headerName": header, "field": field, "width": 110,
-        "type": "numericColumn",
-        "valueFormatter": _METRIC_FORMATTER,
-        "cellStyle": _hi_style(hi_flag),
-    }
-    if group_open:
-        col["columnGroupShow"] = "open"
-    return col
+def _grid_dataframe(rows: list[dict], columns: list[dict]) -> pd.DataFrame:
+    """DataFrame untuk AgGrid: metrik tetap numerik (agar pengurutan & format
+    benar), sisanya teks siap-tampil."""
+    data = []
+    for row in rows:
+        rec = {"_full_id": row["_id"]}
+        for col in columns:
+            if col["kind"] == et.KIND_METRIC:
+                flag = et.best_flag_key(col["key"])
+                rec[col["label"]] = row.get(col["key"])
+                rec[flag] = bool(row.get(flag))
+            else:
+                rec[col["label"]] = et.cell_text(row, col)
+        data.append(rec)
+    return pd.DataFrame(data)
 
 
-def _build_grid_options(df: pd.DataFrame) -> dict:
+_COLUMN_WIDTHS = {"Pipeline": 210, "Berkas": 200, "Waktu": 150,
+                  "Hash dataset": 130, "Dataset": 130, "Pemilik": 120}
+
+
+def _build_grid_options(df: pd.DataFrame, columns: list[dict]) -> dict:
+    """Header BERGRUP Identitas | Parameter | Metrik + centang multi-pilih."""
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(sortable=True, resizable=True, filterable=False)
-    gb.configure_selection(selection_mode="single", use_checkbox=False)
+    gb.configure_selection(selection_mode="multiple", use_checkbox=True)
     options = gb.build()
 
-    options["columnDefs"] = [
-        {"headerName": "Info", "children": [
-            {"headerName": "ID", "field": "ID", "width": 110, "pinned": "left"},
-            {"headerName": "Start Time", "field": "Start Time", "width": 120,
-             "tooltipField": "_created_abs", "comparator": _START_COMPARATOR,
-             "sort": "desc"},
-            {"headerName": "Duration", "field": "Duration", "width": 100},
-            {"headerName": "Pipeline", "field": "Pipeline", "width": 210},
-            {"headerName": "Dataset", "field": "Dataset", "width": 130},
-            {"headerName": "File", "field": "File", "width": 200,
-             "tooltipField": "File"},
-            {"headerName": "Pemilik", "field": "Pemilik", "width": 120},
-            {"headerName": "Status", "field": "Status", "width": 120,
-             "cellStyle": _STATUS_STYLE},
-        ]},
-        {"headerName": "Metrics", "children": [
-            # F1-score has no columnGroupShow → always visible (the column that
-            # survives when the Metrics group is collapsed). The rest are "open".
-            _metric_col("F1-score", "F1-score", "_hi_f1", group_open=False),
-            _metric_col("Accuracy", "Accuracy", "_hi_accuracy", group_open=True),
-            _metric_col("Precision", "Precision", "_hi_precision", group_open=True),
-            _metric_col("Recall", "Recall", "_hi_recall", group_open=True),
-            _metric_col("ROC-AUC", "ROC-AUC", "_hi_roc", group_open=True),
-        ]},
-        {"headerName": "Config", "children": [
-            # Hash stays visible when Config collapses; the rest are "open".
-            {"headerName": "Hash", "field": "Hash", "width": 110},
-            {"headerName": "random_state", "field": "random_state", "width": 120,
-             "columnGroupShow": "open"},
-            {"headerName": "test_split", "field": "test_split", "width": 110,
-             "columnGroupShow": "open"},
-        ]},
-    ]
+    grouped = et.columns_by_group(columns)
+    col_defs, first_column = [], True
+    for group in et.GROUP_ORDER:
+        cols = grouped.get(group) or []
+        if not cols:
+            continue
+        children = []
+        for col in cols:
+            spec = {"headerName": col["label"], "field": col["label"],
+                    "width": _COLUMN_WIDTHS.get(col["label"], 120)}
+            if col["kind"] == et.KIND_METRIC:
+                spec.update({"type": "numericColumn",
+                             "valueFormatter": _METRIC_FORMATTER,
+                             "cellStyle": _hi_style(et.best_flag_key(col["key"]))})
+            elif col["label"] == "Status":
+                spec["cellStyle"] = _STATUS_STYLE
+            if first_column:
+                # Centang menempel pada kolom pertama yang tampil dan dipin ke
+                # kiri agar tetap terlihat saat tabel digeser mendatar.
+                spec.update({"checkboxSelection": True, "pinned": "left"})
+                first_column = False
+            children.append(spec)
+        col_defs.append({"headerName": group, "children": children})
 
+    options["columnDefs"] = col_defs
     options["suppressHorizontalScroll"] = False
     options["enableBrowserTooltips"] = True
     if len(df) > 20:
         options["pagination"] = True
         options["paginationPageSize"] = 20
     return options
+
+
+# --- Kontrol riwayat: filter, pemilih kolom, ekspor ------------------------
+
+_FILTER_KEY = "_hist_filters"
+_COLUMNS_KEY = "_hist_columns"
+_COMPARE_KEY = dlg.COMPARE_KEY
+
+
+def _selected_columns(all_columns: list[dict]) -> list[str]:
+    """Pilihan kolom pengguna, bertahan lewat session_state."""
+    valid = {c["key"] for c in all_columns}
+    chosen = st.session_state.get(_COLUMNS_KEY)
+    if not isinstance(chosen, list):
+        chosen = list(et.DEFAULT_COLUMNS)
+    chosen = [k for k in chosen if k in valid]
+    return chosen or [k for k in et.DEFAULT_COLUMNS if k in valid]
+
+
+def _render_column_picker(all_columns: list[dict]) -> list[str]:
+    """Pemilih kolom per grup. Pilihan disimpan sehingga tidak kembali ke
+    default setiap kali pengguna berinteraksi dengan halaman."""
+    current = _selected_columns(all_columns)
+    grouped = et.columns_by_group(all_columns)
+
+    with st.popover("Kolom", use_container_width=False):
+        st.caption("Pilih kolom yang ditampilkan.")
+        picked: list[str] = []
+        for group in et.GROUP_ORDER:
+            cols = grouped.get(group) or []
+            if not cols:
+                continue
+            labels = {c["label"]: c["key"] for c in cols}
+            default = [c["label"] for c in cols if c["key"] in current]
+            chosen = st.multiselect(group, list(labels), default=default,
+                                    key=f"_hist_cols_{group}")
+            picked += [labels[label] for label in chosen]
+        st.caption(et.PARAM_PROVENANCE)
+        if st.button("Kembalikan ke set inti", key="_hist_cols_reset"):
+            for group in et.GROUP_ORDER:
+                st.session_state.pop(f"_hist_cols_{group}", None)
+            st.session_state[_COLUMNS_KEY] = list(et.DEFAULT_COLUMNS)
+            st.rerun()
+
+    if picked:
+        st.session_state[_COLUMNS_KEY] = picked
+    return picked or current
+
+
+def _render_filters(rows: list[dict]) -> dict:
+    """Filter pipeline/dataset/status/rentang waktu. Menyaring data yang SUDAH
+    dibaca — tidak ada kueri ulang ke basis data."""
+    options = et.filter_options(rows)
+    saved = st.session_state.get(_FILTER_KEY) or {}
+
+    with st.popover("Filter", use_container_width=False):
+        pipelines = st.multiselect("Pipeline", options["pipelines"],
+                                   default=saved.get("pipelines") or [],
+                                   key="_hist_f_pipeline")
+        datasets = st.multiselect("Dataset", options["datasets"],
+                                  default=saved.get("datasets") or [],
+                                  key="_hist_f_dataset")
+        statuses = st.multiselect("Status", options["statuses"],
+                                  default=saved.get("statuses") or [],
+                                  key="_hist_f_status")
+        cols = st.columns(2)
+        start = cols[0].date_input("Dari tanggal", value=saved.get("start"),
+                                   key="_hist_f_start", format="YYYY-MM-DD")
+        end = cols[1].date_input("Sampai tanggal", value=saved.get("end"),
+                                 key="_hist_f_end", format="YYYY-MM-DD")
+        if st.button("Bersihkan filter", key="_hist_f_clear"):
+            for key in ("_hist_f_pipeline", "_hist_f_dataset", "_hist_f_status",
+                        "_hist_f_start", "_hist_f_end"):
+                st.session_state.pop(key, None)
+            st.session_state.pop(_FILTER_KEY, None)
+            st.rerun()
+
+    filters = {"pipelines": pipelines, "datasets": datasets,
+               "statuses": statuses,
+               "start": start if isinstance(start, date) else None,
+               "end": end if isinstance(end, date) else None}
+    st.session_state[_FILTER_KEY] = filters
+    return filters
+
+
+def _render_expression_search(rows: list[dict]) -> list[dict]:
+    """Pencarian ekspresi sederhana pada metrik. Parser TERBATAS — tanpa
+    eval/exec; ekspresi tak dikenal memberi pesan, bukan crash."""
+    text = st.text_input("Cari metrik", value="", key="_hist_expr",
+                         placeholder="mis. f1 > 0.8 and accuracy >= 0.9",
+                         help=et.EXPR_HELP, label_visibility="collapsed")
+    if not (text or "").strip():
+        return rows
+    try:
+        terms = et.parse_expression(text)
+    except et.ExpressionError as e:
+        st.warning(str(e))
+        return rows
+    return et.apply_expression(rows, terms)
+
+
+# --- Perbandingan berdampingan --------------------------------------------
+
+def _comparison_body(rows: list[dict], param_keys: list[str]) -> None:
+    data = et.build_comparison(rows, param_keys)
+
+    # Peringatan WAJIB lebih dulu — sebelum satu angka pun terbaca.
+    for warning in data["warnings"]:
+        st.warning(warning)
+    if data["note"]:
+        st.caption(data["note"])
+
+    header = "| Field | " + " | ".join(f"`{h}`" for h in data["headers"]) + " |"
+    divider = "| --- " * (len(data["headers"]) + 1) + "|"
+    for section in data["sections"]:
+        st.markdown(f"**{section['group']}**")
+        lines = [header, divider]
+        for field in section["fields"]:
+            # Baris yang BERBEDA ditebalkan + ditandai agar langsung terlihat.
+            mark = "**" if field["differs"] else ""
+            cells = " | ".join(f"{mark}{v}{mark}" for v in field["values"])
+            label = ("Δ " if field["differs"] else "") + field["label"]
+            lines.append(f"| {label} | {cells} |")
+        st.markdown(chr(10).join(lines))
+    # SATU baris penutup untuk seluruh tabel perbandingan: asal parameter +
+    # arti penanda Δ. Sebelumnya asal parameter diulang di tiap bagian.
+    st.caption(
+        "Baris bertanda Δ berbeda antar eksperimen; tidak ada peringkat "
+        "otomatis — penilaian mana yang lebih baik tetap milik pembaca. "
+        + et.PARAM_PROVENANCE
+    )
+
+    if st.button("Tutup", key="_hist_cmp_close"):
+        dlg.close_dialog(_COMPARE_KEY)
+        st.rerun()
+
+
+if hasattr(st, "dialog"):
+    _comparison_dialog = dlg.dialog_decorator(
+        "Bandingkan Eksperimen", _COMPARE_KEY, width="large")(_comparison_body)
+else:                                       # pragma: no cover - Streamlit lama
+    def _comparison_dialog(rows, param_keys):
+        with st.expander("Bandingkan Eksperimen", expanded=True):
+            _comparison_body(rows, param_keys)
+
+
+def _maybe_render_comparison(rows: list[dict], param_keys: list[str]) -> None:
+    """Dipanggil dari ALUR UTAMA render() — pola flag yang sama dengan dialog
+    detail, sehingga kontrol di dalamnya bekerja."""
+    ids = dlg.dialog_state(_COMPARE_KEY)
+    if not ids:
+        return
+    chosen = [r for r in rows if r["_id"] in set(ids)]
+    if len(chosen) < 2:                     # data berubah sejak tombol ditekan
+        dlg.close_dialog(_COMPARE_KEY)
+        return
+    _comparison_dialog(chosen, param_keys)
 
 
 # ─── Page ──────────────────────────────────────────────────────────────────
@@ -362,12 +513,25 @@ def _render_running_section(experiments) -> tuple:
     return running, bool(auto), 6
 
 
+@st.cache_data(show_spinner=False)
+def _cached_pdf(experiment_id: str, completed_at, _payload: dict) -> bytes:
+    """Bangun PDF SEKALI per eksperimen selesai.
+
+    Sebelumnya laporan dibuat ulang pada setiap rerun modal, jadi menekan apa
+    pun di dalamnya (tab, expander, tombol) menunggu satu render PDF penuh —
+    itulah rasa tersendatnya. Eksperimen yang sudah FINISHED bersifat tetap,
+    sehingga hasilnya aman di-cache; kuncinya menyertakan completed_at supaya
+    re-run menghasilkan berkas baru. Jalur generatornya sendiri tidak diubah.
+    """
+    from utils.report_generator import generate_report
+    return generate_report(**_payload)
+
+
 def _pdf_download_button(exp: dict, metrics: dict, metadata: dict, key: str) -> None:
     """PDF download for a FINISHED experiment (unchanged generator path)."""
     try:
-        from utils.report_generator import generate_report
         from orchestrator.execution_service import get_pipeline_info
-        pdf_bytes = generate_report(
+        pdf_bytes = _cached_pdf(exp["id"], exp.get("completed_at"), dict(
             experiment_id=exp["id"],
             dataset_type=exp["dataset_type"],
             dataset_path=exp["dataset_path"],
@@ -378,7 +542,7 @@ def _pdf_download_button(exp: dict, metrics: dict, metadata: dict, key: str) -> 
             metadata=metadata,
             label_mapping=(metadata or {}).get("label_mapping"),
             feature_names=(metadata or {}).get("feature_names"),
-        )
+        ))
         st.download_button(
             "Download PDF Report", data=pdf_bytes,
             file_name=f"experiment_report_{exp['id'][:8]}.pdf",
@@ -388,17 +552,32 @@ def _pdf_download_button(exp: dict, metrics: dict, metadata: dict, key: str) -> 
         st.caption(f"PDF tidak dapat dibuat: {type(e).__name__}")
 
 
-@st.dialog("Detail Eksperimen", width="large")
-def _detail_dialog(experiment_id: str) -> None:
+def _detail_payload(experiment_id: str) -> dict | None:
+    """Baca eksperimen SEKALI lalu simpan untuk selama modal terbuka.
+
+    Tanpa ini, `get_full_experiment` (DB + artefak) dibaca ulang pada setiap
+    interaksi di dalam modal. Payload dibuang saat modal ditutup, jadi membuka
+    eksperimen lain selalu membaca yang baru.
+    """
+    cached = dlg.payload(dlg.DETAIL_KEY)
+    if isinstance(cached, dict) and cached.get("_id") == experiment_id:
+        return cached.get("full")
+    full = get_full_experiment(experiment_id)
+    dlg.store_payload(dlg.DETAIL_KEY, {"_id": experiment_id, "full": full})
+    return full
+
+
+def _detail_dialog_body(experiment_id: str) -> None:
     """Pop-up detail view. Renders the SHARED interactive result component
     (zero duplication): confusion matrix, feature importance, ROC, learning
     curve / dual-holdout, static-figures expander — all defensive cases
     preserved for HIKARI and EVE-cbr."""
-    full = get_full_experiment(experiment_id)
+    full = _detail_payload(experiment_id)
     if not full:
         st.error("Eksperimen tidak ditemukan.")
         if st.button("Tutup", key=f"dlg_close_missing_{experiment_id}"):
-            st.session_state.pop("_detail_id", None)
+            dlg.close_dialog(dlg.DETAIL_KEY)
+            dlg.clear_payload(dlg.DETAIL_KEY)
             st.rerun()
         return
 
@@ -445,7 +624,8 @@ def _detail_dialog(experiment_id: str) -> None:
     if exp["status"] in ("QUEUED", "RUNNING"):
         if act[0].button("Batalkan", key=f"dlg_cancel_{exp['id']}"):
             cancel_experiment(exp["id"])
-            st.session_state.pop("_detail_id", None)
+            dlg.close_dialog(dlg.DETAIL_KEY)
+            dlg.clear_payload(dlg.DETAIL_KEY)
             st.rerun()
     if act[1].button("Re-run", key=f"dlg_rerun_{exp['id']}"):
         r = rerun_experiment(exp["id"])
@@ -454,8 +634,15 @@ def _detail_dialog(experiment_id: str) -> None:
         else:
             st.error(r.get("error", "Gagal."))
     if act[2].button("Tutup", key=f"dlg_close_{exp['id']}"):
-        st.session_state.pop("_detail_id", None)
+        dlg.close_dialog(dlg.DETAIL_KEY)
+        dlg.clear_payload(dlg.DETAIL_KEY)
         st.rerun()
+
+
+# Didekorasi lewat util supaya on_dismiss (tombol X / Esc / klik di luar) selalu
+# terpasang — tanpa itu flagnya tetap hidup dan modal terbuka lagi tiap rerun.
+_detail_dialog = dlg.dialog_decorator(
+    "Detail Eksperimen", dlg.DETAIL_KEY, width="large")(_detail_dialog_body)
 
 
 def _render_selected_actions(selected_id: str) -> None:
@@ -469,7 +656,7 @@ def _render_selected_actions(selected_id: str) -> None:
     cols = st.columns(3)
     if cols[0].button("Lihat detail", key=f"open_{selected_id}", type="primary",
                       use_container_width=True):
-        st.session_state["_detail_id"] = selected_id
+        dlg.open_dialog(dlg.DETAIL_KEY, selected_id)
         st.rerun()
     if cols[1].button("Re-run", key=f"rerun_{selected_id}", use_container_width=True):
         r = rerun_experiment(selected_id)
@@ -483,12 +670,110 @@ def _render_selected_actions(selected_id: str) -> None:
             st.rerun()
 
 
+def _render_history(experiments: list[dict]) -> None:
+    """Riwayat eksperimen: filter -> kolom bergrup -> bandingkan -> ekspor.
+
+    Seluruh penyaringan berjalan pada data yang SUDAH dibaca sekali di
+    ``render()``; tidak ada kueri tambahan ke basis data per interaksi.
+    """
+    all_rows = _build_rows(experiments)
+    params_map = _pipeline_params()
+    param_keys = et.parameter_keys(lambda: params_map)
+    all_columns = et.build_columns(param_keys)
+
+    bar = st.columns([1, 1, 3, 2])
+    with bar[0]:
+        filters = _render_filters(all_rows)
+    with bar[1]:
+        selected_keys = _render_column_picker(all_columns)
+    with bar[2]:
+        rows = _render_expression_search(all_rows)
+
+    rows = et.apply_filters(rows, **filters)
+    columns = et.visible_columns(all_columns, selected_keys)
+
+    with bar[3]:
+        st.download_button(
+            "Unduh CSV", data=et.to_csv(rows, columns).encode("utf-8"),
+            file_name=et.csv_filename(), mime="text/csv",
+            use_container_width=True, key="_hist_csv",
+            help="Mengikuti kolom & filter yang sedang aktif, lengkap dengan "
+                 "keterangan semantik metrik per baris.",
+        )
+
+    st.caption(et.result_summary(len(rows), len(all_rows)))
+    note = et.semantics_note(rows)
+    if note:
+        st.caption(note)
+
+    if not rows:
+        st.info("Tidak ada eksperimen yang cocok dengan filter. Bersihkan "
+                "filter lewat tombol **Filter**.")
+        st.session_state.pop("selected_experiment_id", None)
+        return
+    if not columns:
+        st.warning("Tidak ada kolom yang dipilih. Pilih kolom lewat tombol "
+                   "**Kolom**.")
+        return
+
+    df = _grid_dataframe(rows, columns)
+    grid_response = AgGrid(
+        df,
+        gridOptions=_build_grid_options(df, columns),
+        allow_unsafe_jscode=True,
+        theme="streamlit",
+        update_mode=GridUpdateMode.SELECTION_CHANGED,
+        fit_columns_on_grid_load=False,
+        height=440,
+        key="experiment_history_grid",
+    )
+    st.caption(et.BEST_MARK_NOTE)
+
+    selected_ids = _selected_ids(grid_response)
+
+    # Satu baris terpilih -> panel aksi lama (detail / re-run / batalkan).
+    # Dua sampai lima -> perbandingan berdampingan.
+    if len(selected_ids) == 1:
+        st.session_state["selected_experiment_id"] = selected_ids[0]
+    remembered = st.session_state.get("selected_experiment_id")
+
+    cmp_cols = st.columns([2, 5])
+    problem = et.compare_selection_error(selected_ids)
+    if cmp_cols[0].button(f"Bandingkan terpilih ({len(selected_ids)})",
+                          key="_hist_compare", use_container_width=True,
+                          disabled=bool(problem)):
+        dlg.open_dialog(_COMPARE_KEY, selected_ids)
+        st.rerun()
+    if problem and selected_ids:
+        cmp_cols[1].caption(problem)
+    elif not selected_ids:
+        cmp_cols[1].caption(
+            f"Centang 2-{et.MAX_COMPARE} eksperimen untuk membandingkannya, "
+            f"atau satu baris untuk membuka detail & aksinya.")
+
+    if len(selected_ids) <= 1 and remembered:
+        _render_selected_actions(remembered)
+
+
+def _selected_ids(grid_response) -> list[str]:
+    """ID eksperimen yang dicentang. Bentuk kembalian AgGrid berbeda antar
+    versi (DataFrame atau list), jadi keduanya ditangani."""
+    sel = grid_response.get("selected_rows")
+    if isinstance(sel, pd.DataFrame):
+        if sel.empty or "_full_id" not in sel.columns:
+            return []
+        return [str(v) for v in sel["_full_id"].tolist()]
+    if isinstance(sel, list):
+        return [r.get("_full_id") for r in sel if r.get("_full_id")]
+    return []
+
+
 def render():
     st.title("Progress & Status")
 
     experiments = list_all_experiments()
 
-    # ── Sedang Berjalan (live dashboard of ALL in-flight experiments) ──
+    # -- Sedang Berjalan (live dashboard of ALL in-flight experiments) --
     running, auto, interval = _render_running_section(experiments)
 
     st.markdown("---")
@@ -498,48 +783,19 @@ def render():
         st.info("Belum ada eksperimen. Buka halaman 'Run Experiment' untuk membuat satu.")
         st.session_state.pop("selected_experiment_id", None)
     else:
-        st.caption(
-            f"{len(experiments)} eksperimen. Pilih satu baris lalu klik "
-            "**Lihat detail** untuk membuka hasil sebagai pop-up. Grup Metrics/Config "
-            "dapat di-collapse lewat ikon header grup."
-        )
-        df = _build_grid_df(experiments)
-        grid_options = _build_grid_options(df)
-        grid_response = AgGrid(
-            df,
-            gridOptions=grid_options,
-            allow_unsafe_jscode=True,
-            theme="streamlit",
-            update_mode=GridUpdateMode.SELECTION_CHANGED,
-            fit_columns_on_grid_load=False,
-            height=440,
-            key="experiment_history_grid",
-        )
+        _render_history(experiments)
 
-        selected_id = None
-        sel = grid_response.get("selected_rows")
-        if isinstance(sel, pd.DataFrame):
-            if not sel.empty and "_full_id" in sel.columns:
-                selected_id = sel.iloc[0]["_full_id"]
-        elif isinstance(sel, list) and sel:
-            selected_id = sel[0].get("_full_id")
+    # -- Pop-up detail & perbandingan (pola flag, dipanggil dari alur utama
+    #    supaya kontrol interaktif di dalamnya bekerja) --
+    if dlg.is_open(dlg.DETAIL_KEY):
+        _detail_dialog(dlg.dialog_state(dlg.DETAIL_KEY))
+    if experiments and dlg.is_open(_COMPARE_KEY):
+        _maybe_render_comparison(_build_rows(experiments),
+                                 et.parameter_keys(_pipeline_params))
 
-        if selected_id:
-            st.session_state["selected_experiment_id"] = selected_id
-        selected_id = st.session_state.get("selected_experiment_id")
-
-        if selected_id:
-            _render_selected_actions(selected_id)
-        else:
-            st.info("Pilih satu eksperimen pada tabel untuk aksi & detail.")
-
-    # ── Detail pop-up (flag pattern so interactive controls inside work) ──
-    if st.session_state.get("_detail_id"):
-        _detail_dialog(st.session_state["_detail_id"])
-
-    # ── Auto-refresh the running dashboard (adaptive; paused while a detail
-    #    dialog is open so the pop-up is not disrupted). Broker is not probed
-    #    on every rerun — health is cached. No forced parallel execution. ──
-    if running and auto and not st.session_state.get("_detail_id"):
+    # -- Auto-refresh the running dashboard (adaptive; paused while a pop-up is
+    #    open so it is not disrupted). Broker is not probed on every rerun --
+    if (running and auto and not dlg.is_open(dlg.DETAIL_KEY)
+            and not dlg.is_open(_COMPARE_KEY)):
         time.sleep(interval)
         st.rerun()

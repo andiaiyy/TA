@@ -309,20 +309,30 @@ def test_the_flag_is_only_ever_set_inside_a_button_block():
                     writers.add(fn.name)
     assert writers == {"request_auth_dialog"}, writers
 
-    # 2. Setiap pemanggilan request_auth_dialog berada di dalam sebuah `if`
-    #    (blok `if st.button(...)`), bukan di aliran render biasa.
-    guarded, total = 0, 0
-    for fn in ast.walk(tree):
-        if not isinstance(fn, ast.FunctionDef):
-            continue
-        for node in ast.walk(fn):
-            calls = [c for c in ast.walk(node) if isinstance(c, ast.Call)
-                     and getattr(c.func, "id", None) == "request_auth_dialog"]
-            if isinstance(node, ast.If) and calls:
-                guarded += len(calls)
-            if node is fn:
-                total += len(calls)
-    assert total > 0 and guarded == total, (guarded, total)
+    # 2. SETIAP pemanggilan request_auth_dialog berada di dalam blok
+    #    `if st.button(...)`, bukan di aliran render biasa. Diperiksa lewat
+    #    rantai induk tiap pemanggilan (bukan dengan menghitung node `If`,
+    #    yang akan menghitung ganda saat `if` bersarang).
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+
+    def _guarded_by_button(call: ast.Call) -> bool:
+        node = call
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, ast.If):
+                test_src = ast.dump(node.test)
+                if "'button'" in test_src or '"button"' in test_src:
+                    return True
+        return False
+
+    calls = [c for c in ast.walk(tree) if isinstance(c, ast.Call)
+             and getattr(c.func, "id", None) == "request_auth_dialog"]
+    assert calls, "tidak ada pemanggilan request_auth_dialog sama sekali"
+    for call in calls:
+        assert _guarded_by_button(call), ast.dump(call)
 
 
 def test_the_dialog_gate_has_no_truthy_default():
@@ -373,8 +383,11 @@ def test_login_prompts_elsewhere_open_the_same_modal():
     """Ajakan masuk di halaman lain memakai flag yang sama, bukan form sendiri."""
     src = Path(login.__file__).read_text(encoding="utf-8")
     prompt = src.split("def render_login_prompt(")[1].split("\ndef ")[0]
-    assert "request_auth_dialog(" in prompt
+    # Tidak ada lagi tombol "Masuk" di badan halaman: jalur masuk satu-satunya
+    # adalah pemilih mode di sidebar, dan keterangannya menunjuk ke sana.
+    assert "st.button" not in prompt
     assert "st.text_input" not in prompt
+    assert "SIGN_IN_HINT" in prompt
 
     contrib_src = (REPO_ROOT / "ui" / "views" / "contribute.py").read_text(encoding="utf-8")
     assert "render_login_prompt(" in contrib_src
@@ -404,14 +417,35 @@ def test_experiment_reads_are_never_filtered_by_owner():
     assert "WHERE owner" not in db_src
     assert "owner = ?" not in db_src
 
-    results_src = (REPO_ROOT / "ui" / "views" / "view_results.py").read_text(encoding="utf-8")
-    # `owner` hanya boleh muncul sebagai kolom tampilan "Pemilik".
-    for line in results_src.splitlines():
-        if "owner" in line:
-            assert "Pemilik" in line or "#" in line, line
+    # `owner` hanya boleh muncul sebagai kolom TAMPILAN "Pemilik" — tidak pernah
+    # sebagai penyaring. Penyusun barisnya kini ada di ui/components/
+    # experiment_table.py, jadi keduanya ikut diperiksa.
+    for name in (REPO_ROOT / "ui" / "views" / "view_results.py",
+                 REPO_ROOT / "ui" / "components" / "experiment_table.py"):
+        for line in name.read_text(encoding="utf-8").splitlines():
+            if "owner" in line:
+                assert ("pemilik" in line.lower() or "#" in line), f"{name}: {line}"
 
 
 def test_history_table_shows_a_pemilik_column_defaulting_to_sistem():
-    results_src = (REPO_ROOT / "ui" / "views" / "view_results.py").read_text(encoding="utf-8")
-    assert '"Pemilik": e.get("owner") or "sistem"' in results_src
-    assert '"headerName": "Pemilik"' in results_src
+    """Diperiksa pada perilakunya, bukan pada teks sumbernya."""
+    from ui.components import experiment_table as et
+
+    rows = et.build_rows([
+        {"id": "a", "owner": None, "dataset_type": "HIKARI2021"},
+        {"id": "b", "owner": "rina", "dataset_type": "HIKARI2021"},
+    ])
+    assert [r["pemilik"] for r in rows] == ["sistem", "rina"]
+
+    labels = {c["label"] for c in et.build_columns()}
+    assert "Pemilik" in labels
+
+
+def test_the_owner_column_is_never_a_filter_dimension():
+    """Filter yang tersedia tidak memuat pemilik — riwayat tetap terbuka."""
+    from ui.components import experiment_table as et
+
+    rows = et.build_rows([{"id": "a", "owner": "rina",
+                           "dataset_type": "HIKARI2021"}])
+    assert set(et.filter_options(rows)) == {"pipelines", "datasets", "statuses"}
+    assert len(et.apply_filters(rows)) == 1

@@ -112,8 +112,7 @@ def _render_preview(spec: dict, name: str, state_key: str) -> None:
 
     if spec.get("binary"):
         size = int(spec.get("size", 0))
-        st.caption(f"**Full Path:** `{full_path}`")
-        st.caption(f"**Size:** {format_size(size)} · binary artifact (joblib)")
+        st.caption(f"`{full_path}` · {format_size(size)} · artefak biner (joblib)")
         st.info("Berkas biner tidak dapat di-preview. Gunakan tombol unduh di bawah.")
         _download_binary(spec, name, state_key)
         return
@@ -130,8 +129,7 @@ def _render_preview(spec: dict, name: str, state_key: str) -> None:
     lines = content.splitlines()
     n_lines = len(lines)
     size_bytes = len(content.encode("utf-8", errors="replace"))
-    st.caption(f"**Full Path:** `{full_path}`")
-    st.caption(f"**Size:** {format_size(size_bytes)} · {n_lines} lines")
+    st.caption(f"`{full_path}` · {format_size(size_bytes)} · {n_lines} baris")
     if spec.get("note"):
         st.caption(spec["note"])
 

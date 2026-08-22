@@ -1,7 +1,7 @@
 """
 Halaman "Add Pipeline & Dataset".
 
-Dua jalur kontribusi, dipilih lewat dua kotak di tampilan awal:
+Dua jalur kontribusi, dipilih lewat dua kartu di tampilan awal:
 
   • **Unggah Pipeline** — instruksi persyaratan → unggah beberapa berkas `.py`
     → penjelasan per berkas + metadata → validasi statis seluruh paket →
@@ -69,6 +69,7 @@ from ui.components.instructions import (
     render_dataset_instructions, render_pipeline_instructions,
 )
 from ui.components.contribute_context import render_page_context
+from ui.components.upload_cards import render_upload_cards
 from ui.views._artifact_browser import format_size
 from ui.views.login import current_user, render_login_prompt
 
@@ -100,7 +101,7 @@ _DS_DIAG_KEY = "_contrib_ds_diag"
 _STATUS_ICON = {"pass": "✔", "warn": "⚠", "fail": "✖"}
 
 
-# ── Tampilan awal: dua kotak ──────────────────────────────────────────────
+# ── Tampilan awal: dua kartu kontribusi ───────────────────────────────────
 
 def _render_choice_boxes() -> None:
     user = current_user()
@@ -111,57 +112,43 @@ def _render_choice_boxes() -> None:
     render_page_context(user)
     st.divider()
 
-    cols = st.columns(2)
-
-    box = cols[0].container(border=True)
-    box.subheader("Unggah Pipeline")
-    box.caption("Satu atau beberapa berkas `.py`.")
-    box.caption("Diperiksa statis: kontrak pipeline + aturan keamanan.")
-    box.caption("Aktivasi tetap manual oleh pengembang.")
-    if box.button("Mulai", key="contrib_go_pipeline",
-                  use_container_width=True, type="primary"):
-        st.session_state[_MODE_KEY] = "pipeline"
+    # Empat kartu seragam: dua jalur unggah + dua jalur pengelolaan. Ketiga
+    # bendera di sini HANYA menghidupkan/mematikan tombol — izin sebenarnya
+    # tetap ditegakkan `require_upload`/`require_approve`/`require_manage_users`
+    # di fungsi aksinya, jadi tombol yang hidup pun tidak melewati pemeriksaan.
+    mode = render_upload_cards(
+        may_upload=bool(can_upload(user)),
+        may_approve=bool(can_approve(user)),
+        may_manage_users=bool(can_manage_users(user)),
+        counts=_admin_queue_notes(user),
+    )
+    if mode:
+        st.session_state[_MODE_KEY] = mode
         st.rerun()
-
-    box = cols[1].container(border=True)
-    box.subheader("Unggah Dataset")
-    box.caption("Berkas `.csv` / `.ndjson` / `.jsonl`.")
-    box.caption("Disimpan ke `storage/datasets/` agar dapat dipakai eksperimen.")
-    box.caption("Langsung diperiksa kecocokannya per research pipeline.")
-    if box.button("Mulai", key="contrib_go_dataset",
-                  use_container_width=True, type="primary"):
-        st.session_state[_MODE_KEY] = "dataset"
-        st.rerun()
-
-    if can_approve(user):
-        st.divider()
-        admin_cols = st.columns(2)
-
-        box = admin_cols[0].container(border=True)
-        box.subheader("Peninjauan Pengajuan")
-        try:
-            n_pending = len(list_submissions(status=SUBMISSION_PENDING))
-        except Exception:                   # pragma: no cover - defensive
-            n_pending = 0
-        box.caption(f"{n_pending} pengajuan menunggu tinjauan.")
-        box.caption("Khusus Research Admin.")
-        if box.button("Buka", key="contrib_go_review", use_container_width=True):
-            st.session_state[_MODE_KEY] = "review"
-            st.rerun()
-
-        box = admin_cols[1].container(border=True)
-        box.subheader("Kelola Pengguna")
-        try:
-            n_waiting = len([u for u in list_users() if u["status"] == STATUS_PENDING])
-        except Exception:                   # pragma: no cover - defensive
-            n_waiting = 0
-        box.caption(f"{n_waiting} pendaftaran menunggu persetujuan.")
-        box.caption("Aktifkan akun, ubah peran, lihat daftar pengguna.")
-        if box.button("Buka", key="contrib_go_users", use_container_width=True):
-            st.session_state[_MODE_KEY] = "users"
-            st.rerun()
 
     _render_my_submissions()
+
+
+def _admin_queue_notes(user: dict | None) -> dict:
+    """Baris jumlah antrean pada kartu admin — hanya dibaca bila memang berhak.
+
+    Dipisah dari perenderan supaya kartu tetap bebas dari pembacaan basis data,
+    dan supaya pengguna tanpa hak tidak memicu kueri apa pun.
+    """
+    notes: dict[str, str] = {}
+    if can_approve(user):
+        try:
+            n = len(list_submissions(status=SUBMISSION_PENDING))
+            notes["review"] = f"{n} pengajuan menunggu tinjauan."
+        except Exception:                   # pragma: no cover - defensive
+            pass
+    if can_manage_users(user):
+        try:
+            n = len([u for u in list_users() if u["status"] == STATUS_PENDING])
+            notes["users"] = f"{n} pendaftaran menunggu persetujuan."
+        except Exception:                   # pragma: no cover - defensive
+            pass
+    return notes
 
 
 # ── Pengajuan: milik sendiri & peninjauan ─────────────────────────────────
@@ -189,12 +176,13 @@ def _render_my_submissions() -> None:
     st.divider()
     st.markdown("Pengajuan saya")
     for item in mine[:10]:
-        cols = st.columns([3, 2, 2, 3])
-        cols[0].caption(f"#{item['id']} · `{item['original_filename']}`")
-        cols[1].caption(item["kind"])
-        cols[2].caption(_STATUS_LABEL.get(item["status"], item["status"]))
+        # SATU baris per pengajuan. Sebelumnya empat caption kecil di empat
+        # kolom terpisah — terbaca sebagai serakan, bukan sebagai daftar.
         note = item.get("review_note")
-        cols[3].caption(f"Catatan: {note}" if note else (item["submitted_at"] or "")[:19])
+        tail = f"catatan: {note}" if note else (item["submitted_at"] or "")[:19]
+        st.markdown(
+            f"`#{item['id']}` **{item['original_filename']}** — {item['kind']} · "
+            f"{_STATUS_LABEL.get(item['status'], item['status'])} · {tail}")
 
 
 def _render_review_flow() -> None:
@@ -230,12 +218,12 @@ def _render_review_flow() -> None:
     if not history:
         st.caption("Belum ada pengajuan yang ditinjau.")
     for item in history[:15]:
-        cols = st.columns([3, 2, 2, 3])
-        cols[0].caption(f"#{item['id']} · `{item['original_filename']}`")
-        cols[1].caption(item["kind"])
-        cols[2].caption(_STATUS_LABEL.get(item["status"], item["status"]))
-        cols[3].caption(f"oleh {item.get('reviewed_by') or '-'}"
-                        + (f" · {item['review_note']}" if item.get("review_note") else ""))
+        # SATU baris per pengajuan yang sudah ditinjau (sebelumnya 4 caption).
+        note = f" · {item['review_note']}" if item.get("review_note") else ""
+        st.markdown(
+            f"`#{item['id']}` **{item['original_filename']}** — {item['kind']} · "
+            f"{_STATUS_LABEL.get(item['status'], item['status'])} · "
+            f"oleh {item.get('reviewed_by') or '-'}{note}")
 
 
 def _render_registered_pipelines(user: dict) -> None:
@@ -258,10 +246,12 @@ def _render_registered_pipelines(user: dict) -> None:
         with st.container(border=True):
             cols = st.columns([3, 2, 2, 2])
             cols[0].markdown(f"`{row['pipeline_id']}`")
-            cols[0].caption(f"kelas {row['entry_class']} · "
-                            f"SHA-256 `{row['file_hash'][:12]}…`")
-            cols[1].caption(get_research_short_label(row["dataset_type"]))
-            cols[2].caption("Aktif" if row["active"] else "Nonaktif")
+            # SATU keterangan, bukan tiga potongan di tiga kolom.
+            cols[0].caption(
+                f"kelas {row['entry_class']} · SHA-256 "
+                f"`{row['file_hash'][:12]}…` · "
+                f"{get_research_short_label(row['dataset_type'])} · "
+                f"{'Aktif' if row['active'] else 'Nonaktif'}")
             label = "Nonaktifkan" if row["active"] else "Aktifkan"
             if cols[3].button(label, key=f"reg_toggle_{row['pipeline_id']}",
                               use_container_width=True):
@@ -370,8 +360,10 @@ def _render_users_flow() -> None:
         with st.container(border=True):
             cols = st.columns([3, 3, 2, 2])
             cols[0].markdown(f"`{row['username']}`")
-            cols[0].caption(f"Didaftarkan {(row.get('requested_at') or '')[:19]}")
-            cols[1].caption(row.get("reason") or "Tanpa keterangan.")
+            # SATU keterangan: waktu daftar + keperluan.
+            cols[0].caption(
+                f"Didaftarkan {(row.get('requested_at') or '')[:19]} · "
+                f"{row.get('reason') or 'tanpa keterangan'}")
             if cols[2].button("Aktifkan", key=f"user_activate_{row['username']}",
                               type="primary", use_container_width=True):
                 try:
@@ -424,8 +416,8 @@ def _render_users_flow() -> None:
         with st.container(border=True):
             cols = st.columns([3, 2, 2, 2])
             cols[0].markdown(f"`{row['username']}`")
-            cols[0].caption(row["role_label"])
-            cols[1].caption(row["status_label"])
+            # SATU keterangan: peran + status akun (status WAJIB tetap tampil).
+            cols[0].caption(f"{row['role_label']} · {row['status_label']}")
             is_self = row["username"] == (user or {}).get("username")
             if is_self:
                 cols[2].caption("Akun Anda")
@@ -555,11 +547,7 @@ def _render_package_report(result: dict, form: dict) -> None:
 def _render_valid_followup(result: dict, form: dict) -> None:
     """Unduh + cuplikan registry terisi metadata + panduan aktivasi manual."""
     st.divider()
-    st.info(
-        "Paket valid, tetapi pipeline **belum aktif**. Aktivasi dilakukan "
-        "manual oleh pengembang lewat kode + git review — pipeline ini belum "
-        "muncul di daftar research pipeline dan belum dapat dijalankan."
-    )
+    st.info("Paket valid — pipeline **belum aktif**, menunggu aktivasi manual.")
 
     st.markdown("Unduh berkas tervalidasi")
     cols = st.columns(min(3, len(result["files"])) or 1)
@@ -976,9 +964,8 @@ def _render_dataset_upload_tab() -> None:
                  f"berkasnya — platform tidak menimpa dataset yang sudah ada.")
         return
     if not diag.get("compatible_types"):
-        st.warning("Dataset ini belum cocok dengan research pipeline mana pun. "
-                   "Berkas tetap boleh disimpan, tetapi belum dapat dijalankan "
-                   "sampai penyebab di atas diperbaiki.")
+        st.warning("Belum cocok dengan research pipeline mana pun — tetap "
+                   "boleh disimpan.")
     st.caption(f"Tujuan: `{target}`")
 
     user = current_user()
