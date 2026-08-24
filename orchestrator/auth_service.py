@@ -361,11 +361,16 @@ MAX_REASON_LENGTH = 300
 def register_account(username: str, password: str, confirm: str,
                      reason: str | None = None,
                      db_path: str | None = None) -> dict:
-    """Pendaftaran mandiri. SELALU menghasilkan akun `contributor` + `pending`.
+    """Pendaftaran mandiri. SELALU menghasilkan akun `contributor` yang AKTIF.
 
     Peran TIDAK PERNAH diambil dari masukan pengguna — mendaftar bukan jalan
-    memperoleh Research Admin. Akun hasil fungsi ini nol hak sampai Research
-    Admin mengaktifkannya.
+    memperoleh Research Admin; peran itu hanya diberikan Research Admin lewat
+    "Kelola Pengguna".
+
+    Akun langsung aktif karena hak seorang Kontributor memang terbatas:
+    mengunggah DATASET (data, langsung tersimpan) dan MENGAJUKAN pipeline —
+    pengajuan pipeline tetap melewati tinjauan Research Admin karena isinya
+    KODE yang akan dieksekusi.
 
     Raise AuthError dengan pesan spesifik untuk tiap kesalahan masukan;
     password mentah tidak pernah dicatat ke log.
@@ -391,10 +396,12 @@ def register_account(username: str, password: str, confirm: str,
     if get_user(username, db_path) is not None:
         raise AuthError(f"Username '{username}' sudah dipakai.")
 
+    # `requested_at` & `reason` tetap dicatat untuk ketertelusuran, meski
+    # akunnya tidak lagi menunggu persetujuan.
     user = create_user(username, password, ROLE_CONTRIBUTOR, db_path,
-                       status=STATUS_PENDING, requested_at=now_iso(),
+                       status=STATUS_ACTIVE, requested_at=now_iso(),
                        reason=reason)
-    logger.info("Pendaftaran mandiri: %s (menunggu persetujuan)", username)
+    logger.info("Pendaftaran mandiri: %s (aktif sebagai kontributor)", username)
     return user
 
 

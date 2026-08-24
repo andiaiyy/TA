@@ -43,6 +43,15 @@ POPOVER_MAX_W = "13rem"
 GAP_ELEMENT = "1rem"
 GAP_SECTION = "2rem"
 
+# Hierarki jarak di dalam blok katalog. Nilai DALAM-blok sengaja lebih kecil
+# daripada ANTAR-blok: itulah yang membuat dua blok penelitian terbaca sebagai
+# dua kesatuan terpisah, bukan satu daftar panjang.
+GAP_IN_BLOCK = "0.75rem"        # antar elemen di dalam satu blok penelitian
+GAP_BETWEEN_BLOCKS = "2.75rem"  # antar blok penelitian
+
+# Lebar tetap tombol aksi katalog — seragam di semua blok.
+CATALOG_BTN_W = "9.5rem"
+
 # Transisi sorot: cukup terasa, tidak sampai mengganggu.
 HOVER_MS = 150
 
@@ -75,6 +84,14 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
 
 /* Expander & panel: ruang di sekelilingnya. */
 [data-testid="stExpander"] details {{ margin: .6rem 0; }}
+
+/* ── BUG: jejak lokasi terpotong tepi atas sidebar ─────────────────────
+   Isi sidebar mulai terlalu rapat ke tepi atas, sehingga baris pertama
+   (jejak lokasi) terpangkas. Ruang atas ditambah, dan barisnya sendiri diberi
+   line-height + padding vertikal supaya `overflow:hidden` (yang dipakai untuk
+   elipsis) memotong ke SAMPING, bukan memangkas tinggi hurufnya. */
+[data-testid="stSidebarUserContent"] {{ padding-top: 1.5rem; }}
+[data-testid="stSidebarHeader"] {{ padding-bottom: .35rem; }}
 
 /* ── Keterbacaan: keterangan tidak lagi sekecil bawaannya ──────────────── */
 [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {{
@@ -143,12 +160,80 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     vertical-align: middle;
 }}
 
-/* ── Pemilih algoritma: wadah lembut, pilihan aktif terangkat ──────────── */
-[data-testid="stSegmentedControl"] {{ flex-wrap: wrap; }}
-[data-testid="stSegmentedControl"] button {{
-    transition: background-color {HOVER_MS}ms ease;
-    cursor: pointer;
+/* ── Pemilih algoritma: wadah lembut, pilihan aktif terangkat ──────────
+   Wadahnya berlatar netral tipis; pilihan aktif tampil sebagai kartu yang
+   terangkat di atasnya, sisanya redup tanpa latar. `flex-wrap` + `white-space:
+   normal` menjaga enam algoritma HIKARI tetap terbaca — membungkus ke baris
+   kedua, bukan terpotong. */
+[data-testid="stSegmentedControl"] {{
+    flex-wrap: wrap;
+    gap: .25rem;
+    padding: .25rem;
+    border-radius: 10px;
+    background: rgba(127,127,127,.09);
 }}
+[data-testid="stSegmentedControl"] button {{
+    transition: background-color {HOVER_MS}ms ease, opacity {HOVER_MS}ms ease;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    border-radius: 8px;
+    opacity: .62;                        /* pilihan lain: redup */
+    white-space: normal;                 /* boleh membungkus, jangan terpotong */
+}}
+[data-testid="stSegmentedControl"] button:hover {{ opacity: .85; }}
+/* Pilihan AKTIF: kartu terangkat — latar kontras + bayangan halus. */
+[data-testid="stSegmentedControl"] button[aria-checked="true"] {{
+    background: rgba(127,127,127,.26);
+    opacity: 1;
+    font-weight: {WEIGHT_STRONG};
+    box-shadow: 0 1px 3px rgba(0,0,0,.14);
+}}
+
+/* ── Katalog: hierarki jarak & tombol seragam ──────────────────────────
+   Jarak DI DALAM satu blok penelitian lebih kecil daripada jarak ANTAR blok,
+   supaya pengelompokannya terbaca. Pemisah antar blok memakai jarak terbesar
+   di halaman ini. */
+.ids-cat-title {{ margin: 0 0 {GAP_IN_BLOCK} 0; }}
+.ids-cat-short {{ margin: 0 0 {GAP_IN_BLOCK} 0; }}
+.ids-cat-chips {{
+    margin: 0 0 calc({GAP_IN_BLOCK} * 1.6) 0;
+    gap: .45rem;                         /* chip tidak berdempetan */
+    row-gap: .5rem;
+}}
+/* Pemisah antar blok penelitian — jarak paling lebar. */
+.ids-cat-sep {{
+    border: none; border-top: 1px solid rgba(127,127,127,.22);
+    margin: {GAP_BETWEEN_BLOCKS} 0 calc({GAP_BETWEEN_BLOCKS} / 2) 0;
+}}
+
+/* Tombol aksi katalog: lebar & tinggi SERAGAM di semua blok, sejajar. */
+[class*="st-key-cat_run_"] button, [class*="st-key-cat_detail_"] button {{
+    width: {CATALOG_BTN_W};
+    min-height: 2.3rem;
+}}
+/* Aksi sekunder lebih tenang daripada aksi utama. */
+[class*="st-key-cat_detail_"] button {{
+    background: transparent;
+    border-color: rgba(127,127,127,.35);
+    font-weight: {WEIGHT_NORMAL};
+}}
+
+/* ── Pemilih mode: daftar mengembang DI DALAM sidebar ──────────────────
+   Bukan lapisan mengambang lagi, jadi tidak ada yang bisa menimpa konten.
+   Barisnya dibuat ringkas di sini. */
+[class*="st-key-auth_pick_"] button,
+[class*="st-key-auth_logout"] button,
+[class*="st-key-auth_mode_toggle"] button {{
+    padding: .15rem .55rem;
+    min-height: 0;
+    font-size: {FONT_CAPTION};
+    line-height: 1.6;
+    justify-content: flex-start;
+}}
+[class*="st-key-auth_pick_"], [class*="st-key-auth_logout"] {{ margin: 0; }}
+[class*="st-key-auth_pick_"] .stButton,
+[class*="st-key-auth_logout"] .stButton {{ margin: .1rem 0; }}
 
 /* ── Blok mode menempel di DASAR sidebar ───────────────────────────────
    PERINGATAN VERSI: dua selektor di bawah bergantung pada struktur internal
@@ -176,14 +261,15 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
 .ids-mode-anchor {{ display: none; }}
 
 /* ── Pemilih mode di sidebar: daftar pilihan yang ringkas ──────────────── */
-/* Panel selebar ISINYA, dibatasi tegas — bukan selebar sidebar. */
+/* Popover masih dipakai di halaman lain (mis. pemilih kolom & filter di
+   Progress & Status); aturannya dipertahankan agar panelnya tetap ringkas.
+   Pemilih mode TIDAK lagi memakainya — lihat catatan di ui/views/login.py. */
 [data-testid="stPopoverBody"] {{
     min-width: 0 !important;
     width: max-content;
     max-width: {POPOVER_MAX_W};
     padding: .35rem;
 }}
-/* Baris pilihan: satu baris teks, padding vertikal tipis. */
 [data-testid="stPopoverBody"] .stButton > button {{
     padding: .1rem .5rem;
     font-size: {FONT_CAPTION};
@@ -193,8 +279,6 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     width: 100%;
     justify-content: flex-start;
 }}
-/* Jarak antar pilihan dirapatkan HANYA di sini — daftar pendek memang harus
-   padat; jarak lega berlaku untuk isi halaman, bukan untuk menu ini. */
 [data-testid="stPopoverBody"] [data-testid="stVerticalBlock"] {{ gap: .1rem; }}
 [data-testid="stPopoverBody"] [data-testid="stElementContainer"] {{ margin: 0; }}
 

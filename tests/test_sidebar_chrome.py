@@ -176,8 +176,18 @@ def test_the_menu_container_stays_transparent():
 # ── aligned text lines ────────────────────────────────────────────────────
 
 def test_every_line_uses_the_same_left_inset():
+    # Padding kini shorthand: ada padding vertikal kecil supaya `overflow:hidden`
+    # (untuk elipsis) tidak ikut memangkas tinggi huruf.
     for kwargs in ({}, {"muted": True}, {"strong": True}, {"small": True}):
-        assert f"padding-left:{INSET_PX}px" in sidebar_line("x", **kwargs)
+        assert f"2px {INSET_PX}px" in sidebar_line("x", **kwargs)
+
+
+def test_lines_are_not_vertically_clipped():
+    """Regresi: jejak lokasi pernah terpotong tepi atas sidebar."""
+    html = sidebar_line("Menu > Run Experiment", muted=True, small=True)
+    assert "line-height:1.7" in html
+    assert html.count("padding:2px 0 2px") == 1
+    assert "text-overflow:ellipsis" in html      # panjang -> elipsis, bukan potong
 
 
 def test_lines_clip_instead_of_wrapping():

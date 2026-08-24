@@ -26,6 +26,7 @@ from config.research_attribution import (
 from ui.views._artifact_browser import render_file_browser, format_size
 from ui.components import dialogs as dlg
 from ui.components.result_views import normalize_result_payload, render_results
+from ui.components.run_mode_controls import render_run_mode_block
 from streamlit_option_menu import option_menu
 from contracts.dataset_schemas import get_schema
 # Helper murni untuk penyajian diagnosa (aturan format per dataset_type +
@@ -1681,14 +1682,14 @@ def _render_catalog_view() -> None:
     """
     from ui.components.pipeline_catalog import build_catalog, render_catalog
 
-    cols = st.columns([2, 6])
+    # Nama tombolnya sudah menjelaskan dirinya — keterangan di sampingnya
+    # dibuang, petunjuknya pindah ke help=.
+    cols = st.columns([1, 1, 3])
     if cols[0].button("Run Experiment", type="primary", key="_run_go",
-                      use_container_width=True):
+                      use_container_width=True,
+                      help="Pilih dataset lebih dulu, lalu pipeline & algoritma."):
         go_to_execute()
         st.rerun()
-    with cols[1]:
-        st.caption("Menjalankan eksperimen: pilih dataset, lalu research "
-                   "pipeline & algoritmanya.")
 
     catalog = build_catalog()
     if render_catalog(catalog, on_detail=request_catalog_detail,
@@ -2039,7 +2040,12 @@ def _render_execute():
                     st.json(info["fixed_params"])
                 if info.get("runtime_warning"):
                     st.warning(info["runtime_warning"])
-                st.info("All parameters locked per paper.")
+                # Klaim lama "semua parameter terkunci" kini hanya benar untuk
+                # run RESMI — yang tetap menjadi bawaan. Dikatakan apa adanya.
+                st.info("Nilai di atas adalah parameter TERKUNCI yang dipakai "
+                        "run resmi. Run eksplorasi dapat menyesuaikan sebagian "
+                        "di antaranya; hasilnya ditandai dan tidak masuk "
+                        "perbandingan resmi.")
 
         with st.expander("Pipeline Config Viewer (info.yaml · source · registry · contract)"):
             render_file_browser(
@@ -2080,8 +2086,14 @@ def _render_execute():
                 help="Tugas yang tertahan ditandai **FAILED (stale)** setelah "
                      "120 menit. Pastikan service **ids_worker** dan "
                      "**ids_redis** berjalan, lalu klik **Periksa ulang**.")
+        # Mode eksekusi + parameter. Ditempatkan SEBELUM tombol Run supaya
+        # pilihan terbaca pada rerun yang sama dengan penekanan tombolnya.
+        run_choice = render_run_mode_block(selected)
+
         if st.button("Run Experiment", type="primary", disabled=not can_run):
-            _run_with_status(dataset_type, dataset_path, selected)
+            _run_with_status(dataset_type, dataset_path, selected,
+                             run_mode=run_choice["run_mode"],
+                             param_overrides=run_choice["param_overrides"])
 
     # Results (sync path)
     if "last_result" in st.session_state and st.session_state["last_result"].get("success"):
@@ -2105,7 +2117,9 @@ def _phase_checklist(icon: str) -> str:
     return "\n".join(f"- {icon} {p}" for p in _EVE_PHASE_LINES)
 
 
-def _run_with_status(dataset_type: str, dataset_path: str, pipeline_id: str) -> None:
+def _run_with_status(dataset_type: str, dataset_path: str, pipeline_id: str,
+                     run_mode: str | None = None,
+                     param_overrides: dict | None = None) -> None:
     """Dispatch the experiment with a live status block.
 
     Sync mode (USE_ASYNC=false): create_and_run_experiment blocks until the
@@ -2138,9 +2152,14 @@ def _run_with_status(dataset_type: str, dataset_path: str, pipeline_id: str) -> 
         # tidak pernah dipakai untuk menyaring tampilan.
         from ui.views.login import current_user as _current_user
         _user = _current_user()
+        # run_mode None = run RESMI (bawaan orchestrator). param_overrides
+        # dibuang orchestrator pada run resmi, jadi tidak ada jalur di sini yang
+        # bisa menyelinapkan nilai yang diubah ke dalam run resmi.
         result = create_and_run_experiment(
             dataset_type, dataset_path, pipeline_id,
             owner=(_user or {}).get("username"),
+            run_mode=run_mode,
+            param_overrides=param_overrides,
         )
 
         if not result["success"]:
@@ -2334,10 +2353,37 @@ def _render_diag_block(experiment_id: str, status_data: dict) -> None:
         st.json(status_data)
 
 
+def _render_result_mode_banner(experiment_id: str) -> None:
+    """Satu baris mode + parameter yang dipakai, di atas angka hasil."""
+    from orchestrator import run_mode as rm
+    from database.db import get_experiment
+
+    try:
+        row = get_experiment(experiment_id) or {}
+    except Exception:                       # pragma: no cover - defensif
+        logger.debug("Record eksperimen tidak terbaca untuk penanda mode",
+                     exc_info=True)
+        return
+
+    used = rm.params_of(row)
+    locked = rm.locked_params(row.get("pipeline_id") or "")
+    st.markdown(f"**{rm.run_mode_badge(row.get('run_mode'))}** — "
+                f"{rm.RUN_MODE_HINTS[rm.mode_of(row)]}")
+    if rm.is_exploration(row.get("run_mode")):
+        st.warning(rm.EXPLORATION_WARNING)
+    if used:
+        st.caption("Parameter yang dipakai: " + rm.format_params(used, locked))
+
+
 def _display_results(result: dict):
     """Render all metrics and charts via the shared interactive result view."""
     st.header("Results")
     eid = result["experiment_id"]
+
+    # Penanda mode di tempat hasil PERTAMA kali terlihat. Dibaca dari record
+    # eksperimen, bukan dari pilihan di layar: yang berlaku adalah apa yang
+    # benar-benar tercatat untuk run itu.
+    _render_result_mode_banner(eid)
 
     # Unify this page's in-memory PipelineResult with the persisted metrics.json,
     # then render through the SAME shared component the History page uses.

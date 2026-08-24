@@ -525,14 +525,19 @@ def render_catalog(catalog=None, *, on_detail=None,
     catalog = build_catalog() if catalog is None else catalog
     st.markdown(_CSS, unsafe_allow_html=True)
 
+    # DUA elemen pengantar saja: satu baris hitungan + satu petunjuk singkat.
+    # Nama tombolnya sudah jelas, jadi fungsinya tidak dijelaskan lagi.
     counts = catalog_counts(catalog)
     st.markdown(f'<span class="ids-cat-count">{escape(summary_text(counts))}'
                 f'</span>', unsafe_allow_html=True)
-    st.caption("Deskriptif — hasil & metrik ada di Progress & Status.")
+    st.caption("Hasil & metrik ada di Progress & Status.")
 
     requested = None
-    for group in catalog:
-        st.divider()
+    for index, group in enumerate(catalog):
+        if index:
+            # Pemisah ANTAR blok — jaraknya jauh lebih lebar daripada jarak di
+            # dalam blok, sehingga tiap penelitian terbaca sebagai satu kesatuan.
+            st.markdown('<hr class="ids-cat-sep">', unsafe_allow_html=True)
         _line(shorten(group["title"], TITLE_CHARS), "ids-cat-title")
         if group.get("short"):
             _line(group["short"], "ids-cat-short")
@@ -540,15 +545,20 @@ def render_catalog(catalog=None, *, on_detail=None,
         names = [a["algorithm"] for a in group.get("algorithms") or []]
         st.markdown(chips_html(names), unsafe_allow_html=True)
 
-        cols = st.columns([2, 2, 4])
+        # Dua kolom berukuran SAMA -> kedua tombol selebar & setinggi sama,
+        # sejajar pada satu garis dasar; lebar tetapnya dikunci di CSS terpusat.
+        cols = st.columns([1, 1, 3])
         if cols[0].button("Run Pipeline", type="primary",
                           key=f"cat_run_{group['dataset_type']}",
-                          use_container_width=True):
+                          use_container_width=True,
+                          help="Cari dataset yang cocok untuk pipeline ini."):
             requested = group["dataset_type"]
             if on_run is not None:
                 on_run(requested)
+        # Aksi SEKUNDER — sengaja lebih tenang daripada aksi utama.
         if cols[1].button("Detail", key=f"cat_detail_{group['dataset_type']}",
-                          use_container_width=True):
+                          type="tertiary", use_container_width=True,
+                          help="Keterangan lengkap & tahapan pipeline."):
             requested = group["dataset_type"]
             if on_detail is not None:
                 on_detail(requested)

@@ -79,7 +79,18 @@ def _flag(at):
 _PICK_LABEL = "Kontributor"
 
 
+def _open_the_mode_list(at) -> None:
+    """Daftar mode kini mengembang DI DALAM sidebar (bukan popover mengambang),
+    jadi ia harus dibuka dulu sebelum pilihannya terlihat."""
+    toggle = next(b for b in at.button
+                  if b.label in ("Mode pengunjung",)
+                  or b.label.startswith(("Mode ", "ai ", "rina ")))
+    toggle.click().run()
+
+
 def _open_the_modal(at) -> None:
+    if not any(b.label == _PICK_LABEL for b in at.button):
+        _open_the_mode_list(at)
     next(b for b in at.button if b.label == _PICK_LABEL).click().run()
 
 
@@ -186,6 +197,7 @@ def test_picking_a_role_only_opens_the_modal(app, label):
     & statusnya di basis data.
     """
     app.run()
+    _open_the_mode_list(app)
     next(b for b in app.button if b.label == label).click().run()
 
     assert _flag(app) == "login"
@@ -233,6 +245,7 @@ def test_a_signed_in_user_sees_their_role_and_a_way_out(app):
     app.session_state["auth_user"] = {"username": "ai", "role": "research_admin",
                                       "status": "active"}
     app.run()
+    _open_the_mode_list(app)
     labels = [b.label for b in app.button]
     # Kembali ke mode pengunjung = keluar dari akun (keterangannya di help=).
     assert "Pengunjung" in labels

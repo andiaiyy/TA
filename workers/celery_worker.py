@@ -98,12 +98,19 @@ def _safe_update_state(task, stage: str, meta_extra: dict | None = None) -> None
     acks_late=True,
 )
 def run_pipeline_task(self, experiment_id: str, dataset_type: str,
-                      dataset_path: str, pipeline_id: str):
+                      dataset_path: str, pipeline_id: str,
+                      param_overrides: dict | None = None):
     """
     Async pipeline execution task.
 
     Called by experiment_service.create_and_run_experiment() when USE_ASYNC=true.
-    The experiment record already exists in DB with status=QUEUED.
+    The experiment record already exists in DB with status=QUEUED — beserta
+    kolom run_mode/params_used yang sudah terisi di sana.
+
+    ``param_overrides`` OPSIONAL dan default None. Isinya sudah divalidasi
+    orchestrator sebelum tugas ini dikirim, dan pada run RESMI selalu kosong,
+    jadi tugas lama tanpa argumen ini (mis. yang sudah antre saat pembaruan)
+    tetap berjalan sebagai run dengan parameter terkunci.
 
     Steps:
       1. Idempotency check (skip if already FINISHED/FAILED)
@@ -173,6 +180,7 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
                 _safe_update_state(self, stage)
         result = execute_pipeline(
             pipeline_id, df, dataset_type, dataset_path=dataset_path, progress=_progress,
+            param_overrides=param_overrides,
         )
         _safe_update_state(self, "Saving results...")
         logger.error("[DIAG] SAVE ENTRY REACHED")
@@ -215,6 +223,23 @@ def run_pipeline_task(self, experiment_id: str, dataset_type: str,
             "created_at": now_iso(),
             "completed_at": now_iso(),
         }
+        # Mode + parameter yang dipakai, dibaca dari record yang sudah dibuat
+        # orchestrator — SATU sumber untuk kedua jalur eksekusi, jadi artefak
+        # jalur async membawa keterangan yang persis sama dengan jalur sync.
+        try:
+            from orchestrator.run_mode import mode_of, params_of, changed_keys, locked_params
+            _row = get_experiment(experiment_id) or {}
+            _used = params_of(_row)
+            _locked = locked_params(pipeline_id)
+            metadata_dict.update({
+                "run_mode": mode_of(_row),
+                "params_used": _used,
+                "params_locked": _locked,
+                "params_changed": changed_keys(_used, _locked),
+            })
+        except Exception:
+            logger.exception("Mode/parameter tidak dapat ditambahkan ke metadata %s",
+                             experiment_id)
 
         # Save artifacts — if this fails, nothing is on disk yet
         try:

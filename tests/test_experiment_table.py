@@ -91,8 +91,23 @@ def test_a_pipeline_without_a_parameter_shows_a_dash_not_a_borrowed_value():
 
 
 def test_parameters_come_from_the_pipeline_definition_and_say_so():
+    """Sejak ada mode eksekusi, parameter punya DUA asal-usul — dan keterangan
+    itu harus menyebut keduanya, bukan menyamakannya."""
     assert "get_info" in et.PARAM_PROVENANCE
-    assert "tidak menyimpan hiperparameter" in et.PARAM_PROVENANCE
+    assert "direkam saat eksperimen" in et.PARAM_PROVENANCE
+    assert "definisi pipeline" in et.PARAM_PROVENANCE
+
+
+def test_a_recorded_run_is_not_presented_as_a_definition_value():
+    import json
+    rows = et.build_rows(
+        [{"id": "a", "pipeline_id": "hikari2021.rfc_pipeline",
+          "dataset_type": HIKARI, "params_used": json.dumps({"n_estimators": 250})},
+         {"id": "b", "pipeline_id": "hikari2021.rfc_pipeline", "dataset_type": HIKARI}],
+        params_reader=lambda: {"hikari2021.rfc_pipeline": {"n_estimators": 100}},
+    )
+    assert (rows[0]["param_n_estimators"], rows[0]["_params_recorded"]) == (250, True)
+    assert (rows[1]["param_n_estimators"], rows[1]["_params_recorded"]) == (100, False)
 
 
 def test_the_real_registry_supplies_real_parameters():
@@ -166,8 +181,10 @@ def test_windows_and_posix_dataset_paths_both_shorten():
 # ── column picker ─────────────────────────────────────────────────────────
 
 def test_the_default_column_set_is_the_core_one():
-    assert et.DEFAULT_COLUMNS == ["waktu", "pipeline", "dataset", "status",
-                                  "accuracy", "f1"]
+    """"mode" ikut inti: run eksplorasi harus terbedakan tanpa membuka pemilih
+    kolom lebih dulu."""
+    assert et.DEFAULT_COLUMNS == ["waktu", "pipeline", "dataset", "mode",
+                                  "status", "accuracy", "f1"]
 
 
 def test_visible_columns_keep_the_spec_order_not_the_click_order():
@@ -397,7 +414,8 @@ def test_the_csv_follows_the_chosen_columns():
     columns = et.visible_columns(et.build_columns(), ["waktu", "f1"])
     table = _parsed(et.to_csv(rows, columns))
 
-    assert table[0] == ["Waktu", "F1-score", et.CSV_SEMANTICS_COLUMN]
+    assert table[0] == ["Waktu", "F1-score", et.CSV_SEMANTICS_COLUMN,
+                        et.CSV_MODE_COLUMN, et.CSV_PARAMS_COLUMN]
     assert table[1][1] == "0.8800"
 
 
@@ -417,16 +435,16 @@ def test_every_csv_row_carries_its_metric_semantics():
     columns = et.visible_columns(et.build_columns(), ["dataset", "f1"])
     table = _parsed(et.to_csv(rows, columns))
 
-    assert table[0][-1] == et.CSV_SEMANTICS_COLUMN
-    assert et.METRIC_SEMANTICS[HIKARI] in table[1][-1]
-    assert et.METRIC_SEMANTICS[EVE] in table[2][-1]
+    semantics = table[0].index(et.CSV_SEMANTICS_COLUMN)
+    assert et.METRIC_SEMANTICS[HIKARI] in table[1][semantics]
+    assert et.METRIC_SEMANTICS[EVE] in table[2][semantics]
 
 
 def test_an_unknown_family_says_so_rather_than_guessing():
     rows = _rows(_exp(1, dataset="SESUATU_LAIN"))
     columns = et.visible_columns(et.build_columns(), ["dataset"])
     table = _parsed(et.to_csv(rows, columns))
-    assert "tidak dikenal" in table[1][-1]
+    assert "tidak dikenal" in table[1][table[0].index(et.CSV_SEMANTICS_COLUMN)]
 
 
 def test_the_csv_is_not_a_raw_database_dump():

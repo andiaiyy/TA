@@ -44,6 +44,8 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY
 from reportlab.lib.colors import HexColor
 from reportlab.lib import colors
+
+from orchestrator import run_mode as _run_mode
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
     Image, PageBreak, HRFlowable,
@@ -179,6 +181,15 @@ def _build_context(**kw) -> dict:
         "preprocessing_steps": pinfo.get("preprocessing_steps") or [],
         "feature_selection": pinfo.get("feature_selection"),
         "fixed_params": pinfo.get("fixed_params") or {},
+        # Mode & parameter dibaca dari METADATA artefak — yaitu apa yang
+        # benar-benar dipakai saat run itu — bukan dari definisi pipeline pada
+        # kode saat ini. Artefak lama tidak punya keduanya; NULL/absen dibaca
+        # sebagai run RESMI, sama seperti di basis data.
+        "run_mode": _run_mode.normalize_run_mode(md.get("run_mode")),
+        "run_mode_recorded": bool(md.get("run_mode")),
+        "params_used": md.get("params_used") if isinstance(md.get("params_used"), dict) else {},
+        "params_locked": md.get("params_locked") if isinstance(md.get("params_locked"), dict) else {},
+        "params_changed": list(md.get("params_changed") or []),
         "train_test_split": pinfo.get("train_test_split") or {},
         "anti_leakage_info": pinfo.get("anti_leakage"),
         "metrics_policy": pinfo.get("metrics_policy"),
@@ -671,7 +682,18 @@ def _masthead(story, styles, ctx):
         ["Algoritma", _none_or(ctx["algorithm"])],
         ["Dataset", _none_or(ctx["dataset_type"])],
         ["Waktu (dibuat → selesai)", f"{_none_or(ctx['created_at'])} → {_none_or(ctx['completed_at'])}"],
+        ["Mode eksekusi", _run_mode.RUN_MODE_LABELS[ctx["run_mode"]]
+         + " — " + _run_mode.RUN_MODE_HINTS[ctx["run_mode"]]],
     ]))
+
+    # Penanda run eksplorasi di HALAMAN PERTAMA, sebelum satu angka pun
+    # terbaca — laporan ini bisa beredar terpisah dari aplikasi.
+    if _run_mode.is_exploration(ctx["run_mode"]):
+        story.append(Spacer(1, 2*mm))
+        story.append(_callout(
+            "<b>Run eksplorasi.</b> " + _run_mode.EXPLORATION_WARNING,
+            styles, fill=colors.HexColor("#fff4e5"),
+            border=colors.HexColor("#e8a33d")))
 
     story.append(Spacer(1, 3*mm))
     story.append(Paragraph("Abstrak", styles["abstract_h"]))
@@ -714,15 +736,45 @@ def _section_1_konfigurasi(story, styles, ctx):
         story.append(Paragraph(
             "; ".join(str(s) for s in steps) + ".", styles["cell"]))
 
-    cfg = ctx["fixed_params"]
+    # Parameter yang BENAR-BENAR dipakai run ini bila artefaknya mencatatnya;
+    # bila tidak (artefak lama), definisi pipeline pada kode saat ini — dan
+    # perbedaan asal-usul itu dikatakan di judul & keterangan tabel, bukan
+    # disamarkan.
+    used = ctx["params_used"]
+    locked_cfg = ctx["params_locked"] or ctx["fixed_params"]
+    cfg = used or ctx["fixed_params"]
+    changed = set(ctx["params_changed"] or [])
     if cfg:
         story.append(Spacer(1, 2*mm))
-        story.append(Paragraph("Hyperparameter terkunci (paper-faithful), disertai split & seed:",
-                               styles["subsection"]))
-        data = [["Parameter", "Nilai"]] + [[str(k), str(v)] for k, v in cfg.items()]
-        _table_caption(story, styles, ctx,
-                       "Konfigurasi terkunci pipeline (tidak dapat diubah dari antarmuka).")
-        story.append(_data_table(data, [7*cm, 9.6*cm]))
+        if used:
+            heading = ("Hyperparameter yang dipakai run ini, disertai split & seed:"
+                       if not changed else
+                       "Hyperparameter yang dipakai run ini (tanda * = berbeda "
+                       "dari nilai terkunci):")
+            caption = ("Parameter tercatat saat eksperimen berjalan."
+                       if not changed else
+                       "Parameter tercatat saat eksperimen berjalan; nilai bertanda * "
+                       "disesuaikan pengguna pada run eksplorasi, sehingga hasil ini "
+                       "TIDAK sebanding dengan run resmi.")
+            header = ["Parameter", "Nilai", "Nilai terkunci"]
+            rows_cfg = []
+            for k, v in cfg.items():
+                mark = "*" if k in changed else ""
+                base = locked_cfg.get(k, "—")
+                rows_cfg.append([f"{k}{mark}", str(v),
+                                 str(base) if k in changed else "sama"])
+            data = [header] + rows_cfg
+            widths = [5.6*cm, 5.5*cm, 5.5*cm]
+        else:
+            heading = "Hyperparameter terkunci (paper-faithful), disertai split & seed:"
+            caption = ("Konfigurasi terkunci pipeline, dibaca dari definisi pipeline "
+                       "pada kode saat ini — eksperimen ini dijalankan sebelum "
+                       "parameter dicatat per run.")
+            data = [["Parameter", "Nilai"]] + [[str(k), str(v)] for k, v in cfg.items()]
+            widths = [7*cm, 9.6*cm]
+        story.append(Paragraph(heading, styles["subsection"]))
+        _table_caption(story, styles, ctx, caption)
+        story.append(_data_table(data, widths))
 
 
 # ─── 2. Hasil dan Metrik ──────────────────────────────────────────────────
@@ -1054,9 +1106,21 @@ def _section_8_reproducibility(story, styles, ctx):
         "Selama hash dataset, kode pipeline, dan environment sama, metrik yang dihasilkan identik "
         "antar eksekusi — dasar klaim reproducibility artefak penelitian ini.", styles["normal"]))
     story.append(Spacer(1, 2*mm))
+    # Seed dibaca dari parameter yang TERCATAT untuk run ini. Menuliskan "42"
+    # apa adanya akan berbohong pada run eksplorasi yang mengubah seed —
+    # justru pada baris yang menjadi dasar klaim dapat-diulang.
+    seed = (ctx["params_used"] or {}).get("random_state")
+    if seed is None:
+        seed_text = "42 (terkunci untuk seluruh operasi stokastik)"
+    elif "random_state" in set(ctx["params_changed"] or []):
+        base = (ctx["params_locked"] or {}).get("random_state", 42)
+        seed_text = f"{seed} (disesuaikan pada run eksplorasi; nilai terkunci {base})"
+    else:
+        seed_text = f"{seed} (terkunci untuk seluruh operasi stokastik)"
+
     rows = [
         ["Dataset SHA-256", ctx["dataset_hash"]],
-        ["random_state / seed", "42 (terkunci untuk seluruh operasi stokastik)"],
+        ["random_state / seed", seed_text],
         ["Python", _none_or(ctx["python_version"])],
         ["scikit-learn", _none_or(ctx["sklearn_version"])],
         ["pandas / numpy", f"{_none_or(ctx['pandas_version'])} / {_none_or(ctx['numpy_version'])}"],
@@ -1071,6 +1135,14 @@ def _section_8_reproducibility(story, styles, ctx):
         "Untuk membuktikan reproducibility: jalankan pipeline yang sama dua kali pada dataset yang "
         "sama; nilai metrik (accuracy/precision/recall/F1/AUC) harus identik dan hash dataset sama.",
         styles["note"]))
+    if _run_mode.is_exploration(ctx["run_mode"]):
+        # Run eksplorasi TETAP dapat diulang — parameternya tercatat — tetapi
+        # bukan dasar klaim replikasi paper. Dua hal berbeda, dikatakan terpisah.
+        story.append(Paragraph(
+            "Eksperimen ini adalah <b>run eksplorasi</b>: dapat diulang dengan parameter yang "
+            "tercantum pada Tabel Konfigurasi, tetapi TIDAK dipakai sebagai dasar replikasi "
+            "paper rujukan maupun perbandingan resmi antar pipeline.",
+            styles["note"]))
 
 
 # ─── Footer ───────────────────────────────────────────────────────────────

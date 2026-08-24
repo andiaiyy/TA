@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 
 from ui.components.contribute_context import (
-    AFTER_UPLOAD_FLOW, capability, platform_stats, submission_counts,
+    AFTER_UPLOAD_FLOW, AFTER_UPLOAD_FLOW_ALT, capability,
+    platform_stats, submission_counts,
 )
 from ui.components.instructions import (
     ENTRY_POINT_RULE, common_dataset_mistakes, common_pipeline_mistakes,
@@ -191,10 +192,15 @@ def test_queue_survives_a_broken_table(monkeypatch):
     assert submission_counts(CONTRIBUTOR) == {}
 
 
-def test_after_upload_flow_has_review_before_availability():
+def test_after_upload_flow_separates_data_from_code():
+    """Dataset tersimpan langsung; hanya pipeline yang ditinjau."""
     labels = [label for _icon, label in AFTER_UPLOAD_FLOW]
     assert len(AFTER_UPLOAD_FLOW) == 4
-    assert labels.index("Tinjau Research Admin") < labels.index("Tersedia")
+    assert "Dataset tersimpan" in labels
+    assert "Pipeline ditinjau" in labels
+    assert labels.index("Periksa otomatis") < labels.index("Dataset tersimpan")
+    assert "tersimpan" in AFTER_UPLOAD_FLOW_ALT
+    assert "kode yang dieksekusi" in AFTER_UPLOAD_FLOW_ALT
 
 
 # ── the worked example is built from the contract constants ───────────────
@@ -377,7 +383,10 @@ def test_the_pipeline_path_keeps_its_honest_notes(tmp_path):
 def test_the_dataset_path_keeps_the_sample_caveat(tmp_path):
     text = _page_text(_run_page(tmp_path, "dataset")).lower()
     assert "cuplikan" in text
-    assert "research admin" in text
+    # Dataset tidak lagi ditinjau — yang harus tersampaikan kini justru
+    # bahwa berkasnya tersimpan langsung, dan tinjauan hanya untuk pipeline.
+    assert "tersimpan langsung" in text
+    assert "pipeline" in text
 
 
 def test_the_pipeline_path_shows_the_example_and_the_mistakes(tmp_path):

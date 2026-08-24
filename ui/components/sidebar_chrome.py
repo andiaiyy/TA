@@ -69,10 +69,13 @@ def sidebar_line(text: str, *, muted: bool = False, strong: bool = False,
     kepanjangan dipotong dengan elipsis, jadi jarak antar-baris tetap seragam
     berapa pun lebar sidebar yang dipilih pengguna.
     """
+    # `overflow:hidden` memberi elipsis ke SAMPING; tanpa padding & line-height
+    # yang cukup ia ikut memangkas tinggi huruf (jejak lokasi pernah terpotong
+    # di tepi atas sidebar karena ini).
     style = (
-        f"padding-left:{INSET_PX}px;"
+        f"padding:2px 0 2px {INSET_PX}px;"
         f"font-size:{FONT_SMALL if small else FONT_MAIN};"
-        "line-height:1.6;"
+        "line-height:1.7;"
         "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
     )
     if muted:

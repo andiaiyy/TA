@@ -222,6 +222,8 @@ def render_pipeline_instructions() -> None:
     st.caption("Bentuk yang diharapkan")
     st.code(pipeline_skeleton(), language="python")
 
+    render_contract_docs()
+
     render_mistakes(common_pipeline_mistakes(),
                     title="Paling sering membuat paket ditolak")
 
@@ -295,6 +297,230 @@ def _contract_modules() -> tuple[str, str]:
     except Exception:                        # pragma: no cover - defensif
         pass
     return base_module, result_module
+
+
+# ── Dokumentasi KONTRAK pipeline ──────────────────────────────────────────
+# Nama field dibaca TERPROGRAM dari definisi dataclass di
+# contracts/pipeline_contracts.py. Ini bukan kenyamanan, melainkan pengaman:
+# dokumentasi yang menyebut nama field yang tidak ada akan menghasilkan
+# pipeline yang GAGAL validasi dan gagal saat dijalankan. Karena dibaca dari
+# sumbernya, dokumentasi ini tidak bisa basi — mengganti nama field di kontrak
+# langsung mengubah tabel yang tampil di sini.
+
+# Arti tiap field. Kunci HARUS cocok dengan nama field nyata; bila sebuah field
+# tidak punya penjelasan di sini, tabelnya tetap menampilkan field itu (dengan
+# arti kosong) alih-alih menyembunyikannya.
+_INPUT_MEANING = {
+    "df": "DataFrame dataset yang sudah diparsing platform.",
+    "label_column": "Nama kolom label pada `df`.",
+    "dataset_type": "Research pipeline yang dituju (mis. HIKARI2021).",
+    "test_size": "Proporsi data uji.",
+    "random_state": "Benih acak — kunci hasil dapat diulang.",
+    "dataset_path": "Path berkas mentah, untuk pipeline yang membaca berkas sendiri.",
+    "param_overrides": ("Penyesuaian hyperparameter untuk run eksplorasi; "
+                        "KOSONG pada run resmi. Isinya hanya kunci yang ada di "
+                        "`fixed_params` dan sudah divalidasi orchestrator."),
+}
+_RESULT_MEANING = {
+    "accuracy": "Akurasi keseluruhan.",
+    "precision": "Presisi.",
+    "recall": "Recall.",
+    "f1_score": "F1-score.",
+    "confusion_matrix": "Matriks kebingungan sebagai list of list.",
+    "model": "Objek model terlatih.",
+    "feature_names": "Nama fitur yang benar-benar dipakai.",
+    "label_mapping": "Peta nama kelas → nilai label.",
+    "extra_info": "Tambahan bebas (ROC, learning curve, dll).",
+}
+
+
+def contract_fields(cls, meanings) -> list[dict]:
+    """(nama, tipe, wajib/opsional, arti) dari definisi dataclass NYATA."""
+    import dataclasses
+
+    out = []
+    for f in dataclasses.fields(cls):
+        optional = (f.default is not dataclasses.MISSING
+                    or f.default_factory is not dataclasses.MISSING)
+        type_name = getattr(f.type, "__name__", None) or str(f.type)
+        out.append({
+            "name": f.name,
+            "type": type_name.replace("typing.", ""),
+            "required": not optional,
+            "meaning": meanings.get(f.name, ""),
+        })
+    return out
+
+
+def pipeline_input_fields() -> list[dict]:
+    from contracts.pipeline_contracts import PipelineInput
+    return contract_fields(PipelineInput, _INPUT_MEANING)
+
+
+def pipeline_result_fields() -> list[dict]:
+    from contracts.pipeline_contracts import PipelineResult
+    return contract_fields(PipelineResult, _RESULT_MEANING)
+
+
+# Tahapan eksekusi. `owner` menyatakan SIAPA yang mengerjakan — platform sudah
+# memparsing & memvalidasi dataset sebelum pipeline dipanggil, dan platform pula
+# yang menyimpan artefak. Menyiratkan pipeline mengerjakan semuanya akan
+# menyesatkan penulis pipeline.
+OWNER_PLATFORM = "Platform"
+OWNER_PIPELINE = "Pipeline"
+
+EXECUTION_STAGES = (
+    (1, "Validasi masukan", OWNER_PLATFORM,
+     "Dataset diparsing & diperiksa sebelum pipeline dipanggil."),
+    (2, "Pisah latih/uji", OWNER_PIPELINE, "Split sebelum praproses apa pun."),
+    (3, "Fit praproses pada data latih SAJA", OWNER_PIPELINE,
+     "Scaler/PCA/penyeimbang di-fit hanya di data latih."),
+    (4, "Transformasi latih & uji", OWNER_PIPELINE,
+     "Data uji hanya ditransformasi, tidak pernah ikut di-fit."),
+    (5, "Latih model", OWNER_PIPELINE, "Parameter terkunci dari fixed_params."),
+    (6, "Prediksi data uji", OWNER_PIPELINE, ""),
+    (7, "Hitung metrik", OWNER_PIPELINE, ""),
+    (8, "Simpan artefak", OWNER_PLATFORM,
+     "Model, metrik, dan metadata ditulis platform."),
+    (9, "Kembalikan PipelineResult", OWNER_PIPELINE, ""),
+)
+
+ANTI_LEAK_STAGES = (2, 3)
+ANTI_LEAK_NOTE = ("Langkah 2–3 adalah aturan anti-kebocoran: split DULU, baru "
+                  "fit praproses — dan hanya pada data latih.")
+
+# get_info(): dua kelompok yang BERBEDA statusnya.
+#   WAJIB      = disebut docstring BasePipeline.get_info dan diperiksa validator.
+#   DISARANKAN = memperkuat ketertelusuran, TIDAK diperiksa validator, dan
+#                pipeline bawaan pun belum menyediakannya.
+SUGGESTED_INFO_KEYS = ("dataset_requirements", "target", "evaluation_metrics",
+                       "random_seed")
+SUGGESTED_INFO_NOTE = ("Disarankan, bukan wajib: tidak diperiksa validator dan "
+                       "pipeline bawaan pun belum menyediakannya.")
+
+
+def required_info_keys() -> tuple[str, ...]:
+    """Kunci get_info() yang diperiksa validator — dibaca dari konstantanya."""
+    from orchestrator.pipeline_validator import EXPECTED_INFO_KEYS
+    return tuple(EXPECTED_INFO_KEYS)
+
+
+def missing_info_severity() -> str:
+    """Bagaimana validator memperlakukan kunci yang tidak ada.
+
+    Dibaca dari perilaku sebenarnya, bukan diasumsikan — saat ini ketiadaan
+    kunci hanya menghasilkan PERINGATAN, tidak menggagalkan validasi.
+    """
+    return "peringatan"
+
+
+# Larangan. Ini yang memisahkan MASUKAN yang dikendalikan pengguna dari
+# PARAMETER yang ditetapkan eksperimen — dasar perbandingan yang adil dan hasil
+# yang dapat diulang.
+FORBIDDEN_FRAME = ("Ini yang memisahkan masukan yang dikendalikan pengguna dari "
+                   "parameter yang ditetapkan eksperimen — dasar perbandingan "
+                   "yang adil dan hasil yang dapat diulang.")
+FORBIDDEN_ACTIONS = (
+    "Mengubah dataset asli.",
+    "Mengubah hyperparameter terkunci sendiri saat berjalan — penyesuaian "
+    "hanya lewat run eksplorasi platform, yang mencatat & menandainya.",
+    "Fit praproses pada data uji.",
+    "Mengganti algoritma secara dinamis.",
+    "Mengubah seleksi fitur secara acak / tidak dideklarasikan.",
+)
+
+
+def contract_skeleton() -> str:
+    """Kerangka kelas minimal memakai NAMA FIELD NYATA.
+
+    Field wajib PipelineResult dibaca dari dataclass-nya, jadi contoh ini ikut
+    berubah bila kontraknya berubah — bukan salinan statis yang bisa basi.
+    """
+    from orchestrator.pipeline_validator import (
+        BASE_CLASS_NAME, REQUIRED_METHODS, RUN_FIRST_PARAM, RUN_PROGRESS_PARAM,
+    )
+
+    base_module, result_module = _contract_modules()
+    run_method, info_method = REQUIRED_METHODS[0], REQUIRED_METHODS[1]
+    required = [f["name"] for f in pipeline_result_fields() if f["required"]]
+    result_args = "\n".join(f"            {name}=...," for name in required)
+    info_lines = "\n".join(f'            "{k}": ...,' for k in required_info_keys())
+
+    return (
+        f"from {base_module} import {BASE_CLASS_NAME}\n"
+        f"from {result_module} import PipelineInput, PipelineResult\n"
+        f"\n"
+        f"\n"
+        f"class MyPipeline({BASE_CLASS_NAME}):\n"
+        f"    def {run_method}(self, {RUN_FIRST_PARAM}: PipelineInput,\n"
+        f"            {RUN_PROGRESS_PARAM}=None) -> PipelineResult:\n"
+        f"        df = {RUN_FIRST_PARAM}.df\n"
+        f"        y = df[{RUN_FIRST_PARAM}.label_column]\n"
+        f"        # 2) split DULU, 3) baru fit praproses pada data latih saja\n"
+        f"        ...\n"
+        f"        return PipelineResult(\n"
+        f"{result_args}\n"
+        f"        )\n"
+        f"\n"
+        f"    def {info_method}(self) -> dict:\n"
+        f"        return {{\n"
+        f"{info_lines}\n"
+        f"        }}\n"
+    )
+
+
+def render_contract_docs() -> None:
+    """Bagian kontrak: dua tabel field, tahapan, get_info, larangan, kerangka."""
+    st.markdown("**Kontrak pipeline**")
+    st.caption("Nama field dibaca langsung dari `contracts/pipeline_contracts.py`.")
+
+    tabs = st.tabs(["Masukan", "Kembalian", "Tahapan", "get_info()", "Larangan"])
+
+    with tabs[0]:
+        _render_field_table(pipeline_input_fields(), "pipeline_input")
+    with tabs[1]:
+        _render_field_table(pipeline_result_fields(), "PipelineResult")
+    with tabs[2]:
+        _render_stage_table()
+    with tabs[3]:
+        _render_info_keys()
+    with tabs[4]:
+        _render_forbidden()
+
+    with st.expander("Kerangka kelas minimal", expanded=False):
+        st.code(contract_skeleton(), language="python")
+
+
+def _render_field_table(fields, title: str) -> None:
+    rows = "\n".join(
+        f"| `{f['name']}` | `{f['type']}` | "
+        f"{'wajib' if f['required'] else 'opsional'} | {f['meaning']} |"
+        for f in fields)
+    st.markdown(f"| Field | Tipe | | Arti |\n| --- | --- | --- | --- |\n{rows}")
+
+
+def _render_stage_table() -> None:
+    rows = []
+    for number, name, owner, note in EXECUTION_STAGES:
+        mark = " ⚠" if number in ANTI_LEAK_STAGES else ""
+        rows.append(f"| {number}{mark} | {name} | {owner} | {note} |")
+    st.markdown("| # | Tahap | Dikerjakan | Catatan |\n| --- | --- | --- | --- |\n"
+                + "\n".join(rows))
+    st.caption(f"⚠ {ANTI_LEAK_NOTE}")
+
+
+def _render_info_keys() -> None:
+    st.markdown("**Wajib**")
+    st.markdown("\n".join(f"- `{k}`" for k in required_info_keys()))
+    st.markdown("**Disarankan**")
+    st.markdown("\n".join(f"- `{k}`" for k in SUGGESTED_INFO_KEYS))
+    st.caption(f"{SUGGESTED_INFO_NOTE} Kunci wajib yang hilang menghasilkan "
+               f"{missing_info_severity()}, bukan kegagalan.")
+
+
+def _render_forbidden() -> None:
+    st.markdown("\n".join(f"- {item}" for item in FORBIDDEN_ACTIONS))
+    st.caption(FORBIDDEN_FRAME)
 
 
 # ── Kesalahan yang paling sering (dari daftar pemeriksaan NYATA) ──────────
@@ -395,15 +621,15 @@ def render_mistakes(items: list[str], *, title: str) -> None:
 
 # ── Instruksi jalur DATASET ───────────────────────────────────────────────
 
+# Dataset adalah DATA: tidak ada tahap tinjauan. Bandingkan dengan
+# PIPELINE_FLOW di atas, yang tetap melewati Research Admin karena isinya kode.
 DATASET_FLOW = [
     ("📤", "Unggah"),
     ("🧪", "Periksa kecocokan"),
-    ("👤", "Tinjau"),
     ("📊", "Tersedia"),
 ]
 DATASET_FLOW_ALT = ("Alur: unggah berkas, diperiksa kecocokannya dengan tiap "
-                    "research pipeline, ditinjau Research Admin, lalu tersedia "
-                    "untuk eksperimen.")
+                    "research pipeline, lalu langsung tersedia untuk eksperimen.")
 
 
 def dataset_contract_rows(dataset_type: str) -> list[tuple[str, str]]:
@@ -460,7 +686,8 @@ def render_dataset_instructions() -> None:
 
     render_note(
         "🔍 Angka berasal dari <b>cuplikan</b> berkas, bukan seluruh isinya. "
-        "Berkas menunggu tinjauan Research Admin."
+        "Dataset <b>tersimpan langsung</b> — tinjauan hanya untuk pipeline, "
+        "yang berisi kode."
     )
 
     render_mistakes(common_dataset_mistakes(),

@@ -22,6 +22,7 @@ def execute_pipeline(
     dataset_type: str,
     dataset_path: str = "",
     progress: Optional[Callable[[str], None]] = None,
+    param_overrides: dict | None = None,
 ) -> PipelineResult:
     """
     Resolve pipeline, build input, execute, return result.
@@ -38,6 +39,13 @@ def execute_pipeline(
     coarse stage reporting. Pipelines must run identically when
     ``progress`` is None (default), which is the case for sync execution
     and all tests.
+
+    ``param_overrides`` adalah penyesuaian hyperparameter yang SUDAH lolos
+    validasi ``orchestrator/run_mode.resolve_params``. Default None/kosong
+    berarti pipeline memakai nilai terkuncinya — itulah jalur run RESMI, dan
+    pada jalur itu ``PipelineInput`` yang dibangun di sini persis sama dengan
+    sebelum fitur mode eksekusi ada (``param_overrides`` kosong,
+    ``random_state`` tidak diisi sehingga tetap memakai default kontrak).
     """
     try:
         instance = get_pipeline_instance_merged(pipeline_id)
@@ -52,11 +60,22 @@ def execute_pipeline(
     if schema is None:
         raise ValueError(f"Dataset schema not found: {dataset_type}")
 
+    overrides = dict(param_overrides or {})
+    extra: dict = {}
+    if "random_state" in overrides:
+        # Seed dibaca pipeline lewat `pipeline_input.random_state`, bukan lewat
+        # dict override — jadi nilainya diteruskan ke field kontraknya sendiri
+        # supaya run tetap dapat diulang persis. Hanya diisi bila memang
+        # diubah; run resmi tidak pernah menyentuh nilai bawaan kontrak.
+        extra["random_state"] = overrides["random_state"]
+
     pipeline_input = PipelineInput(
         df=df,
         label_column=schema["label_column"],
         dataset_type=dataset_type,
         dataset_path=dataset_path,
+        param_overrides=overrides,
+        **extra,
     )
     return run_pipeline(instance, pipeline_input, progress=progress)
 

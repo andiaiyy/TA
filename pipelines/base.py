@@ -40,6 +40,34 @@ class BasePipeline(ABC):
         """Return static metadata: paper, algorithm, preprocessing_steps, feature_selection, fixed_params, train_test_split."""
         pass
 
+    def _resolved_params(self, pipeline_input) -> dict:
+        """Hyperparameter yang BERLAKU untuk satu eksekusi.
+
+        Titik awalnya adalah ``get_info()['fixed_params']`` — nilai terkunci
+        sesuai paper rujukan. Bila ``pipeline_input.param_overrides`` berisi
+        sesuatu (hanya mungkin pada RUN EKSPLORASI; orchestrator membuangnya
+        pada run resmi), kunci yang cocok ditimpa.
+
+        Dua sifat yang dijaga di sini:
+
+        * **Kosong = tidak berubah.** Tanpa override, nilai yang dikembalikan
+          identik dengan ``fixed_params`` — run resmi menghasilkan angka yang
+          persis sama dengan sebelum fitur ini ada.
+        * **Hanya kunci yang memang ada.** Kunci yang tidak ada di
+          ``fixed_params`` diabaikan, bukan ditambahkan. Validasi sebenarnya
+          dilakukan orchestrator; ini lapis pertahanan kedua, bukan gantinya.
+        """
+        try:
+            params = dict((self.get_info() or {}).get("fixed_params") or {})
+        except Exception:                   # pragma: no cover - defensif
+            logger.exception("get_info() gagal saat menyusun parameter")
+            return {}
+        overrides = getattr(pipeline_input, "param_overrides", None) or {}
+        for key, value in overrides.items():
+            if key in params:
+                params[key] = value
+        return params
+
     @staticmethod
     def _emit_progress(progress: Optional[ProgressCallback], stage: str) -> None:
         """Best-effort progress emission. Swallows all exceptions.

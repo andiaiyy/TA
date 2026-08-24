@@ -106,8 +106,35 @@ def test_plain_text_has_no_hover_rule():
 def test_the_transition_is_short_and_subtle():
     assert 120 <= theme.HOVER_MS <= 180
     # Tidak ada efek yang menggeser tata letak atau membesarkan mencolok.
-    for heavy in ("transform:", "scale(", "box-shadow:", "translateY"):
+    for heavy in ("transform:", "scale(", "translateY"):
         assert heavy not in CSS, heavy
+
+    # Bayangan hanya boleh menandai KEADAAN AKTIF (kartu terangkat pada pemilih
+    # algoritma), bukan efek sorot — sorot cukup perubahan latar.
+    for line in CSS.splitlines():
+        if "box-shadow:" in line:
+            assert "hover" not in line, line
+    shadowed = [l for l in CSS.splitlines() if "box-shadow:" in l]
+    assert len(shadowed) <= 1, shadowed
+
+
+def test_the_active_segment_looks_raised():
+    """Pilihan aktif = kartu terangkat; pilihan lain redup tanpa latar."""
+    container = CSS.split('[data-testid="stSegmentedControl"] {')[1].split("}")[0]
+    assert "background: rgba(127,127,127,.09)" in container   # wadah lembut
+    assert "flex-wrap: wrap" in container                     # enam algoritma muat
+
+    active = CSS.split(
+        '[data-testid="stSegmentedControl"] button[aria-checked="true"] {'
+    )[1].split("}")[0]
+    assert "box-shadow:" in active
+    assert "opacity: 1" in active
+    assert f"font-weight: {theme.WEIGHT_STRONG}" in active
+
+    idle = CSS.split('[data-testid="stSegmentedControl"] button {')[1].split("}")[0]
+    assert "background: transparent" in idle
+    assert "opacity: .62" in idle
+    assert "white-space: normal" in idle      # membungkus, bukan terpotong
 
 
 def test_reduced_motion_turns_transitions_off():
@@ -276,9 +303,12 @@ def test_the_anchor_lives_inside_one_container():
     assert "'<div" not in body and '"<div' not in body
     assert "</div>" not in body
 
+    # Pemilih mode TIDAK lagi memakai st.popover: panelnya di-portal ke
+    # document.body sehingga menembus batas sidebar dan menimpa konten.
+    assert "st.popover(" not in body
     anchor_at = body.index("_MODE_ANCHOR")
-    popover_at = body.index("st.popover(")
-    assert anchor_at < popover_at            # jangkar mendahului isinya
+    toggle_at = body.index("auth_mode_toggle")
+    assert anchor_at < toggle_at             # jangkar mendahului isinya
 
 
 def test_the_picker_list_is_compact():

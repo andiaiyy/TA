@@ -447,5 +447,10 @@ def test_the_owner_column_is_never_a_filter_dimension():
 
     rows = et.build_rows([{"id": "a", "owner": "rina",
                            "dataset_type": "HIKARI2021"}])
-    assert set(et.filter_options(rows)) == {"pipelines", "datasets", "statuses"}
+    # Jaminannya: TIDAK ADA dimensi kepemilikan. Dimensi lain boleh bertambah
+    # (mis. mode eksekusi) — yang dijaga adalah pemilik tidak pernah menjadi
+    # penyaring, sehingga riwayat tetap terbuka bagi siapa pun.
+    dimensions = set(et.filter_options(rows))
+    assert not dimensions & {"owner", "owners", "pemilik", "users"}
+    assert dimensions == {"pipelines", "datasets", "statuses", "modes"}
     assert len(et.apply_filters(rows)) == 1
