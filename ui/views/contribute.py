@@ -199,15 +199,45 @@ def _render_review_flow() -> None:
         return
 
     try:
-        pending = list_submissions(status=SUBMISSION_PENDING)
+        waiting = list_submissions(status=SUBMISSION_PENDING)
     except Exception as e:                  # pragma: no cover - defensive
         st.error(f"Gagal membaca antrean: {e}")
         return
 
+    # Hanya PIPELINE yang ditinjau: isinya kode yang akan dieksekusi. Dataset
+    # tersimpan langsung, jadi tidak pernah masuk antrean ini lagi.
+    pending = [s for s in waiting if s["kind"] == KIND_PIPELINE]
+    st.caption("Hanya pipeline yang ditinjau — isinya kode yang dieksekusi. "
+               "Dataset tersimpan langsung.")
     if not pending:
-        st.caption("Tidak ada pengajuan yang menunggu tinjauan.")
+        st.caption("Tidak ada pengajuan pipeline yang menunggu tinjauan.")
     for item in pending:
         _render_submission_review_card(item, user)
+
+    # Data lama: pengajuan dataset yang terlanjur menunggu sebelum aturan ini
+    # berubah. Tidak dibuang — disetujui lewat jalur yang sudah ada, sehingga
+    # berkasnya pindah ke storage/datasets/ dan tidak ada yang hilang.
+    legacy = [s for s in waiting if s["kind"] == KIND_DATASET]
+    if legacy:
+        st.divider()
+        st.markdown("Pengajuan dataset lama")
+        st.caption("Dataset tidak lagi memerlukan persetujuan. Selesaikan "
+                   "pengajuan lama ini agar berkasnya masuk ke storage/datasets/.")
+        for item in legacy:
+            cols = st.columns([5, 2])
+            cols[0].markdown(f"`#{item['id']}` **{item['original_filename']}**")
+            if cols[1].button("Selesaikan", key=f"legacy_ds_{item['id']}",
+                              use_container_width=True):
+                try:
+                    approve_submission(item["id"], actor=user,
+                                       note="Diselesaikan: dataset tidak lagi "
+                                            "memerlukan persetujuan.")
+                except Exception as e:
+                    st.error(f"Gagal menyelesaikan: {e}")
+                else:
+                    st.success(f"#{item['id']} selesai — berkas masuk ke "
+                               f"storage/datasets/.")
+                    st.rerun()
 
     st.divider()
     _render_registered_pipelines(user)
@@ -976,24 +1006,21 @@ def _render_dataset_upload_tab() -> None:
             key="contrib_login_dataset",
         )
         return
-    st.caption("Berkas diajukan untuk ditinjau Research Admin sebelum tersedia "
-               "untuk eksperimen.")
-    if st.button("Ajukan untuk ditinjau", type="primary",
+    # Dataset adalah DATA, bukan kode yang dieksekusi — jadi ia tidak melewati
+    # tinjauan: begitu lolos pemeriksaan, berkasnya langsung tersimpan. Seluruh
+    # pengaman sebelum titik ini tetap berlaku (batas ukuran, sanitasi nama,
+    # penolakan menimpa, ekstensi yang diizinkan), dan `save_dataset_upload`
+    # tetap memanggil `require_upload` sehingga izinnya ditegakkan di lapis aksi.
+    st.caption("Tersimpan langsung setelah lolos pemeriksaan.")
+    if st.button("Simpan dataset", type="primary",
                  key="contrib_submit_dataset"):
         try:
-            submission = submit_dataset(
-                uploaded, safe, user=user,
-                metadata={"size": size, "detected_format":
-                          (diag.get("profile") or {}).get("detected_format")},
-                validation={"compatible_types": diag.get("compatible_types") or [],
-                            "profile": diag.get("profile") or {}},
-            )
-        except (AuthError, OSError) as e:
-            st.error(f"Gagal mengajukan: {e}")
+            written = save_dataset_upload(uploaded, target, user=user)
+        except (AuthError, PermissionDenied, OSError) as e:
+            st.error(f"Gagal menyimpan: {e}")
             return
-        st.success(f"Diajukan sebagai pengajuan #{submission['id']}.")
-        st.caption("Menunggu peninjauan Research Admin — dataset ini **belum** "
-                   "tersedia di halaman Run Experiment sampai disetujui.")
+        st.success(f"Tersimpan sebagai `{safe}` ({format_size(written)}).")
+        st.caption("Sudah dapat dipilih di halaman Run Experiment.")
 
 
 def _render_dataset_server_tab() -> None:

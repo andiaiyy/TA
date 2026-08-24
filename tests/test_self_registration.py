@@ -38,11 +38,23 @@ def db(tmp_path):
 
 # ── registration produces a rightless account ─────────────────────────────
 
-def test_registration_creates_a_pending_contributor(db):
+def _pending_account(db, username="rina"):
+    """Akun berstatus pending.
+
+    Pendaftaran kini langsung AKTIF, jadi status pending hanya muncul bila
+    Research Admin menetapkannya. Jaminan "akun pending nol hak" tetap berlaku
+    dan tetap diuji — hanya cara membuatnya yang berubah.
+    """
+    register_account(username, GOOD_PASSWORD, GOOD_PASSWORD, db_path=db)
+    set_user_status(username, STATUS_PENDING, actor=ADMIN, db_path=db)
+    return get_user(username, db)
+
+
+def test_registration_creates_an_active_contributor(db):
     user = register_account("rina", GOOD_PASSWORD, GOOD_PASSWORD,
                             reason="mau unggah dataset TLS", db_path=db)
 
-    assert user["status"] == STATUS_PENDING
+    assert user["status"] == STATUS_ACTIVE
     assert user["role"] == ROLE_CONTRIBUTOR
     assert user["reason"] == "mau unggah dataset TLS"
     assert user["requested_at"]
@@ -61,7 +73,9 @@ def test_registration_never_accepts_a_role_from_the_caller(db):
 
 
 def test_a_pending_account_has_no_rights_at_all(db):
-    user = register_account("rina", GOOD_PASSWORD, GOOD_PASSWORD, db_path=db)
+    """Pendaftaran kini langsung aktif, tetapi status pending masih ada:
+    Research Admin dapat menetapkannya. Akun pending tetap nol hak."""
+    user = _pending_account(db)
 
     assert is_account_active(user) is False
     assert can_upload(user) is False
@@ -133,7 +147,7 @@ def test_reason_is_capped_in_length(db):
 
 def test_a_pending_account_can_authenticate_but_stays_rightless(db):
     """Pilihan desain: boleh masuk supaya statusnya terlihat, hak tetap nol."""
-    register_account("rina", GOOD_PASSWORD, GOOD_PASSWORD, db_path=db)
+    _pending_account(db)
     user = authenticate("rina", GOOD_PASSWORD, db)
 
     assert user is not None
@@ -195,8 +209,7 @@ def _files_on_disk(storage):
 def test_a_pending_account_cannot_submit_a_dataset(storage):
     from orchestrator.submission_service import list_submissions, submit_dataset
 
-    pending_user = register_account("rina", GOOD_PASSWORD, GOOD_PASSWORD,
-                                    db_path=storage["db"])
+    pending_user = _pending_account(storage["db"])
 
     with pytest.raises(PermissionDenied, match="menunggu persetujuan"):
         submit_dataset(_Upload("d.csv", b"a,b\n1,2\n"), "d.csv",
@@ -210,8 +223,7 @@ def test_a_pending_account_cannot_submit_a_dataset(storage):
 def test_a_pending_account_cannot_submit_a_pipeline(storage):
     from orchestrator.submission_service import list_submissions, submit_pipeline
 
-    pending_user = register_account("rina", GOOD_PASSWORD, GOOD_PASSWORD,
-                                    db_path=storage["db"])
+    pending_user = _pending_account(storage["db"])
 
     with pytest.raises(PermissionDenied):
         submit_pipeline([("p.py", "x = 1\n")], "p.py", user=pending_user,
@@ -226,7 +238,7 @@ def test_a_stale_session_claiming_active_is_still_refused(storage):
     Lapis aksi membaca ulang DB, jadi tetap ditolak."""
     from orchestrator.submission_service import list_submissions, submit_dataset
 
-    register_account("rina", GOOD_PASSWORD, GOOD_PASSWORD, db_path=storage["db"])
+    _pending_account(storage["db"])
     stale = {"username": "rina", "role": ROLE_RESEARCH_ADMIN,
              "status": STATUS_ACTIVE}          # klaim palsu
 
@@ -285,7 +297,9 @@ def test_activation_records_who_and_when(db):
     {"username": "budi", "role": ROLE_RESEARCH_ADMIN, "status": STATUS_PENDING},
 ])
 def test_only_an_active_research_admin_may_activate(db, actor):
-    register_account("calon", GOOD_PASSWORD, GOOD_PASSWORD, db_path=db)
+    """Akun dinonaktifkan lalu dicoba diaktifkan kembali oleh pihak tak berhak.
+    (Pendaftaran kini langsung aktif, jadi kasusnya dibuat eksplisit.)"""
+    _pending_account(db, "calon")
     with pytest.raises(PermissionDenied):
         set_user_status("calon", STATUS_ACTIVE, actor=actor, db_path=db)
     assert get_user("calon", db)["status"] == STATUS_PENDING
@@ -310,9 +324,10 @@ def test_role_promotion_is_admin_only_and_explicit(db):
 
 
 def test_pending_list_only_contains_waiting_accounts(db):
+    """Pendaftaran menghasilkan akun aktif; hanya yang ditetapkan pending oleh
+    Research Admin yang muncul di daftar menunggu."""
     register_account("rina", GOOD_PASSWORD, GOOD_PASSWORD, db_path=db)
-    register_account("budi", GOOD_PASSWORD, GOOD_PASSWORD, db_path=db)
-    set_user_status("rina", STATUS_ACTIVE, actor=ADMIN, db_path=db)
+    _pending_account(db, "budi")
 
     waiting = [u["username"] for u in list_pending_accounts(db)]
     assert waiting == ["budi"]

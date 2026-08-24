@@ -22,6 +22,7 @@ from ui.components.result_views import normalize_result_payload, render_results
 from ui.components.dashboard import (
     select_running, progress_view, elapsed_seconds, format_elapsed,
 )
+from orchestrator import run_mode as rm
 from ui.components import experiment_table as et
 from ui.components import dialogs as dlg
 
@@ -149,9 +150,12 @@ def _dataset_basename(path) -> str:
 def _pipeline_params() -> dict:
     """{pipeline_id: {param: nilai}} dari get_info() setiap pipeline terdaftar.
 
-    Ini SATU-SATUNYA sumber parameter yang nyata: basis data dan artefak tidak
-    menyimpan hiperparameter per eksperimen (lihat et.PARAM_PROVENANCE).
-    Nilainya bersifat DEFINISI, karena itu asal-usulnya selalu dinyatakan di UI.
+    Ini adalah CADANGAN, bukan sumber utama: eksperimen yang dijalankan sejak
+    mode eksekusi ada membawa ``params_used`` sendiri, dan ``et.build_rows``
+    memakainya lebih dulu. Fungsi ini hanya mengisi baris lama yang memang
+    belum pernah mencatat parameternya. Nilainya bersifat DEFINISI — nilai pada
+    kode saat ini — karena itu asal-usulnya selalu dinyatakan di UI
+    (lihat ``et.PARAM_PROVENANCE``).
     Di-cache karena membangun instance pipeline tidak gratis.
     """
     out: dict[str, dict] = {}
@@ -335,6 +339,15 @@ def _render_filters(rows: list[dict]) -> dict:
         statuses = st.multiselect("Status", options["statuses"],
                                   default=saved.get("statuses") or [],
                                   key="_hist_f_status")
+        # Kosong = SEMUA mode. Run eksplorasi tidak pernah disembunyikan secara
+        # bawaan — penyaringan mode adalah pilihan pengguna.
+        modes = st.multiselect(
+            "Mode eksekusi", options["modes"],
+            default=saved.get("modes") or [],
+            format_func=lambda m: et.MODE_FILTER_LABELS.get(m, m),
+            key="_hist_f_mode",
+            help=et.MODE_FILTER_DEFAULT_NOTE,
+        )
         cols = st.columns(2)
         start = cols[0].date_input("Dari tanggal", value=saved.get("start"),
                                    key="_hist_f_start", format="YYYY-MM-DD")
@@ -342,13 +355,13 @@ def _render_filters(rows: list[dict]) -> dict:
                                  key="_hist_f_end", format="YYYY-MM-DD")
         if st.button("Bersihkan filter", key="_hist_f_clear"):
             for key in ("_hist_f_pipeline", "_hist_f_dataset", "_hist_f_status",
-                        "_hist_f_start", "_hist_f_end"):
+                        "_hist_f_mode", "_hist_f_start", "_hist_f_end"):
                 st.session_state.pop(key, None)
             st.session_state.pop(_FILTER_KEY, None)
             st.rerun()
 
     filters = {"pipelines": pipelines, "datasets": datasets,
-               "statuses": statuses,
+               "statuses": statuses, "modes": modes,
                "start": start if isinstance(start, date) else None,
                "end": end if isinstance(end, date) else None}
     st.session_state[_FILTER_KEY] = filters
@@ -567,6 +580,39 @@ def _detail_payload(experiment_id: str) -> dict | None:
     return full
 
 
+def _render_mode_details(exp: dict) -> None:
+    """Mode + parameter yang dipakai + mana yang berbeda dari bawaan.
+
+    Sumbernya berbeda tergantung usia record, dan perbedaan itu DINYATAKAN:
+    eksperimen yang mencatat ``params_used`` menampilkan angka yang benar-benar
+    dipakai saat itu; record lama menampilkan definisi pipeline pada kode saat
+    ini, dengan keterangan bahwa parameternya memang belum pernah dicatat.
+    """
+    mode = rm.mode_of(exp)
+    used = rm.params_of(exp)
+    locked = rm.locked_params(exp.get("pipeline_id") or "")
+
+    if rm.is_exploration(mode):
+        st.warning(rm.EXPLORATION_WARNING)
+
+    if not used:
+        if locked:
+            st.caption(
+                "Parameter (definisi pipeline saat ini — eksperimen ini "
+                f"dijalankan sebelum parameter dicatat per run): "
+                f"{rm.format_params(locked)}"
+            )
+        return
+
+    changed = rm.changed_keys(used, locked)
+    st.caption("Parameter yang dipakai (direkam saat run): "
+               + rm.format_params(used, locked))
+    if changed:
+        st.caption(f"Berbeda dari bawaan: {', '.join(f'`{k}`' for k in sorted(changed))}.")
+    else:
+        st.caption("Seluruh parameter sama dengan nilai terkunci pipeline.")
+
+
 def _detail_dialog_body(experiment_id: str) -> None:
     """Pop-up detail view. Renders the SHARED interactive result component
     (zero duplication): confusion matrix, feature importance, ROC, learning
@@ -585,7 +631,9 @@ def _detail_dialog_body(experiment_id: str) -> None:
     metrics = full.get("metrics")
     metadata = full.get("metadata")
 
-    st.markdown(f"**{exp['pipeline_id']}** · {exp['dataset_type']} · `{exp['status']}`")
+    st.markdown(f"**{exp['pipeline_id']}** · {exp['dataset_type']} · "
+                f"`{exp['status']}` · {rm.run_mode_badge(exp.get('run_mode'))}")
+    _render_mode_details(exp)
     st.caption(f"ID `{exp['id']}` · Created {(exp.get('created_at') or '-')[:19]} · "
                f"Completed {(exp.get('completed_at') or '-')[:19]}")
     # Ketertelusuran pipeline TERUNGGAH: versi + SHA-256 berkasnya. Pipeline
@@ -652,7 +700,10 @@ def _render_selected_actions(selected_id: str) -> None:
         st.session_state.pop("selected_experiment_id", None)
         return
     exp = full["experiment"]
-    st.markdown(f"**Terpilih:** `{exp['id'][:8]}` — {exp['pipeline_id']} · `{exp['status']}`")
+    # Mode ikut pada baris ringkas ini juga: tidak boleh ada tempat di mana
+    # sebuah run eksplorasi terlihat seperti run resmi.
+    st.markdown(f"**Terpilih:** `{exp['id'][:8]}` — {exp['pipeline_id']} · "
+                f"`{exp['status']}` · {rm.run_mode_badge(exp.get('run_mode'))}")
     cols = st.columns(3)
     if cols[0].button("Lihat detail", key=f"open_{selected_id}", type="primary",
                       use_container_width=True):

@@ -28,6 +28,10 @@ class HikariKNNPipeline(BasePipeline):
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
         random_state = pipeline_input.random_state
+        # Hyperparameter yang berlaku: nilai terkunci get_info()['fixed_params'],
+        # ditimpa hanya bila run EKSPLORASI mengirim override tervalidasi.
+        # Run resmi selalu menghasilkan nilai terkunci yang sama persis.
+        params = self._resolved_params(pipeline_input)
 
         X, y, feature_names, label_mapping = common_preprocess(df, label_col)
 
@@ -45,7 +49,7 @@ class HikariKNNPipeline(BasePipeline):
         X_test_scaled = scaler.transform(X_test)
 
         self._emit_progress(progress, "Training")
-        clf = KNeighborsClassifier(n_neighbors=5, n_jobs=2)
+        clf = KNeighborsClassifier(n_neighbors=params["n_neighbors"], n_jobs=2)
         clf.fit(X_train_scaled, y_train_bal)
 
         y_pred = clf.predict(X_test_scaled)
@@ -74,7 +78,8 @@ class HikariKNNPipeline(BasePipeline):
         self._emit_progress(progress, "Computing learning curve")
         try:
             train_sizes, train_scores, val_scores = learning_curve(
-                estimator=KNeighborsClassifier(n_neighbors=5, n_jobs=2),
+                estimator=KNeighborsClassifier(
+                    n_neighbors=params["n_neighbors"], n_jobs=2),
                 X=X_train_scaled, y=y_train_bal,
                 train_sizes=[0.2, 0.4, 0.6, 0.8, 1.0],
                 cv=5, scoring="f1_weighted", n_jobs=2, random_state=random_state,

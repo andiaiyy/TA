@@ -15,6 +15,16 @@ class PipelineInput:
     test_size: float = 0.2
     random_state: int = 42
     dataset_path: str = ""   # raw file path for pipelines that read files directly (e.g. EVE Suricata)
+    # Penyesuaian hyperparameter untuk RUN EKSPLORASI. OPSIONAL dan default
+    # KOSONG: pemanggilan lama (dan seluruh test yang ada) tetap berjalan persis
+    # seperti sebelumnya, dan kosong berarti "pakai nilai terkunci pipeline".
+    #
+    # Isinya sudah divalidasi orchestrator (orchestrator/run_mode.py): hanya
+    # kunci yang benar-benar ada pada get_info()['fixed_params'] pipeline yang
+    # bersangkutan, dengan tipe yang sesuai dan nilai di dalam batas aman. Run
+    # RESMI selalu mengirim dict kosong — override dibuang di orchestrator,
+    # bukan di sini.
+    param_overrides: dict = field(default_factory=dict)
 
 
 @dataclass

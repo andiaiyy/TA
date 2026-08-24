@@ -116,6 +116,29 @@ MIGRATIONS = [
         "sql": "ALTER TABLE users ADD COLUMN activated_at TEXT",
         "add_column": ("users", "activated_at"),
     },
+    # v16-v18: mode eksekusi + pencatatan parameter. ADITIF seluruhnya —
+    # tiga ALTER TABLE ADD COLUMN nullable pada `experiments`. Tabel TIDAK
+    # dibuat ulang, tidak ada baris yang disentuh, dan tidak ada nilai yang
+    # diisi mundur: record lama tetap NULL, dan NULL dibaca sebagai run RESMI
+    # (orchestrator/run_mode.normalize_run_mode).
+    {
+        "version": 16,
+        "description": "Add nullable run_mode to experiments (NULL = official)",
+        "sql": "ALTER TABLE experiments ADD COLUMN run_mode TEXT",
+        "add_column": ("experiments", "run_mode"),
+    },
+    {
+        "version": 17,
+        "description": "Add nullable params_used (JSON) to experiments",
+        "sql": "ALTER TABLE experiments ADD COLUMN params_used TEXT",
+        "add_column": ("experiments", "params_used"),
+    },
+    {
+        "version": 18,
+        "description": "Add nullable params_changed flag to experiments",
+        "sql": "ALTER TABLE experiments ADD COLUMN params_changed INTEGER",
+        "add_column": ("experiments", "params_changed"),
+    },
 ]
 
 CREATE_SCHEMA_VERSION_TABLE = """

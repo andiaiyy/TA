@@ -17,14 +17,24 @@ semantiknya (:func:`semantics_note`), perbandingan lintas keluarga memunculkan
 peringatan (:func:`comparison_warnings`), berkas CSV membawa kolom keterangan
 per baris, dan modul ini TIDAK PERNAH menyusun peringkat "model terbaik".
 
-**Parameter tidak pernah dikarang.** Basis data maupun artefak tidak menyimpan
-hiperparameter per eksperimen (metadata.json hanya memuat identitas dataset,
-daftar fitur, label_mapping, dan versi lingkungan). Satu-satunya sumber nyata
-adalah ``get_info()['fixed_params']`` milik pipeline, yang bersifat
-DEFINISI — nilai yang berlaku pada kode saat ini, bukan yang direkam saat
-eksperimen berjalan. Modul ini membacanya apa adanya, menandai asal-usulnya
-lewat :data:`PARAM_PROVENANCE`, dan mengisi "—" untuk pipeline yang memang tidak
-punya kunci itu (mis. EVE tidak memakai ``test_size``).
+**Parameter tidak pernah dikarang.** Ada DUA asal-usul, dan keduanya dinyatakan
+apa adanya lewat :data:`PARAM_PROVENANCE`:
+
+* eksperimen yang dijalankan SEJAK mode eksekusi ada membawa kolom
+  ``params_used`` — parameter yang benar-benar dipakai saat itu, tercatat per
+  eksperimen;
+* record lama (kolom itu NULL) jatuh kembali ke ``get_info()['fixed_params']``
+  pipeline, yang bersifat DEFINISI — nilai yang berlaku pada kode saat ini,
+  bukan yang direkam saat eksperimen berjalan.
+
+Pipeline yang memang tidak punya sebuah kunci tetap mengisi "—" (mis. EVE tidak
+memakai ``test_size``); tidak ada nilai yang ditebak untuk mengisi kekosongan.
+
+**Mode eksekusi selalu terlihat.** Setiap baris membawa penandanya
+(:func:`~orchestrator.run_mode.run_mode_badge`), kolom Mode ikut set bawaan,
+CSV membawanya sebagai kolom tersendiri, dan mencampur run resmi dengan run
+eksplorasi memunculkan peringatan — sekelas peringatan semantik metrik di atas.
+Record dengan ``run_mode`` NULL dibaca sebagai RESMI, bukan "tidak diketahui".
 """
 from __future__ import annotations
 
@@ -32,6 +42,11 @@ import csv
 import io
 import re
 from datetime import datetime, timezone
+
+from orchestrator.run_mode import (
+    ALL_RUN_MODES, MIXED_MODE_WARNING, RUN_MODE_BADGES, format_params,
+    load_params, locked_params, normalize_run_mode, run_mode_badge,
+)
 
 # ── Keluarga pipeline & semantik metrik ───────────────────────────────────
 
@@ -61,9 +76,14 @@ DATASET_MISMATCH_WARNING = (
 )
 
 PARAM_PROVENANCE = (
-    "Parameter dibaca dari definisi pipeline (get_info → fixed_params) pada "
-    "kode saat ini, bukan direkam per eksperimen — basis data dan artefak "
-    "tidak menyimpan hiperparameter per proses."
+    "Parameter bertanda ✓ direkam saat eksperimen itu berjalan; sisanya dibaca "
+    "dari definisi pipeline (get_info → fixed_params) pada kode saat ini, "
+    "karena eksperimen lama belum mencatat parameternya."
+)
+PARAM_RECORDED_MARK = "✓"
+MODE_COLUMN_NOTE = (
+    "Kolom Mode: 🔒 Resmi = parameter terkunci, dasar perbandingan & replikasi; "
+    "🧪 Eksplorasi = parameter disesuaikan, di luar perbandingan resmi."
 )
 
 
@@ -123,6 +143,7 @@ _IDENTITY_COLUMNS = [
     ("status", "Status", KIND_TEXT),
     ("dataset_hash", "Hash dataset", KIND_TEXT),
     ("pipeline_version", "Versi pipeline", KIND_TEXT),
+    ("mode", "Mode", KIND_TEXT),
 ]
 _METRIC_COLUMNS = [
     ("accuracy", "Accuracy", KIND_METRIC),
@@ -133,7 +154,10 @@ _METRIC_COLUMNS = [
 ]
 
 # Set inti yang tampil sebelum pengguna memilih apa pun.
-DEFAULT_COLUMNS = ["waktu", "pipeline", "dataset", "status", "accuracy", "f1"]
+# "mode" ikut set bawaan: run eksplorasi harus terbedakan SEKILAS, tanpa
+# pengguna perlu membuka pemilih kolom lebih dulu.
+DEFAULT_COLUMNS = ["waktu", "pipeline", "dataset", "mode", "status",
+                   "accuracy", "f1"]
 
 METRIC_DECIMALS = 4
 MAX_COMPARE = 5
@@ -225,6 +249,11 @@ def build_rows(experiments, *, roc_reader=None, params_reader=None) -> list[dict
     ``params_reader() -> {pipeline_id: {param: nilai}}`` memberi parameter
     tingkat-definisi. Keduanya opsional — tanpa keduanya, kolom terkait berisi
     None dan disajikan "—".
+
+    Parameter satu baris diambil dari ``params_used`` record itu bila ada
+    (nilai yang BENAR-BENAR dipakai saat itu), dan hanya jatuh ke definisi
+    pipeline bila record-nya memang belum mencatat apa pun. ``_params_recorded``
+    menandai yang mana, supaya UI tidak menyamakan keduanya.
     """
     params_map = (params_reader() or {}) if params_reader else {}
     rows = []
@@ -255,13 +284,21 @@ def build_rows(experiments, *, roc_reader=None, params_reader=None) -> list[dict
             # NULL untuk pipeline bawaan (definisinya ada di git) — "—", bukan 0.
             "pipeline_version": (e.get("pipeline_version")
                                  if e.get("pipeline_version") is not None else "—"),
+            # NULL -> "resmi": record lama dibuat saat seluruh parameter masih
+            # terkunci, jadi ini fakta, bukan tebakan. Tidak pernah "?".
+            "mode": run_mode_badge(e.get("run_mode")),
+            "_mode": normalize_run_mode(e.get("run_mode")),
             "accuracy": e.get("accuracy"),
             "precision": e.get("precision_score"),
             "recall": e.get("recall"),
             "f1": e.get("f1_score"),
             "auc": auc,
         }
-        for key, value in (params_map.get(row["pipeline"]) or {}).items():
+        recorded = load_params(e.get("params_used"))
+        row["_params_used"] = recorded
+        row["_params_recorded"] = bool(recorded)
+        source = recorded or (params_map.get(row["pipeline"]) or {})
+        for key, value in source.items():
             row[f"param_{key}"] = value
         rows.append(row)
     return rows
@@ -323,19 +360,33 @@ def filter_options(rows) -> dict:
     """Nilai yang benar-benar muncul pada data — bukan daftar tetap."""
     def uniq(key):
         return sorted({r.get(key) for r in rows or [] if r.get(key)})
+    # Mode SELALU ditawarkan lengkap, bukan hanya yang kebetulan muncul: pilihan
+    # "hanya eksplorasi" harus ada meski belum satu pun run eksplorasi dibuat.
     return {"pipelines": uniq("pipeline"), "datasets": uniq("dataset"),
-            "statuses": uniq("status")}
+            "statuses": uniq("status"), "modes": list(ALL_RUN_MODES)}
+
+
+MODE_FILTER_LABELS = dict(RUN_MODE_BADGES)
+MODE_FILTER_DEFAULT_NOTE = (
+    "Bawaan menampilkan SEMUA mode — run eksplorasi tidak disembunyikan, "
+    "hanya ditandai."
+)
 
 
 def apply_filters(rows, *, pipelines=None, datasets=None, statuses=None,
-                  start=None, end=None) -> list[dict]:
+                  modes=None, start=None, end=None) -> list[dict]:
     """Saring baris YANG SUDAH DIBACA — tidak ada kueri ulang ke basis data.
 
-    Daftar kosong/None berarti "tanpa batasan" untuk dimensi itu.
+    Daftar kosong/None berarti "tanpa batasan" untuk dimensi itu — termasuk
+    ``modes``, sehingga bawaannya menampilkan kedua mode. Menyaring mode adalah
+    pilihan pengguna, bukan penyembunyian otomatis.
     """
+    wanted_modes = {normalize_run_mode(m) for m in modes} if modes else None
     out = []
     for row in rows or []:
         if pipelines and row.get("pipeline") not in pipelines:
+            continue
+        if wanted_modes is not None and row.get("_mode") not in wanted_modes:
             continue
         if datasets and row.get("dataset") not in datasets:
             continue
@@ -431,13 +482,29 @@ def apply_expression(rows, terms) -> list[dict]:
 
 # ── Perbandingan berdampingan ─────────────────────────────────────────────
 
-_COMPARE_IDENTITY = ["pipeline", "dataset", "waktu", "status", "durasi",
+_COMPARE_IDENTITY = ["pipeline", "dataset", "mode", "waktu", "status", "durasi",
                      "pemilik", "dataset_hash", "pipeline_version"]
+
+
+def modes_in(rows) -> list[str]:
+    """Mode yang muncul pada sekumpulan baris, urut tetap."""
+    present = {row.get("_mode") or normalize_run_mode(row.get("run_mode"))
+               for row in rows or []}
+    return [m for m in ALL_RUN_MODES if m in present]
+
+
+def is_mixed_mode(rows) -> bool:
+    """True bila run resmi DAN run eksplorasi dipilih bersama-sama."""
+    return len(modes_in(rows)) > 1
 
 
 def comparison_warnings(rows) -> list[str]:
     """Peringatan WAJIB sebelum menyandingkan angka."""
     warnings = []
+    # Mode lebih dulu: perbedaan parameter membuat angka tidak sebanding
+    # sebelum semantik metrik sempat menjadi soal.
+    if is_mixed_mode(rows):
+        warnings.append(MIXED_MODE_WARNING)
     if is_cross_family(rows):
         warnings.append(CROSS_FAMILY_WARNING)
     hashes = {r.get("_dataset_hash_full") for r in rows or []
@@ -504,23 +571,42 @@ def compare_selection_error(selected_ids) -> str:
 # ── Ekspor CSV ────────────────────────────────────────────────────────────
 
 CSV_SEMANTICS_COLUMN = "Semantik metrik"
+CSV_MODE_COLUMN = "Mode eksekusi"
+CSV_PARAMS_COLUMN = "Parameter dipakai"
+
+
+def row_params_text(row) -> str:
+    """Parameter satu baris sebagai teks, dengan nilai bawaan bila berbeda."""
+    used = row.get("_params_used") or {}
+    if not used:
+        return ""
+    try:
+        locked = locked_params(row.get("pipeline") or "")
+    except Exception:                   # pragma: no cover - defensif
+        locked = {}
+    return format_params(used, locked)
 
 
 def to_csv(rows, columns) -> str:
     """CSV yang MENGIKUTI kolom & filter aktif, bukan dump basis data.
 
-    Setiap baris membawa keterangan semantik metriknya sendiri, sehingga berkas
-    ini tidak menyesatkan bila dibuka terpisah dari aplikasi.
+    Tiga kolom SELALU ikut, apa pun pilihan kolom pengguna: semantik metrik,
+    mode eksekusi, dan parameter yang dipakai. Berkas CSV sering dibaca
+    terpisah dari aplikasi — tanpa ketiganya, sebuah run eksplorasi akan
+    terbaca persis seperti run resmi, dan itulah yang tidak boleh terjadi.
     """
     buffer = io.StringIO()
-    header = [c["label"] for c in columns] + [CSV_SEMANTICS_COLUMN]
+    header = ([c["label"] for c in columns]
+              + [CSV_SEMANTICS_COLUMN, CSV_MODE_COLUMN, CSV_PARAMS_COLUMN])
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(header)
     for row in rows or []:
         fam = family_of(row.get("dataset"))
         note = (f"{FAMILY_LABELS[fam]}: {METRIC_SEMANTICS[fam]}" if fam
                 else "keluarga pipeline tidak dikenal")
-        writer.writerow([cell_text(row, c) for c in columns] + [note])
+        writer.writerow([cell_text(row, c) for c in columns]
+                        + [note, run_mode_badge(row.get("_mode")),
+                           row_params_text(row)])
     return buffer.getvalue()
 
 

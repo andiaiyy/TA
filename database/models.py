@@ -36,7 +36,21 @@ CREATE TABLE IF NOT EXISTS experiments (
     -- definisinya ada di git, jadi tidak perlu versi/hash terpisah. Record lama
     -- tetap NULL dan TIDAK pernah diisi mundur.
     pipeline_version  INTEGER,
-    pipeline_hash     TEXT
+    pipeline_hash     TEXT,
+    -- Mode eksekusi (run resmi vs run eksplorasi). NULLABLE, dan NULL berarti
+    -- RESMI: 48 record yang sudah ada dibuat sebelum kolom ini ada, semuanya
+    -- memakai parameter terkunci, jadi membacanya sebagai resmi adalah fakta —
+    -- bukan asumsi. Tidak ada record lama yang diisi mundur.
+    run_mode          TEXT,
+    -- Parameter yang BENAR-BENAR dipakai run ini, sebagai JSON. NULL pada
+    -- record lama: nilainya tidak pernah dicatat saat itu, dan menebaknya
+    -- justru akan mengarang. Pembacanya jatuh kembali ke definisi pipeline
+    -- dengan asal-usul yang dinyatakan.
+    params_used       TEXT,
+    -- 1 bila ada parameter yang berbeda dari nilai terkunci. Turunan dari
+    -- params_used, disimpan supaya penyaringan & penandaan tidak perlu
+    -- membongkar JSON di setiap baris.
+    params_changed    INTEGER
 );
 """
 

@@ -71,6 +71,9 @@ def create_experiment(
     owner: str | None = None,
     pipeline_version: int | None = None,
     pipeline_hash: str | None = None,
+    run_mode: str | None = None,
+    params_used: str | None = None,
+    params_changed: int | None = None,
 ) -> None:
     """Insert new experiment with status QUEUED.
 
@@ -81,16 +84,23 @@ def create_experiment(
 
     ``pipeline_version``/``pipeline_hash`` hanya terisi untuk pipeline
     TERUNGGAH; pipeline bawaan membiarkannya NULL karena definisinya ada di git.
+
+    ``run_mode``/``params_used``/``params_changed`` mencatat mode eksekusi dan
+    parameter yang BENAR-BENAR dipakai. Ketiganya nullable: record yang dibuat
+    sebelum kolomnya ada tetap NULL, dan NULL dibaca sebagai run RESMI
+    (lihat ``orchestrator/run_mode.normalize_run_mode``).
     """
     conn = get_connection(db_path)
     try:
         conn.execute(
             """INSERT INTO experiments (id, dataset_type, dataset_path, dataset_hash,
-               pipeline_id, status, created_at, owner, pipeline_version, pipeline_hash)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               pipeline_id, status, created_at, owner, pipeline_version, pipeline_hash,
+               run_mode, params_used, params_changed)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (experiment_id, dataset_type, dataset_path, dataset_hash,
              pipeline_id, STATUS_QUEUED, created_at, owner,
-             pipeline_version, pipeline_hash),
+             pipeline_version, pipeline_hash,
+             run_mode, params_used, params_changed),
         )
         conn.commit()
     finally:

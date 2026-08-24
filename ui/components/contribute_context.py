@@ -28,17 +28,18 @@ from ui.components.instructions import inject_css, render_flow
 
 logger = logging.getLogger(__name__)
 
-# Alur SESUDAH mengunggah — sama untuk kedua jalur, karena antrean tinjauannya
-# memang satu. Dipakai di tampilan awal halaman (sebelum pengguna memilih jalur).
+# Alur SESUDAH mengunggah, dipakai di tampilan awal halaman.
+# Dua jalur, dua aturan: dataset (DATA) tersimpan langsung; pipeline (KODE
+# yang akan dieksekusi) tetap melewati tinjauan Research Admin.
 AFTER_UPLOAD_FLOW = [
-    ("📤", "Ajukan"),
+    ("📤", "Unggah"),
     ("🔍", "Periksa otomatis"),
-    ("👤", "Tinjau Research Admin"),
-    ("✅", "Tersedia"),
+    ("✅", "Dataset tersimpan"),
+    ("👤", "Pipeline ditinjau"),
 ]
 AFTER_UPLOAD_FLOW_ALT = (
-    "Setelah diajukan: berkas diperiksa otomatis, menunggu tinjauan Research "
-    "Admin, lalu disetujui atau ditolak."
+    "Setelah diperiksa: dataset langsung tersimpan; pipeline menunggu tinjauan "
+    "Research Admin karena berisi kode yang dieksekusi."
 )
 
 

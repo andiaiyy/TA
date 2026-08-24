@@ -53,6 +53,10 @@ class HikariRFCPipeline(BasePipeline):
         df = pipeline_input.df.copy()
         label_col = pipeline_input.label_column
         random_state = pipeline_input.random_state
+        # Hyperparameter yang berlaku: nilai terkunci get_info()['fixed_params'],
+        # ditimpa hanya bila run EKSPLORASI mengirim override tervalidasi.
+        # Run resmi selalu menghasilkan nilai terkunci yang sama persis.
+        params = self._resolved_params(pipeline_input)
 
         # Step 1: Drop non-feature columns
         df.drop(columns=[c for c in _DROP_COLS if c in df.columns], inplace=True, errors="ignore")
@@ -101,7 +105,7 @@ class HikariRFCPipeline(BasePipeline):
         self._emit_progress(progress, "Training")
         # Step 7: Train model on balanced + scaled train data
         clf = RandomForestClassifier(
-            n_estimators=100,
+            n_estimators=params["n_estimators"],
             random_state=random_state,
             n_jobs=2,
         )
@@ -147,7 +151,8 @@ class HikariRFCPipeline(BasePipeline):
         try:
             train_sizes, train_scores, val_scores = learning_curve(
                 estimator=RandomForestClassifier(
-                    n_estimators=100, random_state=random_state, n_jobs=2
+                    n_estimators=params["n_estimators"],
+                    random_state=random_state, n_jobs=2
                 ),
                 X=X_train_scaled,
                 y=y_train_bal,

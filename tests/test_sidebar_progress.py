@@ -415,7 +415,8 @@ def test_the_block_order_is_breadcrumb_progress_identity(tmp_path, page):
     assert breadcrumb < progress, texts
     # Pemicu popover tidak terekspos sebagai button di AppTest; isi daftarnya
     # yang terlihat — kehadirannya membuktikan blok identitas ikut dirender.
-    assert "Pengunjung" in [b.label for b in at.sidebar.button]
+    # Pemicunya berlabel mode aktif; daftar pilihannya baru muncul saat ditekan.
+    assert "Mode pengunjung" in [b.label for b in at.sidebar.button]
 
 
 def test_each_block_is_separated_by_a_divider(tmp_path):

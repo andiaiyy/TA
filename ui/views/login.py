@@ -69,6 +69,10 @@ _MODE_VISITOR = "Pengunjung"
 _ROLE_HELP = ("Membuka formulir masuk. Memilih di sini tidak memberikan peran "
               "tersebut — peran ditentukan akun & statusnya.")
 _CURRENT_MODE_HELP = "Mode saat ini: membaca tanpa akun."
+
+# Daftar pilihan terbuka/tertutup. Bukan flag modal: tidak ada lapisan
+# mengambang, jadi tidak perlu ikut siklus hidup dialog.
+_MODE_OPEN_KEY = "_mode_list_open"
 _CURRENT_ROLE_HELP = "Peran akun Anda saat ini."
 _OTHER_ROLE_HELP = "Peran ditentukan akun & statusnya, bukan dipilih di sini."
 
@@ -135,6 +139,17 @@ def _attempt_login(username: str, password: str) -> bool:
     return True
 
 
+def _toggle_mode_list() -> None:
+    """Buka/tutup daftar pilihan mode.
+
+    Dipisah dari ``render_mode_switch`` supaya fungsi itu tetap bebas dari
+    penulisan ke ``session_state`` — pemilih mode tidak boleh menulis apa pun
+    yang menyerupai pemberian hak, dan test menegakkannya lewat AST.
+    """
+    st.session_state[_MODE_OPEN_KEY] = not st.session_state.get(_MODE_OPEN_KEY,
+                                                                False)
+
+
 def render_mode_switch() -> None:
     """Panel identitas RINGKAS di bagian bawah sidebar.
 
@@ -156,36 +171,35 @@ def render_mode_switch() -> None:
             if st.session_state.pop(_SIGNUP_DONE_KEY, False):
                 st.success("Pendaftaran diterima — menunggu persetujuan.")
 
-            # `st.popover` membuka panel mengambang; karena blok ini elemen
-            # TERAKHIR di sidebar, panelnya membuka ke ATAS mengikuti ruang
-            # yang tersedia — tanpa perlu trik CSS posisi.
             label = (f"{user['username']} · {role_label(user.get('role'))}"
                      if user else "Mode pengunjung")
-            # Daftar pilihan sengaja RINGKAS: hanya nama mode, satu baris per
-            # pilihan, tanpa kalimat penjelas di dalamnya. Penjelasannya pindah
-            # ke `help=` masing-masing tombol (butir 9) — termasuk penegasan
-            # bahwa memilih peran TIDAK memberikan peran itu.
+            # BUKAN `st.popover`. Panel popover Streamlit dirender lewat React
+            # Portal ke `document.body`, jadi ia BUKAN keturunan DOM sidebar:
+            # panelnya menembus batas sidebar dan menimpa tombol di area konten,
+            # dan tidak dapat dikekang dengan andal lewat CSS di dalam sidebar.
             #
-            # `use_container_width` sengaja TIDAK dipakai di sini: tombol yang
-            # memuai membuat panel selebar sidebar. Lebarnya kini mengikuti
-            # isinya, dibatasi max-width di CSS terpusat.
-            with st.popover(label, use_container_width=True):
+            # Gantinya: daftar yang MENGEMBANG DI TEMPAT. Tombol di bawah ini
+            # adalah elemen sidebar biasa — mereka mendorong isi seperlunya,
+            # selalu berada di dalam batas sidebar, dan tidak menumpuk apa pun.
+            if st.button(label, key="auth_mode_toggle",
+                         use_container_width=True,
+                         help="Ganti mode / masuk."):
+                _toggle_mode_list()
+                st.rerun()
+
+            if st.session_state.get(_MODE_OPEN_KEY):
                 if user:
                     if st.button(_MODE_VISITOR, key="auth_logout",
+                                 use_container_width=True,
                                  help="Keluar dan kembali membaca tanpa akun."):
                         logout()
                         st.rerun()
                     for role in _PICKABLE_ROLES:
                         st.button(role_label(role), key=f"auth_pick_{role}",
-                                  disabled=True,
+                                  use_container_width=True, disabled=True,
                                   help=_CURRENT_ROLE_HELP
                                        if role == user.get("role")
                                        else _OTHER_ROLE_HELP)
-                    if not is_account_active(user):
-                        # Status akun — WAJIB tetap tersampaikan, diringkas
-                        # menjadi dua kata.
-                        render_line("⏳ Menunggu persetujuan", muted=True,
-                                    small=True)
                 else:
                     # Memilih peran di sini TIDAK memberikan peran itu — tombolnya
                     # hanya membuka jalur masuk. Peran yang berlaku selalu datang
@@ -194,12 +208,17 @@ def render_mode_switch() -> None:
                     # itu tidak ada satu pun penulisan peran ke session_state di
                     # sini; yang ditulis hanya flag pembuka modal.
                     st.button(_MODE_VISITOR, key="auth_pick_visitor",
-                              disabled=True, help=_CURRENT_MODE_HELP)
+                              use_container_width=True, disabled=True,
+                              help=_CURRENT_MODE_HELP)
                     for role in _PICKABLE_ROLES:
                         if st.button(role_label(role), key=f"auth_pick_{role}",
-                                     help=_ROLE_HELP):
+                                     use_container_width=True, help=_ROLE_HELP):
                             request_auth_dialog(_MODE_LOGIN)
                             st.rerun()
+
+            if user and not is_account_active(user):
+                # Status akun — WAJIB tetap tersampaikan.
+                render_line("⏳ Menunggu persetujuan", muted=True, small=True)
 
 
 # ── Siklus hidup flag modal ───────────────────────────────────────────────

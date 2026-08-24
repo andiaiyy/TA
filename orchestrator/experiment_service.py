@@ -25,6 +25,7 @@ from utils.hashing import sha256_file
 from utils.timestamps import now_iso
 from utils.artifact_saver import save_all_artifacts
 from utils.error_sanitizer import sanitize_error
+from orchestrator.run_mode import ParamError, dump_params, resolve_params
 
 # [DIAG] In-process diagnostic stash for UI consumption.
 # Keyed by experiment_id, stores resolved USE_ASYNC, chosen branch,
@@ -48,9 +49,19 @@ def create_and_run_experiment(
     dataset_path: str,
     pipeline_id: str,
     owner: str | None = None,
+    run_mode: str | None = None,
+    param_overrides: dict | None = None,
 ) -> dict:
     """
     Create and execute an experiment.
+
+    ``run_mode`` (opsional, default None) memilih mode eksekusi. None dan nilai
+    tak dikenal berarti **run RESMI** — bawaan platform tidak pernah eksplorasi.
+    Pada run resmi ``param_overrides`` DIBUANG sepenuhnya oleh
+    ``resolve_params`` sebelum apa pun dijalankan, jadi tidak ada jalur yang
+    membuat run resmi memakai nilai yang diubah. Parameter yang benar-benar
+    dipakai dicatat di basis data (``run_mode``/``params_used``) dan di
+    metadata artefak, untuk kedua mode.
 
     ``owner`` (opsional, default None) hanyalah METADATA pencatatan: username
     pengguna yang sedang masuk, atau None bila dijalankan tanpa login. Nilainya
@@ -78,6 +89,26 @@ def create_and_run_experiment(
     """
     experiment_id = str(uuid.uuid4())
 
+    # Mode + parameter diselesaikan SEBELUM record dibuat, supaya baris basis
+    # data sudah membawa modenya sejak QUEUED — tidak ada jendela waktu di mana
+    # sebuah run eksplorasi terlihat seperti run resmi.
+    try:
+        resolved = resolve_params(pipeline_id, run_mode, param_overrides)
+    except ParamError as e:
+        logger.warning("Parameter ditolak untuk %s: %s", pipeline_id, e)
+        return {
+            "success": False,
+            "experiment_id": None,
+            "async_mode": USE_ASYNC,
+            "error": str(e),
+            "metrics": None,
+            "feature_names": None,
+            "label_mapping": None,
+        }
+    effective_params = resolved["params"]
+    applied_overrides = resolved["overrides"]
+    resolved_mode = resolved["run_mode"]
+
     # [DIAG-PATH] Unsanitized entry log — prints what the orchestrator received
     # from the UI BEFORE any sanitizer touches it. Lets us correlate the
     # experiment_id with the raw dataset_path and existence check.
@@ -99,6 +130,9 @@ def create_and_run_experiment(
             pipeline_id=pipeline_id,
             created_at=now_iso(),
             owner=owner,
+            run_mode=resolved_mode,
+            params_used=dump_params(effective_params),
+            params_changed=1 if resolved["changed"] else 0,
             # Ketertelusuran pipeline terunggah: versi + SHA-256 berkasnya.
             # Pipeline bawaan menghasilkan None/None (definisinya ada di git).
             **traceability_for(pipeline_id),
@@ -125,6 +159,7 @@ def create_and_run_experiment(
                 dataset_type=dataset_type,
                 dataset_path=dataset_path,
                 pipeline_id=pipeline_id,
+                param_overrides=applied_overrides,
             )
             # [DIAG] Stash dispatch facts for the UI diagnostic block.
             _DIAG_DISPATCH[experiment_id] = {
@@ -167,7 +202,8 @@ def create_and_run_experiment(
             "task_id": None,
             "timestamp": now_iso(),
         }
-        result = execute_pipeline(pipeline_id, df, dataset_type, dataset_path=dataset_path, progress=None)
+        result = execute_pipeline(pipeline_id, df, dataset_type, dataset_path=dataset_path,
+                                  progress=None, param_overrides=applied_overrides)
 
         # [DIAG-PATH] Sync-path post-pipeline state snapshot — mirrors the worker
         # snapshot in celery_worker.py so the failure-point trail is identical
@@ -205,6 +241,14 @@ def create_and_run_experiment(
             "feature_names": result.feature_names,
             "created_at": now_iso(),
             "completed_at": now_iso(),
+            # Mode + parameter ikut ke metadata.json supaya artefak dapat
+            # berdiri sendiri: dibaca terpisah dari basis data pun, terlihat
+            # apakah ia run resmi dan dengan parameter apa. Struktur
+            # metrics.json TIDAK disentuh — tidak ada field metrik yang berubah.
+            "run_mode": resolved_mode,
+            "params_used": effective_params,
+            "params_locked": resolved["locked"],
+            "params_changed": resolved["changed"],
         }
         # Save artifacts — if this fails, nothing is on disk yet
         try:
@@ -448,8 +492,33 @@ def rerun_experiment(experiment_id: str) -> dict:
             "feature_names": None,
             "label_mapping": None,
         }
+    # Mengulang harus mengulang HAL YANG SAMA: run eksplorasi diulang sebagai
+    # eksplorasi dengan parameter yang sama, run resmi tetap resmi. Tanpa ini,
+    # "Re-run" diam-diam mengubah eksplorasi menjadi resmi.
+    from orchestrator.run_mode import (
+        RUN_MODE_EXPLORATION, changed_keys, mode_of, params_of,
+    )
+    mode = mode_of(original)
+    overrides = {}
+    if mode == RUN_MODE_EXPLORATION:
+        used = params_of(original)
+        locked = _locked_params_for(original["pipeline_id"])
+        overrides = {k: used[k] for k in changed_keys(used, locked)}
+
     return create_and_run_experiment(
         dataset_type=original["dataset_type"],
         dataset_path=original["dataset_path"],
         pipeline_id=original["pipeline_id"],
+        run_mode=mode,
+        param_overrides=overrides,
     )
+
+
+def _locked_params_for(pipeline_id: str) -> dict:
+    """Nilai terkunci pipeline; {} bila pipeline-nya tidak dapat dimuat."""
+    from orchestrator.run_mode import locked_params
+    try:
+        return locked_params(pipeline_id)
+    except Exception:                       # pragma: no cover - defensif
+        logger.debug("fixed_params tidak terbaca untuk %s", pipeline_id, exc_info=True)
+        return {}

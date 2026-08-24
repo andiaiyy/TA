@@ -33,12 +33,21 @@ MODULE = REPO_ROOT / "ui" / "components" / "instructions.py"
 @pytest.mark.parametrize("flow, alt", [(PIPELINE_FLOW, PIPELINE_FLOW_ALT),
                                        (DATASET_FLOW, DATASET_FLOW_ALT)])
 def test_flow_diagram_has_a_step_per_stage(flow, alt):
+    """Jumlah tahap mengikuti alurnya masing-masing: pipeline empat (ada
+    tinjauan), dataset tiga (tersimpan langsung)."""
     svg = flow_diagram_svg(flow, alt=alt)
-    assert len(flow) == 4
-    assert svg.count('class="ids-node"') == 4
-    assert svg.count('class="ids-link"') == 3          # penghubung antar tahap
+    assert svg.count('class="ids-node"') == len(flow)
+    assert svg.count('class="ids-link"') == len(flow) - 1
     for _icon, label in flow:
         assert label in svg
+
+
+def test_only_the_pipeline_flow_has_a_review_step():
+    pipeline_labels = [label for _icon, label in PIPELINE_FLOW]
+    dataset_labels = [label for _icon, label in DATASET_FLOW]
+
+    assert any("Tinjau" in l for l in pipeline_labels)
+    assert not any("Tinjau" in l for l in dataset_labels)
 
 
 def test_flow_diagram_is_responsive():
@@ -197,8 +206,12 @@ def test_pipeline_panel_has_no_wall_of_prose(monkeypatch):
     """Tampilan utama padat: yang panjang adalah markup (SVG/CSS), bukan
     paragraf. Teks biasa harus tetap pendek."""
     parts = _rendered_pipeline_panel(monkeypatch)
+    # Tabel markdown & blok kode bukan "paragraf" — yang diukur adalah teks
+    # mengalir. Dokumentasi kontrak disajikan sebagai tabel, sesuai permintaan.
     prose = [p for p in parts
-             if "<style>" not in p and "<svg" not in p and "<div" not in p]
+             if "<style>" not in p and "<svg" not in p and "<div" not in p
+             and not p.lstrip().startswith("|") and "\n|" not in p
+             and "class MyPipeline" not in p]
     assert prose
     assert max(len(p) for p in prose) < 800
 
@@ -259,7 +272,7 @@ def test_dataset_panel_keeps_the_sample_caveat(monkeypatch):
 
     text = " ".join(out).lower()
     assert "cuplikan" in text                    # angka berbasis cuplikan
-    assert "research admin" in text              # menunggu tinjauan
+    assert "tersimpan langsung" in text          # dataset tidak ditinjau
 
 
 # ── the shared Run Experiment panel is untouched ──────────────────────────
