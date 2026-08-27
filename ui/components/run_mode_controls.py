@@ -149,9 +149,11 @@ def render_param_form(pipeline_id: str) -> dict:
         return {}
 
     head = st.columns([3, 1])
-    head[0].caption("Nilai bawaan pipeline menjadi titik awal.")
+    head[0].markdown("**Parameter yang dapat disesuaikan**")
     if head[1].button("Kembalikan ke bawaan", key=f"_pov_reset_{pipeline_id}",
-                      use_container_width=True):
+                      use_container_width=True,
+                      help="Nilai bawaan pipeline menjadi titik awal; tombol "
+                           "ini mengembalikan seluruh isian ke nilai itu."):
         reset_overrides(pipeline_id)
         st.rerun()
 
@@ -169,8 +171,6 @@ def render_param_form(pipeline_id: str) -> dict:
         marks = ", ".join(f"`{k}` {overrides[k]} (bawaan {defaults[k]})"
                           for k in sorted(overrides))
         st.markdown(f"{CHANGED_MARK} Berbeda dari bawaan: {marks}")
-    else:
-        st.caption("Belum ada parameter yang berbeda dari bawaan.")
 
     if locked:
         with st.expander("Parameter yang tetap terkunci", expanded=False):

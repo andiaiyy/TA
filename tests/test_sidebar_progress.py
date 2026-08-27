@@ -413,10 +413,11 @@ def test_the_block_order_is_breadcrumb_progress_identity(tmp_path, page):
     # keberadaannya diperiksa lewat tombol; yang diurutkan di sini adalah dua
     # blok teks di atasnya, dan identitas dipastikan hadir paling bawah.
     assert breadcrumb < progress, texts
-    # Pemicu popover tidak terekspos sebagai button di AppTest; isi daftarnya
-    # yang terlihat — kehadirannya membuktikan blok identitas ikut dirender.
-    # Pemicunya berlabel mode aktif; daftar pilihannya baru muncul saat ditekan.
-    assert "Mode pengunjung" in [b.label for b in at.sidebar.button]
+    # Blok identitas kini: satu baris status + DROPDOWN pemilih mode.
+    # Keduanya diperiksa — keberadaannya membuktikan blok itu ikut dirender.
+    assert any("Mode pengunjung" in t for t in texts), texts
+    picker = at.sidebar.selectbox(key="auth_mode_pick")
+    assert picker.value == "Pengunjung"
 
 
 def test_each_block_is_separated_by_a_divider(tmp_path):

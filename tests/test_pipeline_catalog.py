@@ -352,7 +352,7 @@ def test_the_execute_flow_is_not_duplicated():
 
     assert names.count("_render_execute") == 1
     assert names.count("render") == 1
-    assert src.count('st.button("Run Experiment", type="primary", disabled=not can_run)') == 1
+    assert src.count('st.button("Run Experiment", type="primary"') == 1
 
 
 def test_the_catalog_view_does_not_reimplement_the_flow():
@@ -519,8 +519,9 @@ def test_the_back_button_is_locked_while_an_experiment_runs(tmp_path):
     back = next(b for b in at.button if b.label == "← Katalog")
     assert back.disabled is True
 
-    captions = " ".join(c.value for c in at.caption)
-    assert "dikunci" in captions
+    # Alasan tombol terkunci kini menempel pada tombol itu sendiri (help=),
+    # bukan sebagai baris keterangan kecil di bawahnya.
+    assert "dikunci" in (back.help or "")
 
 
 def test_the_back_button_is_free_when_nothing_runs(tmp_path):
@@ -536,6 +537,8 @@ def test_a_finished_result_lands_on_the_execute_view(tmp_path):
 
 
 def test_the_selected_pipeline_marker_is_shown(tmp_path):
+    """Label pipeline dinaikkan menjadi teks isi — ini identitas yang sedang
+    dikerjakan, bukan catatan pinggir."""
     at = _run_page(tmp_path, {"_run_view": "execute"})
-    captions = " ".join(c.value for c in at.caption)
-    assert "Pipeline:" in captions
+    body = " ".join(m.value for m in at.markdown)
+    assert "Pipeline:" in body

@@ -138,8 +138,13 @@ def flow_diagram_svg(steps: list[tuple[str, str]], *, alt: str) -> str:
 
 
 def render_flow(steps: list[tuple[str, str]], *, alt: str) -> None:
+    """Diagram alur + teks alternatifnya.
+
+    Teks alternatif TIDAK lagi diulang sebagai baris keterangan di bawah
+    diagram: ia sudah dibawa SVG-nya sendiri lewat `<title>` dan `aria-label`,
+    yang dibacakan pembaca layar dan muncul sebagai tooltip saat disorot.
+    """
     st.markdown(flow_diagram_svg(steps, alt=alt), unsafe_allow_html=True)
-    st.caption(alt)          # teks alternatif yang tetap terbaca
 
 
 # ── Chip ──────────────────────────────────────────────────────────────────
@@ -207,11 +212,11 @@ def render_pipeline_instructions() -> None:
     )
 
     cols = st.columns(2)
-    cols[0].caption(f"Modul diizinkan ({len(ALLOWED_MODULES)})")
     with cols[0]:
+        st.markdown(f"**Modul diizinkan ({len(ALLOWED_MODULES)})**")
         render_chips(sorted(ALLOWED_MODULES), "ok")
-    cols[1].caption(f"Modul ditolak ({len(FORBIDDEN_MODULES)})")
     with cols[1]:
+        st.markdown(f"**Modul ditolak ({len(FORBIDDEN_MODULES)})**")
         render_chips(sorted(FORBIDDEN_MODULES), "no")
 
     render_note(
@@ -219,7 +224,7 @@ def render_pipeline_instructions() -> None:
         "Lolos <b>bukan</b> berarti aktif: menunggu tinjauan Research Admin."
     )
 
-    st.caption("Bentuk yang diharapkan")
+    st.markdown("**Bentuk yang diharapkan**")
     st.code(pipeline_skeleton(), language="python")
 
     render_contract_docs()
@@ -471,8 +476,8 @@ def contract_skeleton() -> str:
 
 def render_contract_docs() -> None:
     """Bagian kontrak: dua tabel field, tahapan, get_info, larangan, kerangka."""
-    st.markdown("**Kontrak pipeline**")
-    st.caption("Nama field dibaca langsung dari `contracts/pipeline_contracts.py`.")
+    st.markdown("**Kontrak pipeline** — nama field dibaca langsung dari "
+                "`contracts/pipeline_contracts.py`.")
 
     tabs = st.tabs(["Masukan", "Kembalian", "Tahapan", "get_info()", "Larangan"])
 
@@ -506,21 +511,21 @@ def _render_stage_table() -> None:
         rows.append(f"| {number}{mark} | {name} | {owner} | {note} |")
     st.markdown("| # | Tahap | Dikerjakan | Catatan |\n| --- | --- | --- | --- |\n"
                 + "\n".join(rows))
-    st.caption(f"⚠ {ANTI_LEAK_NOTE}")
+    st.markdown(f"⚠ {ANTI_LEAK_NOTE}")
 
 
 def _render_info_keys() -> None:
     st.markdown("**Wajib**")
     st.markdown("\n".join(f"- `{k}`" for k in required_info_keys()))
-    st.markdown("**Disarankan**")
+    st.markdown(f"**Disarankan** — {SUGGESTED_INFO_NOTE} Kunci wajib yang "
+                f"hilang menghasilkan {missing_info_severity()}, bukan "
+                f"kegagalan.")
     st.markdown("\n".join(f"- `{k}`" for k in SUGGESTED_INFO_KEYS))
-    st.caption(f"{SUGGESTED_INFO_NOTE} Kunci wajib yang hilang menghasilkan "
-               f"{missing_info_severity()}, bukan kegagalan.")
 
 
 def _render_forbidden() -> None:
+    st.markdown(FORBIDDEN_FRAME)
     st.markdown("\n".join(f"- {item}" for item in FORBIDDEN_ACTIONS))
-    st.caption(FORBIDDEN_FRAME)
 
 
 # ── Kesalahan yang paling sering (dari daftar pemeriksaan NYATA) ──────────

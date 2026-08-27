@@ -33,13 +33,14 @@ logger = logging.getLogger(__name__)
 # yang akan dieksekusi) tetap melewati tinjauan Research Admin.
 AFTER_UPLOAD_FLOW = [
     ("📤", "Unggah"),
-    ("🔍", "Periksa otomatis"),
+    ("🔍", "Periksa berkas"),
     ("✅", "Dataset tersimpan"),
     ("👤", "Pipeline ditinjau"),
 ]
 AFTER_UPLOAD_FLOW_ALT = (
-    "Setelah diperiksa: dataset langsung tersimpan; pipeline menunggu tinjauan "
-    "Research Admin karena berisi kode yang dieksekusi."
+    "Setelah berkas lolos pemeriksaan otomatis: dataset langsung tersimpan; "
+    "pipeline menunggu tinjauan Research Admin karena berisi kode yang "
+    "dieksekusi."
 )
 
 
@@ -92,15 +93,25 @@ def platform_stats() -> dict:
 
 
 def render_platform_summary() -> None:
-    """Tiga angka ringkas + satu baris kaitan ke halaman lain."""
+    """Tiga angka ringkas, dalam KOTAK yang sama dengan halaman Run Experiment.
+
+    Sebelumnya bagian ini memakai `st.metric` berjajar sementara halaman lain
+    memakai kotak sel angka — dua gaya untuk hal yang sama. Sekarang keduanya
+    memakai penyaji yang sama, jadi tampilannya tidak mungkin berbeda.
+    """
+    from ui.components.sections import render_counts
+
     stats = platform_stats()
-    cols = st.columns(3)
-    cols[0].metric("Research pipeline", stats["research"])
-    cols[1].metric("Algoritma", stats["algorithms"])
-    cols[2].metric("Dataset di server", stats["datasets"])
-    if stats["contributed"]:
-        st.caption(f"{stats['contributed']} pipeline hasil kontribusi sudah "
-                   f"aktif di registry.")
+    render_counts([
+        ("research pipeline", stats["research"],
+         (f"{stats['contributed']} pipeline hasil kontribusi sudah aktif di "
+          f"registry." if stats["contributed"] else
+          "Research pipeline yang terdaftar di registry.")),
+        ("algoritma", stats["algorithms"],
+         "Dijumlahkan per research pipeline."),
+        ("dataset", stats["datasets"],
+         "Berkas dataset di storage/datasets/."),
+    ])
 
 
 # ── Status & hak pengguna ─────────────────────────────────────────────────
@@ -121,7 +132,13 @@ def capability(user: dict | None) -> dict:
     # Frasa, bukan kalimat — apa yang boleh dilakukan, tanpa kata pengisi.
     if not user:
         label = "Mode pengunjung"
-        what = "membaca & menjalankan pemeriksaan"
+        # Disebut spesifik: OBJEK yang dapat dibaca dan diperiksa,
+        # plus batasnya. Sesuai perilaku nyata — `can_upload(None)`
+        # False, sedangkan diagnosa kecocokan dataset berada sebelum
+        # gerbang izin sehingga pengunjung benar-benar dapat
+        # menjalankannya.
+        what = ("dapat membaca persyaratan dan memeriksa kecocokan "
+                "dataset; mengunggah memerlukan akun Kontributor")
     else:
         label = role_label(user.get("role")) or "Pengguna"
         if may_review:
@@ -140,13 +157,15 @@ def render_capability(user: dict | None) -> None:
     from ui.views.login import render_login_prompt
 
     cap = capability(user)
-    st.markdown(f"**{cap['label']}** — {cap['what']}")
+    _status = f"**{cap['label']}** — {cap['what']}"
+    if user and not cap["may_upload"]:
+        _status += " Menunggu persetujuan — halaman tetap dapat dibaca."
+    st.markdown(_status)
     if not user:
         # Keterangan WAJIB "kenapa aksi tak tersedia" — diringkas sependek
         # mungkin; penunjuk jalur masuknya ditambahkan render_login_prompt.
         render_login_prompt("Mengajukan berkas memerlukan akun.")
-    elif not cap["may_upload"]:
-        st.caption("Menunggu persetujuan — halaman tetap dapat dibaca.")
+
 
 
 # ── Apa yang terjadi setelah mengunggah ───────────────────────────────────
@@ -193,7 +212,8 @@ def render_after_upload(user: dict | None) -> None:
 
 def render_related_pages() -> None:
     """Kaitan ke halaman lain, satu baris."""
-    st.caption("Setelah disetujui, dataset & pipeline muncul di **Run Experiment**.")
+    st.markdown("Setelah disetujui, dataset & pipeline muncul di "
+                "**Run Experiment**.")
 
 
 # ── Panel konteks (dipakai di tampilan awal halaman) ──────────────────────

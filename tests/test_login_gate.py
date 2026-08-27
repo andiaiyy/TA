@@ -319,12 +319,24 @@ def test_the_flag_is_only_ever_set_inside_a_button_block():
             parents[child] = node
 
     def _guarded_by_button(call: ast.Call) -> bool:
+        """Pemanggilan berada di dalam blok yang dipicu INTERAKSI pengguna.
+
+        Dua bentuk yang sah, keduanya bukan efek samping render:
+
+        * `if st.button(...)` — tombol biasa;
+        * `if choice != current` — pemilih mode kini DROPDOWN, dan blok ini
+          hanya benar saat pengguna memilih nilai yang berbeda dari mode yang
+          berlaku. Pengulangannya dicegah `_remember_mode_action`, diperiksa
+          di bawah.
+        """
         node = call
         while node in parents:
             node = parents[node]
             if isinstance(node, ast.If):
                 test_src = ast.dump(node.test)
                 if "'button'" in test_src or '"button"' in test_src:
+                    return True
+                if "'choice'" in test_src and "'current'" in test_src:
                     return True
         return False
 
@@ -333,6 +345,12 @@ def test_the_flag_is_only_ever_set_inside_a_button_block():
     assert calls, "tidak ada pemanggilan request_auth_dialog sama sekali"
     for call in calls:
         assert _guarded_by_button(call), ast.dump(call)
+
+    # 3. Satu pilihan dropdown hanya boleh membuka modal SEKALI. Tanpa penanda
+    #    ini, pilihan yang sama akan menyalakan flag lagi pada setiap rerun —
+    #    persis bentuk bug "modal muncul sendiri" yang dijaga test ini.
+    assert "_remember_mode_action" in src
+    assert "_MODE_ACTED_KEY" in src
 
 
 def test_the_dialog_gate_has_no_truthy_default():
