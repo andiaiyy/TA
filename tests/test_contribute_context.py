@@ -198,7 +198,10 @@ def test_after_upload_flow_separates_data_from_code():
     assert len(AFTER_UPLOAD_FLOW) == 4
     assert "Dataset tersimpan" in labels
     assert "Pipeline ditinjau" in labels
-    assert labels.index("Periksa otomatis") < labels.index("Dataset tersimpan")
+    # Label tahap pemeriksaan kini menyebut OBJEK-nya ("Periksa berkas");
+    # "Periksa otomatis" dulu tidak menjelaskan apa yang diperiksa.
+    assert "Periksa berkas" in labels
+    assert labels.index("Periksa berkas") < labels.index("Dataset tersimpan")
     assert "tersimpan" in AFTER_UPLOAD_FLOW_ALT
     assert "kode yang dieksekusi" in AFTER_UPLOAD_FLOW_ALT
 
@@ -348,12 +351,19 @@ def test_the_page_renders_without_exceptions(tmp_path, mode, user):
 @pytest.mark.parametrize("user", [VISITOR, CONTRIBUTOR, ADMIN],
                          ids=["pengunjung", "kontributor", "research_admin"])
 def test_the_landing_view_shows_platform_context(tmp_path, user):
-    """Konteks platform + status pengguna tampil untuk SEMUA peran."""
+    """Konteks platform + status pengguna tampil untuk SEMUA peran.
+
+    Ringkasannya kini memakai KOTAK sel angka yang sama dengan halaman Run
+    Experiment (sebelumnya `st.metric` berjajar), jadi yang diperiksa adalah
+    blok kotaknya — bukan lagi elemen metric.
+    """
     at = _run_page(tmp_path, None, user)
-    assert at.metric, "ringkasan keadaan platform harus tampil"
-    labels = [m.label for m in at.metric]
-    assert "Research pipeline" in labels
-    assert "Dataset di server" in labels
+    boxes = [e.proto.body for e in at.get("html") if "ids-counts" in e.proto.body]
+    assert boxes, "ringkasan keadaan platform harus tampil"
+
+    box = boxes[0]
+    for label in ("research pipeline", "algoritma", "dataset"):
+        assert f">{label}<" in box, label
 
     expected = capability(user)["label"]
     assert expected in _page_text(at), expected

@@ -514,22 +514,39 @@ def comparison_warnings(rows) -> list[str]:
     return warnings
 
 
-def build_comparison(rows, param_keys=()) -> dict:
+ALIGN_LEFT = "left"
+ALIGN_RIGHT = "right"
+
+ONLY_DIFF_LABEL = "Hanya tampilkan yang berbeda"
+ALL_SAME_NOTE = ("Seluruh baris bernilai sama pada eksperimen yang dipilih — "
+                 "tidak ada perbedaan untuk ditampilkan.")
+
+
+def build_comparison(rows, param_keys=(), *, only_differences=False) -> dict:
     """Data perbandingan berdampingan: satu kolom per eksperimen.
 
     Mengembalikan::
 
-        {"headers": [...], "warnings": [...], "note": str,
+        {"headers": [...], "ids": [...], "warnings": [...], "note": str,
+         "diff_count": int, "total_count": int,
          "sections": [{"group": str, "fields": [
-             {"label": str, "values": [...], "differs": bool}]}]}
+             {"label": str, "values": [...], "differs": bool, "align": str}]}]}
 
     ``differs`` menandai baris yang nilainya TIDAK sama di semua eksperimen —
-    itulah yang perlu disorot pembaca.
+    itulah yang perlu disorot pembaca. ``align`` menentukan perataan sel:
+    metrik & parameter numerik rata KANAN supaya digitnya sejajar dan mudah
+    dibandingkan sekilas, sisanya rata kiri.
+
+    ``only_differences=True`` menyisakan baris yang berbeda saja. Penyaringan
+    dilakukan DI SINI, atas nilai yang sudah dihitung — bukan dengan membaca
+    ulang apa pun.
     """
     rows = list(rows or [])
     columns = {c["key"]: c for c in build_columns(param_keys)}
+    diff_count = total_count = 0
 
     def section(group, keys, drop_empty=False):
+        nonlocal diff_count, total_count
         fields = []
         for key in keys:
             col = columns.get(key)
@@ -540,8 +557,14 @@ def build_comparison(rows, param_keys=()) -> dict:
             # dibaca (mis. `max_iter` saat tak satu pun pipeline memakainya).
             if drop_empty and all(v == "—" for v in values):
                 continue
+            differs = len(set(values)) > 1
+            total_count += 1
+            if differs:
+                diff_count += 1
+            if only_differences and not differs:
+                continue
             fields.append({"label": col["label"], "values": values,
-                           "differs": len(set(values)) > 1})
+                           "differs": differs, "align": _align_for(col, values)})
         return {"group": group, "fields": fields}
 
     sections = [
@@ -551,10 +574,47 @@ def build_comparison(rows, param_keys=()) -> dict:
     ]
     return {
         "headers": [r.get("id", "—") for r in rows],
+        "ids": [r.get("_id") for r in rows],
         "warnings": comparison_warnings(rows),
         "note": semantics_note(rows),
+        "diff_count": diff_count,
+        "total_count": total_count,
         "sections": [s for s in sections if s["fields"]],
     }
+
+
+def _align_for(column, values) -> str:
+    """Angka rata KANAN, label rata kiri.
+
+    Kolom metrik selalu angka. Kolom parameter bisa angka (``n_estimators``)
+    atau teks (``scaler``), jadi diputuskan dari nilainya yang sebenarnya —
+    bukan dari nama kolomnya.
+    """
+    if column["kind"] == KIND_METRIC:
+        return ALIGN_RIGHT
+    if column["group"] == GROUP_PARAM and all(_looks_numeric(v) for v in values):
+        return ALIGN_RIGHT
+    return ALIGN_LEFT
+
+
+def _looks_numeric(text) -> bool:
+    candidate = str(text or "").strip()
+    if candidate in ("", "—"):
+        return True                          # sel kosong tidak memaksa perataan
+    try:
+        float(candidate)
+    except ValueError:
+        return False
+    return True
+
+
+def drop_from_comparison(rows, experiment_id):
+    """Baris perbandingan tanpa satu eksperimen. MURNI — tidak membaca apa pun.
+
+    Dipakai tombol "buang" di dalam modal: tabel diperbarui dari data yang sudah
+    ada di memori, jadi menyusutkan pilihan tidak memicu pembacaan berkas/DB.
+    """
+    return [r for r in rows or [] if r.get("_id") != experiment_id]
 
 
 def compare_selection_error(selected_ids) -> str:

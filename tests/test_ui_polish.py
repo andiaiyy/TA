@@ -43,15 +43,28 @@ def test_the_shared_style_is_injected_from_one_place_only():
 
 def test_only_four_text_sizes_are_defined():
     """Judul halaman & judul bagian dari Streamlit; modul ini menambah dua
-    tingkat sisanya — teks isi dan keterangan."""
+    tingkat sisanya — teks isi dan keterangan.
+
+    Satu perkecualian yang DINYATAKAN: `FONT_DISPLAY`, ukuran angka di dalam
+    kotak ringkasan. Ia bukan tingkat teks kelima — tidak ada kalimat yang
+    memakainya, hanya angka statistik yang harus terbaca sekilas dan terpisah
+    jelas dari labelnya.
+    """
     sizes = {theme.FONT_SECTION, theme.FONT_BODY, theme.FONT_CAPTION}
     assert len(sizes) == 3                   # + judul halaman dari Streamlit = 4
+    assert theme.FONT_DISPLAY not in sizes   # perkecualian, bukan tingkat baru
 
     # Dinormalkan: CSS boleh menulis ".84rem" maupun "0.84rem".
     declared = {f"{float(v):.2f}" for v in
                 re.findall(r"font-size:\s*([0-9.]*[0-9])rem", CSS)}
-    allowed = {f"{float(v.rstrip('rem')):.2f}" for v in sizes}
+    allowed = {f"{float(v.rstrip('rem')):.2f}"
+               for v in sizes | {theme.FONT_DISPLAY}}
     assert declared <= allowed, (declared, allowed)
+
+    # Perkecualian itu HANYA dipakai untuk angka ringkasan.
+    display = f"font-size: {theme.FONT_DISPLAY}"
+    assert CSS.count(display) == 1
+    assert display in CSS.split(".ids-count-n {")[1].split("}")[0]
 
 
 def test_only_two_font_weights_are_used():
@@ -118,20 +131,48 @@ def test_the_transition_is_short_and_subtle():
     assert len(shadowed) <= 1, shadowed
 
 
+def test_the_segmented_control_selectors_match_the_installed_frontend():
+    """Penjaga bug NYATA: gaya segmented control pernah tidak tampil sama sekali
+    karena CSS menyasar testid yang tidak ada di DOM.
+
+    `st.segmented_control` dirender sebagai ButtonGroup, dan tombolnya memakai
+    testid berpola `stBaseButton-<kind>`. Nama-namanya diverifikasi terhadap
+    berkas frontend Streamlit yang BENAR-BENAR terpasang, jadi bila versi
+    berikutnya menggantinya, test ini gagal alih-alih gayanya hilang diam-diam.
+    """
+    import streamlit as st_mod
+
+    static = Path(st_mod.__file__).parent / "static" / "static" / "js"
+    bundles = "".join(f.read_text(encoding="utf-8", errors="ignore")
+                      for f in static.glob("*.js"))
+    assert bundles, "berkas frontend Streamlit tidak ditemukan"
+
+    # Nama wadah ada apa adanya; nama tombol dibentuk `stBaseButton-<kind>`,
+    # jadi yang dicari di bundel adalah <kind>-nya.
+    assert theme.SEG_GROUP in bundles, theme.SEG_GROUP
+    assert "stBaseButton-" in bundles
+    assert "segmented_controlActive" in bundles
+    assert theme.SEG_ITEM == "stBaseButton-segmented_control"
+    assert theme.SEG_ITEM_ACTIVE == "stBaseButton-segmented_controlActive"
+
+    # Nama lama TIDAK boleh kembali sebagai penyasar.
+    assert "stSegmented" + "Control" not in CSS
+
+
 def test_the_active_segment_looks_raised():
     """Pilihan aktif = kartu terangkat; pilihan lain redup tanpa latar."""
-    container = CSS.split('[data-testid="stSegmentedControl"] {')[1].split("}")[0]
+    container = CSS.split(f'[data-testid="{theme.SEG_GROUP}"] {{')[1].split("}")[0]
     assert "background: rgba(127,127,127,.09)" in container   # wadah lembut
     assert "flex-wrap: wrap" in container                     # enam algoritma muat
 
     active = CSS.split(
-        '[data-testid="stSegmentedControl"] button[aria-checked="true"] {'
+        f'[data-testid="{theme.SEG_ITEM_ACTIVE}"],'
     )[1].split("}")[0]
     assert "box-shadow:" in active
     assert "opacity: 1" in active
     assert f"font-weight: {theme.WEIGHT_STRONG}" in active
 
-    idle = CSS.split('[data-testid="stSegmentedControl"] button {')[1].split("}")[0]
+    idle = CSS.split(f'[data-testid="{theme.SEG_GROUP}"] button {{')[1].split("}")[0]
     assert "background: transparent" in idle
     assert "opacity: .62" in idle
     assert "white-space: normal" in idle      # membungkus, bukan terpotong
@@ -307,8 +348,8 @@ def test_the_anchor_lives_inside_one_container():
     # document.body sehingga menembus batas sidebar dan menimpa konten.
     assert "st.popover(" not in body
     anchor_at = body.index("_MODE_ANCHOR")
-    toggle_at = body.index("auth_mode_toggle")
-    assert anchor_at < toggle_at             # jangkar mendahului isinya
+    picker_at = body.index("_MODE_PICK_KEY")
+    assert anchor_at < picker_at             # jangkar mendahului isinya
 
 
 def test_the_picker_list_is_compact():
@@ -332,6 +373,18 @@ def test_the_picker_panel_is_narrower_than_the_sidebar():
     assert float(theme.POPOVER_MAX_W.rstrip("rem")) <= 14
 
 
+def test_the_mode_picker_is_a_dropdown():
+    """Kontrol perpindahan mode berupa DROPDOWN, bukan barisan tombol."""
+    src = Path(login.__file__).read_text(encoding="utf-8")
+    body = src.split("def render_mode_switch()")[1].split(chr(10) + "def ")[0]
+
+    assert "st.selectbox(" in body
+    assert "st.popover(" not in body               # bocor keluar sidebar
+    # Tidak ada lagi satu tombol per peran di sidebar.
+    assert "auth_pick_" not in body
+    assert "auth_mode_toggle" not in body
+
+
 def test_the_picker_labels_are_short_phrases():
     """Isi daftar hanya nama mode — tanpa kalimat penjelas."""
     src = Path(login.__file__).read_text(encoding="utf-8")
@@ -339,8 +392,16 @@ def test_the_picker_labels_are_short_phrases():
 
     assert login._MODE_VISITOR == "Pengunjung"
     assert "Masuk sebagai" not in body              # label lama yang panjang
-    # Penjelasan pindah ke help=, bukan baris teks di dalam daftar.
-    assert body.count("help=") >= 3
+
+    # Pilihannya nama mode saja — pendek, satu frasa, tanpa tanda baca kalimat.
+    for option in login.mode_options():
+        assert len(option.split()) <= 2, option
+        assert "." not in option and ";" not in option
+
+    # Penjelasan pindah ke help=, bukan baris teks di dalam daftar — dan
+    # catatan jujur "memilih tidak memberikan peran" harus ikut di sana.
+    assert "help=_MODE_PICK_HELP" in body
+    assert "tidak memberikan peran" in login._MODE_PICK_HELP
 
 
 
@@ -419,7 +480,7 @@ def test_the_selected_algorithm_still_drives_the_pipeline_id():
 
 def test_many_algorithms_wrap_instead_of_being_cut_off():
     """HIKARI punya enam algoritma — harus membungkus, bukan terpotong."""
-    assert '[data-testid="stSegmentedControl"]' in CSS
+    assert f'[data-testid="{theme.SEG_GROUP}"]' in CSS
     assert "flex-wrap: wrap" in CSS
 
     from config.pipeline_registry import PIPELINE_REGISTRY
@@ -512,7 +573,13 @@ def test_the_capability_line_is_a_phrase_not_a_sentence():
     for user in (None, {"username": "a", "role": "contributor",
                         "status": "active"}):
         what = capability(user)["what"]
-        assert _words(what) <= 8, what
+        # Batasnya dinaikkan dari 8 kata: baris pengunjung kini menyebut
+        # SPESIFIK apa yang dapat dilakukan ("membaca persyaratan", "memeriksa
+        # kecocokan dataset") dan batasnya ("mengunggah memerlukan akun").
+        # Frasa lama "menjalankan pemeriksaan" memang lebih pendek, tetapi
+        # ambigu — tidak jelas pemeriksaan apa. Yang tetap dijaga: bukan
+        # kalimat bertanya dan tanpa kata pengisi.
+        assert _words(what) <= 14, what
         assert "?" not in what
         for filler in ("Anda dapat", "silakan", "Perlu diketahui"):
             assert filler not in what

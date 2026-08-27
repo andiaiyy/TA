@@ -70,11 +70,29 @@ _ROLE_HELP = ("Membuka formulir masuk. Memilih di sini tidak memberikan peran "
               "tersebut — peran ditentukan akun & statusnya.")
 _CURRENT_MODE_HELP = "Mode saat ini: membaca tanpa akun."
 
-# Daftar pilihan terbuka/tertutup. Bukan flag modal: tidak ada lapisan
-# mengambang, jadi tidak perlu ikut siklus hidup dialog.
-_MODE_OPEN_KEY = "_mode_list_open"
+# Kunci dropdown pemilih mode + dua kunci pembantu yang menjaga dropdown
+# selalu MENAMPILKAN mode yang benar-benar berlaku:
+#
+#   _MODE_PICK_KEY   nilai widget dropdown (teks pendek: "Pengunjung", ...)
+#   _MODE_SHOWN_KEY  mode nyata pada render terakhir — dipakai mengenali
+#                    perubahan yang datang dari LUAR dropdown (mis. berhasil
+#                    masuk lewat modal, atau keluar)
+#   _MODE_ACTED_KEY  pilihan yang sudah ditindaklanjuti, supaya satu pilihan
+#                    tidak membuka modal berulang kali pada setiap rerun
+#
+# Ketiganya BUKAN peran. Peran yang berlaku selalu dibaca dari akun & statusnya
+# di basis data oleh orchestrator.auth_service.
+_MODE_PICK_KEY = "auth_mode_pick"
+_MODE_SHOWN_KEY = "_mode_shown"
+_MODE_ACTED_KEY = "_mode_acted"
 _CURRENT_ROLE_HELP = "Peran akun Anda saat ini."
 _OTHER_ROLE_HELP = "Peran ditentukan akun & statusnya, bukan dipilih di sini."
+
+# Tooltip dropdown. Disusun DARI keterangan di atas, bukan ditulis ulang:
+# catatan jujur "memilih tidak memberikan peran" harus tetap sampai ke pengguna
+# sekarang setelah daftarnya menjadi dropdown, dan menyusunnya begini membuat
+# catatan itu tidak bisa hilang tanpa mengubah konstantanya sendiri.
+_MODE_PICK_HELP = f"{_ROLE_HELP} {_OTHER_ROLE_HELP}"
 
 # Penanda tak terlihat yang menandai wadah blok mode. CSS terpusat
 # (ui/components/theme.py) mencari wadah yang MEMUAT penanda ini lalu
@@ -139,15 +157,50 @@ def _attempt_login(username: str, password: str) -> bool:
     return True
 
 
-def _toggle_mode_list() -> None:
-    """Buka/tutup daftar pilihan mode.
+def mode_options() -> list[str]:
+    """Pilihan dropdown: NAMA MODE saja, tanpa kalimat penjelas.
+
+    Diturunkan dari daftar peran yang sama dengan yang dipakai lapis izin, jadi
+    menambah peran di ``database/models`` langsung terlihat di sini.
+    """
+    return [_MODE_VISITOR] + [role_label(role) for role in _PICKABLE_ROLES]
+
+
+def current_mode_label(user: dict | None) -> str:
+    """Mode yang BENAR-BENAR berlaku sekarang."""
+    return role_label(user.get("role")) if user else _MODE_VISITOR
+
+
+def _settle_mode_pick(current: str) -> None:
+    """Samakan nilai dropdown dengan mode yang benar-benar berlaku.
+
+    Dijalankan SEBELUM widget dibuat — itulah satu-satunya saat nilai widget
+    boleh ditulis. Dua keadaan disamakan di sini:
+
+    * mode nyata berubah dari luar dropdown (berhasil masuk lewat modal, atau
+      keluar) — dropdown ikut menunjuk ke mode baru;
+    * sebuah pilihan sudah ditindaklanjuti (modal dibuka) — dropdown
+      dikembalikan ke mode nyata, sehingga ia TIDAK PERNAH menampilkan peran
+      yang tidak dimiliki, termasuk bila pengguna menutup modal tanpa masuk.
 
     Dipisah dari ``render_mode_switch`` supaya fungsi itu tetap bebas dari
     penulisan ke ``session_state`` — pemilih mode tidak boleh menulis apa pun
     yang menyerupai pemberian hak, dan test menegakkannya lewat AST.
     """
-    st.session_state[_MODE_OPEN_KEY] = not st.session_state.get(_MODE_OPEN_KEY,
-                                                                False)
+    changed = st.session_state.get(_MODE_SHOWN_KEY) != current
+    acted = st.session_state.pop(_MODE_ACTED_KEY, None) is not None
+    if changed or acted:
+        st.session_state[_MODE_PICK_KEY] = current
+    st.session_state[_MODE_SHOWN_KEY] = current
+
+
+def _remember_mode_action(choice: str) -> None:
+    """Tandai satu pilihan sudah ditindaklanjuti.
+
+    Tanpa ini, pilihan yang sama akan membuka modal lagi pada setiap rerun.
+    Menulis kunci NON-widget, jadi aman dipanggil setelah widget dibuat.
+    """
+    st.session_state[_MODE_ACTED_KEY] = choice
 
 
 def render_mode_switch() -> None:
@@ -171,50 +224,44 @@ def render_mode_switch() -> None:
             if st.session_state.pop(_SIGNUP_DONE_KEY, False):
                 st.success("Pendaftaran diterima — menunggu persetujuan.")
 
-            label = (f"{user['username']} · {role_label(user.get('role'))}"
-                     if user else "Mode pengunjung")
-            # BUKAN `st.popover`. Panel popover Streamlit dirender lewat React
-            # Portal ke `document.body`, jadi ia BUKAN keturunan DOM sidebar:
-            # panelnya menembus batas sidebar dan menimpa tombol di area konten,
-            # dan tidak dapat dikekang dengan andal lewat CSS di dalam sidebar.
-            #
-            # Gantinya: daftar yang MENGEMBANG DI TEMPAT. Tombol di bawah ini
-            # adalah elemen sidebar biasa — mereka mendorong isi seperlunya,
-            # selalu berada di dalam batas sidebar, dan tidak menumpuk apa pun.
-            if st.button(label, key="auth_mode_toggle",
-                         use_container_width=True,
-                         help="Ganti mode / masuk."):
-                _toggle_mode_list()
-                st.rerun()
+            # Identitas dalam satu baris kecil. Nama akun ditulis di sini,
+            # bukan di dalam daftar pilihan — daftar hanya memuat nama mode.
+            if user:
+                render_line(f"{user['username']} · "
+                            f"{role_label(user.get('role'))}", small=True)
+            else:
+                render_line("Mode pengunjung", muted=True, small=True)
 
-            if st.session_state.get(_MODE_OPEN_KEY):
-                if user:
-                    if st.button(_MODE_VISITOR, key="auth_logout",
-                                 use_container_width=True,
-                                 help="Keluar dan kembali membaca tanpa akun."):
-                        logout()
-                        st.rerun()
-                    for role in _PICKABLE_ROLES:
-                        st.button(role_label(role), key=f"auth_pick_{role}",
-                                  use_container_width=True, disabled=True,
-                                  help=_CURRENT_ROLE_HELP
-                                       if role == user.get("role")
-                                       else _OTHER_ROLE_HELP)
+            # DROPDOWN, bukan barisan tombol. `st.selectbox` memakai baseui
+            # Select: daftarnya memang dirender ke lapisan mengambang, TETAPI
+            # lebarnya dikunci ke lebar kontrol pemicunya, jadi ia tidak bisa
+            # melebar keluar kolom sidebar seperti `st.popover` dulu. CSS
+            # terpusat mengekangnya sekali lagi lewat
+            # [data-testid="stSelectboxVirtualDropdown"] (nama testid nyata,
+            # dijaga test terhadap berkas frontend yang terpasang).
+            options = mode_options()
+            current = current_mode_label(user)
+            _settle_mode_pick(current)
+            choice = st.selectbox(
+                "Mode", options,
+                index=options.index(current) if current in options else 0,
+                key=_MODE_PICK_KEY, label_visibility="collapsed",
+                help=_MODE_PICK_HELP,
+            )
+
+            # Memilih peran di sini TIDAK memberikan peran itu — pilihannya
+            # hanya membuka jalur masuk, dan dropdown dikembalikan ke mode nyata
+            # pada rerun berikutnya. Peran yang berlaku selalu datang dari akun
+            # & statusnya di basis data, dibaca ulang oleh
+            # orchestrator.auth_service pada setiap aksi berisiko. Karena itu
+            # tidak ada satu pun penulisan peran ke session_state di sini.
+            if choice != current:
+                _remember_mode_action(choice)
+                if choice == _MODE_VISITOR:
+                    logout()                 # Keluar, kembali membaca tanpa akun
                 else:
-                    # Memilih peran di sini TIDAK memberikan peran itu — tombolnya
-                    # hanya membuka jalur masuk. Peran yang berlaku selalu datang
-                    # dari akun & statusnya di basis data, dibaca ulang oleh
-                    # orchestrator.auth_service pada setiap aksi berisiko. Karena
-                    # itu tidak ada satu pun penulisan peran ke session_state di
-                    # sini; yang ditulis hanya flag pembuka modal.
-                    st.button(_MODE_VISITOR, key="auth_pick_visitor",
-                              use_container_width=True, disabled=True,
-                              help=_CURRENT_MODE_HELP)
-                    for role in _PICKABLE_ROLES:
-                        if st.button(role_label(role), key=f"auth_pick_{role}",
-                                     use_container_width=True, help=_ROLE_HELP):
-                            request_auth_dialog(_MODE_LOGIN)
-                            st.rerun()
+                    request_auth_dialog(_MODE_LOGIN)
+                st.rerun()
 
             if user and not is_account_active(user):
                 # Status akun — WAJIB tetap tersampaikan.

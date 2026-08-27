@@ -49,6 +49,19 @@ _DETAIL_FIELDS = (
     ("paper", "Penelitian sumber"),
 )
 
+# Awalan kunci `st.container(key=…)` untuk kartu katalog. Streamlit menambahkan
+# kelas `st-key-<key>` pada elemen berkunci, dan ITULAH kaitan CSS-nya — bukan
+# testid yang ditebak. Ada test yang mencocokkan awalan ini dengan bundel
+# frontend yang benar-benar terpasang. Nilainya dimiliki `theme` supaya satu
+# konstanta melayani gaya dan kode sekaligus.
+from ui.components.theme import CARD_KEY_PREFIX
+
+
+def card_key(dataset_type: str) -> str:
+    """Kunci container untuk satu kartu research pipeline."""
+    return CARD_KEY_PREFIX + str(dataset_type)
+
+
 _CSS = """
 <style>
 .ids-cat-title { font-size: 1.05rem; font-weight: 600; margin: .2rem 0 .15rem; }
@@ -411,6 +424,18 @@ def phase_graph_svg(stages, *, pre_stages=PRE_STAGES) -> str:
 
     Lebarnya mengikuti jumlah tahap; wadahnya menggulir mendatar sehingga
     pipeline berfase panjang tidak dibungkus ke banyak baris.
+
+    **Kenapa atribut presentasi, bukan kelas CSS.** Setiap bentuk membawa
+    ``fill``/``stroke``/``font-size`` sendiri di dalam atribut. Sebelumnya
+    warnanya diserahkan ke kelas ``.ids-ph-*`` di stylesheet katalog; bila blok
+    gaya itu tidak ikut ke dalam cakupan DOM yang sama (mis. di dalam modal),
+    ``<rect>`` jatuh ke bawaan SVG — **isi hitam pekat** — dan grafnya tidak
+    terbaca. Dengan atribut inline, graf ini tampil benar tanpa stylesheet apa
+    pun.
+
+    **Aman lintas tema.** Semua warna memakai ``currentColor`` beropasitas
+    rendah, jadi ia mengikuti warna teks tema yang aktif — tidak ada nilai heksa
+    yang bisa menghilang di tema terang atau gelap.
     """
     nodes = ([{"label": s, "kind": "pre", "note": ""} for s in (pre_stages or [])]
              + list(stages or []))
@@ -425,23 +450,37 @@ def phase_graph_svg(stages, *, pre_stages=PRE_STAGES) -> str:
         x = 4 + index * (GRAPH_CARD_W + GRAPH_GAP)
         if index:                           # garis penghubung ke kartu sebelumnya
             parts.append(
-                f'<line class="ids-ph-link" x1="{x - GRAPH_GAP}" y1="{GRAPH_CARD_H / 2:.0f}" '
-                f'x2="{x}" y2="{GRAPH_CARD_H / 2:.0f}" />')
-        dashed = ' stroke-dasharray="4 3"' if node["kind"] == "pre" else ""
+                f'<line class="ids-ph-link" x1="{x - GRAPH_GAP}" '
+                f'y1="{GRAPH_CARD_H / 2:.0f}" x2="{x}" '
+                f'y2="{GRAPH_CARD_H / 2:.0f}" stroke="currentColor" '
+                f'stroke-width="1.5" stroke-opacity=".55" />')
+        # Tahap PRA-PIPELINE dibedakan: garis putus + isi lebih pudar, supaya
+        # tidak terbaca sebagai bagian dari pipeline itu sendiri.
+        is_pre = node["kind"] == "pre"
+        dashed = ' stroke-dasharray="4 3"' if is_pre else ""
         parts.append(
             f'<rect class="ids-ph-card" x="{x}" y="0" width="{GRAPH_CARD_W}" '
-            f'height="{GRAPH_CARD_H}" rx="8"{dashed} />')
+            f'height="{GRAPH_CARD_H}" rx="8"{dashed} '
+            f'fill="currentColor" fill-opacity="{".04" if is_pre else ".07"}" '
+            f'stroke="currentColor" stroke-opacity="{".35" if is_pre else ".55"}" '
+            f'stroke-width="1" />')
         parts.append(
-            f'<text class="ids-ph-num" x="{x + 10}" y="18">{index + 1}</text>')
+            f'<text class="ids-ph-num" x="{x + 10}" y="18" fill="currentColor" '
+            f'fill-opacity=".45" font-size="10">{index + 1}</text>')
         for line_no, chunk in enumerate(_wrap(node["label"], 18)[:2]):
             parts.append(
                 f'<text class="ids-ph-label" x="{x + 10}" '
-                f'y="{34 + line_no * 13}">{escape(chunk)}</text>')
+                f'y="{34 + line_no * 13}" fill="currentColor" '
+                f'font-size="11">{escape(chunk)}</text>')
 
     alt = " → ".join(n["label"] for n in nodes)
+    # `overflow-x:auto` inline juga: gulir mendatar tetap bekerja meski
+    # stylesheet katalog tidak ikut ke cakupan DOM ini.
     return (
-        f'<div class="ids-ph-wrap" role="img" aria-label="{escape(alt)}">'
+        f'<div class="ids-ph-wrap" role="img" aria-label="{escape(alt)}" '
+        f'style="overflow-x:auto;overflow-y:hidden;padding:.2rem 0 .4rem">'
         f'<svg viewBox="0 0 {width} {height}" width="{width}" height="{height}" '
+        f'style="display:block" '
         f'xmlns="http://www.w3.org/2000/svg"><title>{escape(alt)}</title>'
         f'{"".join(parts)}</svg></div>'
     )
@@ -470,12 +509,26 @@ def phase_graph_alt(stages, *, pre_stages=PRE_STAGES) -> str:
 
 
 def render_phase_graph(pipeline_id: str, info: dict) -> None:
-    """Graf fase satu pipeline + keterangan teksnya."""
+    """Graf fase satu pipeline + keterangan teksnya.
+
+    Dirender lewat :func:`streamlit.html`, BUKAN
+    ``st.markdown(unsafe_allow_html=True)``. Alasannya menentukan: markdown
+    Streamlit melewati react-markdown, yang membangun ulang HTML mentah menjadi
+    elemen React di namespace HTML — ``<rect>``/``<line>``/``<text>`` di
+    dalamnya tidak menjadi bentuk SVG, sehingga grafnya tidak tergambar.
+    ``st.html`` menyisipkan markup lewat DOMPurify, yang memang mengizinkan
+    namespace SVG. Bila versi Streamlit terlalu lama untuk punya ``st.html``,
+    baru jatuh ke markdown.
+    """
     stages = phase_graph_stages(pipeline_id, info)
     if not stages:
         st.caption("Tahapan pipeline ini tidak terdaftar.")
         return
-    st.markdown(phase_graph_svg(stages), unsafe_allow_html=True)
+    markup = phase_graph_svg(stages)
+    if hasattr(st, "html"):
+        st.html(markup)
+    else:                                   # pragma: no cover - Streamlit lama
+        st.markdown(markup, unsafe_allow_html=True)
     # SATU baris: urutan tahap (teks alternatif graf) + keterangan tahap
     # pra-pipeline, sebelumnya dua caption bertumpuk.
     st.caption(f"{phase_graph_alt(stages)} — {PRE_STAGE_NOTE}")
@@ -530,38 +583,39 @@ def render_catalog(catalog=None, *, on_detail=None,
     counts = catalog_counts(catalog)
     st.markdown(f'<span class="ids-cat-count">{escape(summary_text(counts))}'
                 f'</span>', unsafe_allow_html=True)
-    st.caption("Hasil & metrik ada di Progress & Status.")
+
 
     requested = None
-    for index, group in enumerate(catalog):
-        if index:
-            # Pemisah ANTAR blok — jaraknya jauh lebih lebar daripada jarak di
-            # dalam blok, sehingga tiap penelitian terbaca sebagai satu kesatuan.
-            st.markdown('<hr class="ids-cat-sep">', unsafe_allow_html=True)
-        _line(shorten(group["title"], TITLE_CHARS), "ids-cat-title")
-        if group.get("short"):
-            _line(group["short"], "ids-cat-short")
+    for group in catalog:
+        # KARTU BERKOTAK, bukan blok yang dipisah garis. Wadah berbatas milik
+        # Streamlit memberi garis tipis + sudut membulat; latar, lebar maksimum,
+        # jarak dalam/antar kartu, dan efek sorot ditambahkan CSS terpusat lewat
+        # kelas `st-key-<key>` yang muncul karena container ini berkunci.
+        with st.container(border=True, key=card_key(group["dataset_type"])):
+            _line(shorten(group["title"], TITLE_CHARS), "ids-cat-title")
+            if group.get("short"):
+                _line(group["short"], "ids-cat-short")
 
-        names = [a["algorithm"] for a in group.get("algorithms") or []]
-        st.markdown(chips_html(names), unsafe_allow_html=True)
+            names = [a["algorithm"] for a in group.get("algorithms") or []]
+            st.markdown(chips_html(names), unsafe_allow_html=True)
 
-        # Dua kolom berukuran SAMA -> kedua tombol selebar & setinggi sama,
-        # sejajar pada satu garis dasar; lebar tetapnya dikunci di CSS terpusat.
-        cols = st.columns([1, 1, 3])
-        if cols[0].button("Run Pipeline", type="primary",
-                          key=f"cat_run_{group['dataset_type']}",
-                          use_container_width=True,
-                          help="Cari dataset yang cocok untuk pipeline ini."):
-            requested = group["dataset_type"]
-            if on_run is not None:
-                on_run(requested)
-        # Aksi SEKUNDER — sengaja lebih tenang daripada aksi utama.
-        if cols[1].button("Detail", key=f"cat_detail_{group['dataset_type']}",
-                          type="tertiary", use_container_width=True,
-                          help="Keterangan lengkap & tahapan pipeline."):
-            requested = group["dataset_type"]
-            if on_detail is not None:
-                on_detail(requested)
+            # Dua kolom berukuran SAMA -> kedua tombol selebar & setinggi sama,
+            # sejajar pada satu garis dasar; lebar tetapnya dikunci di CSS.
+            cols = st.columns([1, 1, 3])
+            if cols[0].button("Run Pipeline", type="primary",
+                              key=f"cat_run_{group['dataset_type']}",
+                              use_container_width=True,
+                              help="Cari dataset yang cocok untuk pipeline ini."):
+                requested = group["dataset_type"]
+                if on_run is not None:
+                    on_run(requested)
+            # Aksi SEKUNDER — sengaja lebih tenang daripada aksi utama.
+            if cols[1].button("Detail", key=f"cat_detail_{group['dataset_type']}",
+                              type="tertiary", use_container_width=True,
+                              help="Keterangan lengkap & tahapan pipeline."):
+                requested = group["dataset_type"]
+                if on_detail is not None:
+                    on_detail(requested)
     return requested
 
 

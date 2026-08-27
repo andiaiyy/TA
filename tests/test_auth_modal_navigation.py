@@ -79,19 +79,22 @@ def _flag(at):
 _PICK_LABEL = "Kontributor"
 
 
-def _open_the_mode_list(at) -> None:
-    """Daftar mode kini mengembang DI DALAM sidebar (bukan popover mengambang),
-    jadi ia harus dibuka dulu sebelum pilihannya terlihat."""
-    toggle = next(b for b in at.button
-                  if b.label in ("Mode pengunjung",)
-                  or b.label.startswith(("Mode ", "ai ", "rina ")))
-    toggle.click().run()
+def _mode_picker(at):
+    """Dropdown pemilih mode di sidebar."""
+    return at.selectbox(key="auth_mode_pick")
+
+
+def _pick_mode(at, label: str) -> None:
+    """Pilih satu mode dari dropdown.
+
+    Menggantikan penekanan tombol: pemilih mode kini DROPDOWN, sehingga tidak
+    ada lagi barisan tombol peran di sidebar.
+    """
+    _mode_picker(at).set_value(label).run()
 
 
 def _open_the_modal(at) -> None:
-    if not any(b.label == _PICK_LABEL for b in at.button):
-        _open_the_mode_list(at)
-    next(b for b in at.button if b.label == _PICK_LABEL).click().run()
+    _pick_mode(at, _PICK_LABEL)
 
 
 def test_the_modal_stays_closed_until_the_button_is_pressed(app):
@@ -197,10 +200,12 @@ def test_picking_a_role_only_opens_the_modal(app, label):
     & statusnya di basis data.
     """
     app.run()
-    _open_the_mode_list(app)
-    next(b for b in app.button if b.label == label).click().run()
+    _pick_mode(app, label)
 
     assert _flag(app) == "login"
+    # Dropdown kembali menunjuk mode NYATA — ia tidak pernah menampilkan peran
+    # yang tidak dimiliki, termasuk bila modal ditutup tanpa masuk.
+    assert _mode_picker(app).value == "Pengunjung"
     state = app.session_state.filtered_state
     assert login.SESSION_USER_KEY not in state, state
     assert not any(v in ("contributor", "research_admin")
@@ -245,13 +250,14 @@ def test_a_signed_in_user_sees_their_role_and_a_way_out(app):
     app.session_state["auth_user"] = {"username": "ai", "role": "research_admin",
                                       "status": "active"}
     app.run()
-    _open_the_mode_list(app)
-    labels = [b.label for b in app.button]
-    # Kembali ke mode pengunjung = keluar dari akun (keterangannya di help=).
-    assert "Pengunjung" in labels
-    keluar = next(b for b in app.button if b.label == "Pengunjung")
-    assert "Keluar" in (keluar.help or "")
+    picker = _mode_picker(app)
 
-    # Peran aktif tampil pada LABEL pemilih mode, bukan sebagai baris tambahan.
-    roles = [b for b in app.button if b.label == "Research Admin"]
-    assert roles and roles[0].disabled is True
+    # Peran aktif adalah nilai dropdown — bukan baris tambahan.
+    assert picker.value == "Research Admin"
+    # Jalan keluar tersedia sebagai pilihan "Pengunjung".
+    assert "Pengunjung" in picker.options
+
+    # Memilihnya = keluar dari akun; identitas benar-benar hilang dari session.
+    _pick_mode(app, "Pengunjung")
+    assert login.SESSION_USER_KEY not in app.session_state.filtered_state
+    assert _mode_picker(app).value == "Pengunjung"

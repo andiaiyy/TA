@@ -190,7 +190,7 @@ with _breadcrumb_slot:
 # dirender. Sebuah view tidak dapat mendeteksi kepergiannya sendiri (render()-nya
 # tidak dipanggil saat pengguna ada di halaman lain), jadi pemeriksaannya harus
 # berada di alur yang jalan pada setiap halaman — di sini.
-drop_stale_page_flags(page)
+_page_changed = drop_stale_page_flags(page)
 
 # Blok 2 dari sidebar: eksperimen yang sedang berjalan, di antara menu halaman
 # dan blok identitas. Memperbarui dirinya sendiri tiap 15 detik lewat
@@ -217,12 +217,25 @@ render_mode_switch()
 maybe_render_auth_dialog(page)
 
 # ── Page routing ──────────────────────────────────────────────────────────
-if page == "Progress & Status":
-    from ui.views.view_results import render
-    render()
-elif page == "Run Experiment":
-    from ui.views.run_experiment import render
-    render()
-elif page == "Add Pipeline & Dataset":
-    from ui.views.contribute import render
-    render()
+# SELURUH isi halaman digambar ke dalam SATU placeholder. Dua akibatnya:
+#
+# 1. saat halaman berganti, `.empty()` membuang seluruh subpohon halaman lama
+#    SEBELUM halaman baru menggambar — sebelumnya tiap view menulis langsung ke
+#    wadah utama, jadi tidak ada apa pun yang bisa dikosongkan dan sisa elemen
+#    halaman sebelumnya bertahan di layar;
+# 2. isi halaman selalu berada di jalur elemen yang sama, jadi frontend
+#    mengganti isinya alih-alih menyandingkan elemen lama dan baru.
+_page_slot = st.empty()
+if _page_changed:
+    _page_slot.empty()
+
+with _page_slot.container():
+    if page == "Progress & Status":
+        from ui.views.view_results import render
+        render()
+    elif page == "Run Experiment":
+        from ui.views.run_experiment import render
+        render()
+    elif page == "Add Pipeline & Dataset":
+        from ui.views.contribute import render
+        render()

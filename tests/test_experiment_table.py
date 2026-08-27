@@ -570,9 +570,11 @@ def test_the_compare_button_is_disabled_without_a_selection(tmp_path):
 
 
 def test_the_result_count_is_shown(tmp_path):
+    """Jumlah baris menempel pada tombol Unduh CSV — tombol itu mengikuti
+    filter yang persis sama, jadi angkanya selalu cocok dengan isinya."""
     at = _run_page(tmp_path)
-    captions = " ".join(c.value for c in at.caption)
-    assert re.search(r"\d+ dari \d+ eksperimen", captions)
+    csv = next(b for b in at.get("download_button") if b.label == "Unduh CSV")
+    assert re.search(r"\d+ dari \d+ eksperimen", csv.help or "")
 
 
 def test_the_running_block_and_history_both_survive(tmp_path):
@@ -616,9 +618,18 @@ def test_the_comparison_dialog_renders_with_a_preset_selection(tmp_path):
     at = _run_page(tmp_path, preset={"_hist_compare_ids": ids})
     assert at.exception is None or not at.exception
 
-    tables = [m.value for m in at.markdown if m.value.startswith("| Field")]
+    # Tabel perbandingan kini SATU tabel HTML (st.html) supaya lebar kolomnya
+    # benar-benar seragam; di AppTest ia terbaca lewat proto elemen html.
+    blocks = [e.proto.body for e in at.get("html")]
+    tables = [b for b in blocks if 'class="ids-cmp"' in b]
     assert tables, "tabel perbandingan tidak terender"
-    assert any("Accuracy" in t for t in tables)
+    table = next(b for b in tables if "Accuracy" in b)
+    # Satu tabel per blok — kolomnya selaras karena semuanya table-layout:fixed
+    # dengan lebar kolom pertama yang sama.
+    assert table.count("<table") == 1
+    assert "table-layout: fixed" in "".join(blocks)   # lebar kolom seragam
+    for group in ("Identitas", "Metrik"):             # pemisah antar-kelompok
+        assert f'class="ids-cmp-group"' in table and group in table
 
 
 def test_a_cross_family_comparison_warns_in_the_page(tmp_path):

@@ -494,20 +494,33 @@ def test_a_recorded_run_prefers_its_own_params_over_the_definition():
 
 
 def test_the_real_database_still_holds_every_record_as_official():
-    """Basis data NYATA: setelah migrasi, tidak satu pun record berubah mode."""
+    """Basis data NYATA: record LAMA tidak berubah mode setelah migrasi.
+
+    Yang dijaga adalah sifat yang permanen — record yang dibuat sebelum kolom
+    mode ada (``run_mode`` NULL) tetap terbaca sebagai RESMI dan tetap ada.
+    Versi awal test ini menuntut "tidak ada satu pun run eksplorasi di basis
+    data", padahal itu bukan sifat sistem melainkan keadaan sesaat: begitu
+    seseorang benar-benar menjalankan run eksplorasi — yang memang boleh —
+    test itu gagal tanpa ada yang rusak.
+    """
     from config.settings import DB_PATH
     conn = sqlite3.connect(str(DB_PATH))
     try:
         columns = {r[1] for r in conn.execute("PRAGMA table_info(experiments)")}
         assert {"run_mode", "params_used", "params_changed"} <= columns
-        total = conn.execute("SELECT COUNT(*) FROM experiments").fetchone()[0]
-        exploration = conn.execute(
-            "SELECT COUNT(*) FROM experiments WHERE run_mode = ?",
-            (rm.RUN_MODE_EXPLORATION,)).fetchone()[0]
+        legacy = conn.execute(
+            "SELECT run_mode FROM experiments WHERE run_mode IS NULL").fetchall()
+        tagged = conn.execute(
+            "SELECT run_mode FROM experiments WHERE run_mode IS NOT NULL").fetchall()
     finally:
         conn.close()
-    assert total >= 15                       # record dasar BAB III
-    assert exploration == 0                  # tidak ada yang tertandai eksplorasi
+
+    assert len(legacy) >= 15                 # record dasar BAB III masih utuh
+    # NULL selalu dibaca sebagai resmi — tidak ada yang tertandai eksplorasi.
+    assert all(rm.mode_of({"run_mode": row[0]}) == rm.RUN_MODE_OFFICIAL
+               for row in legacy)
+    # Record yang memang bermode hanya boleh memakai mode yang sah.
+    assert all(row[0] in rm.ALL_RUN_MODES for row in tagged)
 
 
 def test_the_migration_is_additive_only():

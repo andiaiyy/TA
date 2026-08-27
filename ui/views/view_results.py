@@ -2,6 +2,7 @@
 experiments on top, then the history table (AgGrid) below with a pop-up (dialog)
 detail view built from the shared result components."""
 from datetime import date, datetime, timezone
+from html import escape
 import time
 
 import streamlit as st
@@ -24,6 +25,12 @@ from ui.components.dashboard import (
 )
 from orchestrator import run_mode as rm
 from ui.components import experiment_table as et
+from ui.components.page_flags import wait_before_refresh
+
+# Nama halaman ini di menu ui/app.py. Dipakai mengikat pembaruan
+# berkala pada halamannya: begitu pengguna pindah, penggambaran
+# ulang berhenti (eksperimennya sendiri tidak disentuh).
+PAGE_NAME = 'Progress & Status'
 from ui.components import dialogs as dlg
 
 
@@ -173,17 +180,24 @@ def _pipeline_params() -> dict:
     return out
 
 
-def _build_rows(experiments: list[dict]) -> list[dict]:
-    """Baris tabel — memakai penyusun MURNI, pembaca artefak disuntikkan."""
-    finished = {e.get("id"): e.get("completed_at") for e in experiments
-                if e.get("status") == "FINISHED"}
+def _build_rows(experiments: list[dict], *, with_roc: bool = True) -> list[dict]:
+    """Baris tabel — memakai penyusun MURNI, pembaca artefak disuntikkan.
+
+    ``with_roc=False`` MELEWATI pembacaan artefak sepenuhnya. ROC-AUC adalah
+    satu-satunya nilai di tabel ini yang tidak ada di basis data: mengisinya
+    berarti membuka `metrics.json` satu per satu untuk SETIAP eksperimen yang
+    selesai. Kolomnya tidak termasuk set bawaan, jadi pada tampilan biasa
+    puluhan pembacaan itu dilakukan untuk kolom yang tidak seorang pun lihat.
+    """
+    finished = ({e.get("id"): e.get("completed_at") for e in experiments
+                 if e.get("status") == "FINISHED"} if with_roc else {})
 
     def _roc(eid):
         if eid not in finished:
             return None
         return _roc_auc(eid, finished[eid])
 
-    rows = et.build_rows(experiments, roc_reader=_roc,
+    rows = et.build_rows(experiments, roc_reader=_roc if with_roc else None,
                          params_reader=_pipeline_params)
     return et.mark_best_within_family(rows)
 
@@ -236,8 +250,14 @@ _COLUMN_WIDTHS = {"Pipeline": 210, "Berkas": 200, "Waktu": 150,
                   "Hash dataset": 130, "Dataset": 130, "Pemilik": 120}
 
 
-def _build_grid_options(df: pd.DataFrame, columns: list[dict]) -> dict:
-    """Header BERGRUP Identitas | Parameter | Metrik + centang multi-pilih."""
+def _build_grid_options(df: pd.DataFrame, columns: list[dict],
+                        metric_tooltip: str = "") -> dict:
+    """Header BERGRUP Identitas | Parameter | Metrik + centang multi-pilih.
+
+    ``metric_tooltip`` menempel pada header SETIAP kolom metrik. Di situlah
+    keterangan semantik metrik tinggal sekarang: menjelaskan angka tepat di
+    kolom yang menampilkannya, bukan sebagai paragraf di bawah tabel.
+    """
     gb = GridOptionsBuilder.from_dataframe(df)
     gb.configure_default_column(sortable=True, resizable=True, filterable=False)
     gb.configure_selection(selection_mode="multiple", use_checkbox=True)
@@ -257,6 +277,8 @@ def _build_grid_options(df: pd.DataFrame, columns: list[dict]) -> dict:
                 spec.update({"type": "numericColumn",
                              "valueFormatter": _METRIC_FORMATTER,
                              "cellStyle": _hi_style(et.best_flag_key(col["key"]))})
+                if metric_tooltip:
+                    spec["headerTooltip"] = metric_tooltip
             elif col["label"] == "Status":
                 spec["cellStyle"] = _STATUS_STYLE
             if first_column:
@@ -300,7 +322,6 @@ def _render_column_picker(all_columns: list[dict]) -> list[str]:
     grouped = et.columns_by_group(all_columns)
 
     with st.popover("Kolom", use_container_width=False):
-        st.caption("Pilih kolom yang ditampilkan.")
         picked: list[str] = []
         for group in et.GROUP_ORDER:
             cols = grouped.get(group) or []
@@ -308,10 +329,14 @@ def _render_column_picker(all_columns: list[dict]) -> list[str]:
                 continue
             labels = {c["label"]: c["key"] for c in cols}
             default = [c["label"] for c in cols if c["key"] in current]
-            chosen = st.multiselect(group, list(labels), default=default,
-                                    key=f"_hist_cols_{group}")
+            chosen = st.multiselect(
+                group, list(labels), default=default,
+                key=f"_hist_cols_{group}",
+                # Asal-usul parameter menempel pada grup yang dijelaskannya,
+                # bukan sebagai baris keterangan terpisah.
+                help=et.PARAM_PROVENANCE if group == et.GROUP_PARAM else None,
+            )
             picked += [labels[label] for label in chosen]
-        st.caption(et.PARAM_PROVENANCE)
         if st.button("Kembalikan ke set inti", key="_hist_cols_reset"):
             for group in et.GROUP_ORDER:
                 st.session_state.pop(f"_hist_cols_{group}", None)
@@ -385,38 +410,250 @@ def _render_expression_search(rows: list[dict]) -> list[dict]:
 
 
 # --- Perbandingan berdampingan --------------------------------------------
+#
+# Tiga hal yang menentukan bentuk bagian ini:
+#
+# * **Hitung SEKALI.** Baris yang dibandingkan disimpan sebagai payload modal
+#   saat modal DIBUKA. Setiap interaksi di dalamnya (mencentang "hanya yang
+#   berbeda", membuang satu eksperimen) hanya menyusun ulang tabel dari data
+#   yang sudah ada di memori — tidak ada pembacaan basis data atau artefak.
+# * **Tabel selaras.** Dirender sebagai SATU tabel HTML dengan lebar kolom
+#   seragam (`table-layout: fixed`), label rata kiri, angka rata kanan. Satu
+#   tabel untuk semua kelompok, bukan satu tabel per kelompok — hanya dengan
+#   begitu lebar kolomnya benar-benar sama di seluruh bagian.
+# * **Peringatan tetap di atas.** Semantik metrik & campuran mode dirender
+#   sebelum satu angka pun terbaca.
 
-def _comparison_body(rows: list[dict], param_keys: list[str]) -> None:
-    data = et.build_comparison(rows, param_keys)
+_CMP_ONLY_DIFF_KEY = "_hist_cmp_only_diff"
+
+# Lebar kolom pertama (nama baris). SATU angka yang dipakai dua kali: oleh CSS
+# tabel DAN oleh bobot `st.columns` baris aksi, sehingga tombol setiap
+# eksperimen jatuh tepat di bawah kolomnya sendiri.
+CMP_LABEL_WIDTH = 0.32
+
+_CMP_CSS = """
+<style>
+/* SATU mekanisme untuk seluruh tabel di dialog ini: elemen tabel berkelas
+   "ids-cmp".
+   Lebar kolom, tinggi baris, padding, dan garis pemisah didefinisikan sekali
+   di sini supaya tabel utama dan tabel aksi tidak mungkin tampil berbeda. */
+.ids-cmp { width: 100%; border-collapse: collapse; table-layout: fixed;
+           font-size: 0.9rem; }
+.ids-cmp col.ids-cmp-labelcol { width: 32%; }
+/* Tinggi baris & padding SERAGAM untuk th maupun td. */
+.ids-cmp th, .ids-cmp td {
+    padding: .38rem .5rem; line-height: 1.45; height: 2.2rem;
+    vertical-align: middle;
+    /* Nama panjang dipendekkan; nilai penuh ada di tooltip (atribut title). */
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    /* SATU gaya garis pemisah di seluruh tabel — tipis dan sama. */
+    border-bottom: 1px solid rgba(127,127,127,.22);
+}
+.ids-cmp thead th { font-weight: 600; text-align: right; }
+.ids-cmp .ids-cmp-label { text-align: left; }
+/* Angka rata KANAN dengan angka lebar-tetap supaya digitnya sejajar. */
+.ids-cmp td.ids-cmp-r { text-align: right;
+    font-variant-numeric: tabular-nums; font-feature-settings: "tnum"; }
+.ids-cmp td.ids-cmp-l { text-align: left; }
+/* Pemisah kelompok: dibedakan lewat latar & huruf kecil-besar, BUKAN lewat
+   garis yang lebih tebal — supaya tidak ada campuran garis tebal & tipis. */
+.ids-cmp tr.ids-cmp-group td {
+    font-weight: 600; font-size: .8rem; letter-spacing: .03em;
+    text-transform: uppercase; opacity: .72;
+    background: rgba(127,127,127,.07);
+}
+/* Baris yang BERBEDA disorot; yang sama dibiarkan tenang. */
+.ids-cmp tr.ids-cmp-diff td { background: rgba(127,127,127,.13);
+           font-weight: 600; }
+.ids-cmp tr.ids-cmp-diff td.ids-cmp-label::before {
+           content: "\0394\00a0"; opacity: .65; }
+</style>
+"""
+
+
+def _comparison_payload(ids: list[str], rows: list[dict],
+                        param_keys: list[str]) -> dict:
+    """Baris + kunci parameter untuk modal, DISUSUN SEKALI saat modal dibuka.
+
+    Payload dibuang saat modal ditutup, jadi membuka perbandingan lain selalu
+    menyusun yang baru. Selama modal terbuka, isinya tidak pernah disusun ulang
+    — mencentang "hanya yang berbeda" atau membuang satu eksperimen bekerja atas
+    data yang sudah ada di memori.
+    """
+    cached = dlg.payload(_COMPARE_KEY)
+    if isinstance(cached, dict) and cached.get("_ids") == list(ids):
+        return cached
+    chosen = [r for r in rows if r["_id"] in set(ids)]
+    fresh = {"_ids": list(ids), "rows": chosen, "param_keys": list(param_keys)}
+    dlg.store_payload(_COMPARE_KEY, fresh)
+    return fresh
+
+
+def _drop_from_comparison(experiment_id: str) -> None:
+    """Buang satu eksperimen dari perbandingan — tanpa membaca ulang apa pun.
+
+    Flag dan payload diperbarui bersama: flag menjaga modal tetap terbuka,
+    payload menyediakan barisnya. Bila tinggal satu, modal ditutup dan flagnya
+    dibersihkan — membandingkan satu eksperimen tidak ada artinya.
+    """
+    payload = dlg.payload(_COMPARE_KEY) or {}
+    rows = et.drop_from_comparison(payload.get("rows") or [], experiment_id)
+    if len(rows) < 2:
+        dlg.close_dialog(_COMPARE_KEY)
+        dlg.clear_payload(_COMPARE_KEY)
+        return
+    ids = [r["_id"] for r in rows]
+    st.session_state[_COMPARE_KEY] = ids
+    dlg.store_payload(_COMPARE_KEY,
+                      {"_ids": ids, "rows": rows,
+                       "param_keys": payload.get("param_keys") or []})
+
+
+def _close_comparison() -> None:
+    """Bersihkan flag + payload perbandingan. Dipakai semua jalur keluar."""
+    dlg.close_dialog(_COMPARE_KEY)
+    dlg.clear_payload(_COMPARE_KEY)
+
+
+def _cell_html(value, css_class: str, *, tag: str = "td") -> str:
+    """Satu sel: dipendekkan bila panjang, nilai penuh selalu di tooltip.
+
+    Elipsis dilakukan CSS (`text-overflow`), sementara `title` membawa teks
+    lengkapnya — jadi kolom yang sempit tidak pernah menghilangkan informasi.
+    """
+    text = str(value)
+    return (f'<{tag} class="{css_class}" title="{escape(text)}">'
+            f'{escape(text)}</{tag}>')
+
+
+def comparison_table_html(data: dict) -> str:
+    """Tabel perbandingan sebagai SATU blok HTML yang selaras."""
+    headers = data["headers"]
+    cols = ('<colgroup><col class="ids-cmp-labelcol" />'
+            + '<col />' * len(headers) + '</colgroup>')
+    head = ('<thead><tr>'
+            + _cell_html("Field", "ids-cmp-label", tag="th")
+            + "".join(_cell_html(h, "", tag="th") for h in headers)
+            + "</tr></thead>")
+
+    body: list[str] = []
+    for section in data["sections"]:
+        body.append(
+            f'<tr class="ids-cmp-group"><td colspan="{len(headers) + 1}">'
+            f'{escape(str(section["group"]))}</td></tr>')
+        for field in section["fields"]:
+            row_class = "ids-cmp-diff" if field["differs"] else ""
+            align = "ids-cmp-r" if field["align"] == et.ALIGN_RIGHT else "ids-cmp-l"
+            cells = "".join(_cell_html(v, align) for v in field["values"])
+            body.append(
+                f'<tr class="{row_class}">'
+                + _cell_html(field["label"], "ids-cmp-label")
+                + f'{cells}</tr>')
+
+    return (f'<div class="ids-cmp-scroll"><table class="ids-cmp">{cols}{head}'
+            f'<tbody>{"".join(body)}</tbody></table></div>')
+
+
+def comparison_column_weights(count: int) -> list[float]:
+    """Bobot `st.columns` yang SEJAJAR dengan kolom tabel di atasnya.
+
+    Diturunkan dari :data:`CMP_LABEL_WIDTH` yang sama dengan yang dipakai CSS,
+    jadi baris aksi tidak mungkin melenceng dari tabelnya.
+    """
+    count = max(int(count), 1)
+    return [CMP_LABEL_WIDTH] + [(1.0 - CMP_LABEL_WIDTH) / count] * count
+
+
+def comparison_actions_html(rows) -> str:
+    """Baris identitas eksperimen — tabel yang SAMA mekanismenya.
+
+    Sebelumnya bagian ini memakai `st.columns` + markdown per baris, sehingga
+    lebar kolom, tinggi baris, dan garisnya tidak pernah cocok dengan tabel
+    utama. Sekarang ia tabel `ids-cmp` juga; hanya tombolnya yang tetap widget
+    Streamlit (HTML tidak bisa memuat tombol), dan tombol itu memakai bobot
+    kolom yang sama sehingga jatuh tepat di bawah kolomnya.
+    """
+    headers = [r.get("id", "—") for r in rows]
+    cols = ('<colgroup><col class="ids-cmp-labelcol" />'
+            + '<col />' * len(headers) + '</colgroup>')
+    body = []
+    for label, key in (("Pipeline", "pipeline"), ("Mode", "mode")):
+        body.append(
+            "<tr>" + _cell_html(label, "ids-cmp-label")
+            + "".join(_cell_html(r.get(key, "—"), "ids-cmp-l") for r in rows)
+            + "</tr>")
+    head = ('<thead><tr>'
+            + _cell_html("Eksperimen", "ids-cmp-label", tag="th")
+            + "".join(_cell_html(h, "", tag="th") for h in headers)
+            + "</tr></thead>")
+    return (f'<div class="ids-cmp-scroll"><table class="ids-cmp">{cols}{head}'
+            f'<tbody>{"".join(body)}</tbody></table></div>')
+
+
+def _comparison_body(ids: list[str], rows: list[dict],
+                     param_keys: list[str]) -> None:
+    payload = _comparison_payload(ids, rows, param_keys)
+    chosen = payload["rows"]
 
     # Peringatan WAJIB lebih dulu — sebelum satu angka pun terbaca.
-    for warning in data["warnings"]:
+    for warning in et.comparison_warnings(chosen):
         st.warning(warning)
-    if data["note"]:
-        st.caption(data["note"])
+    note = et.semantics_note(chosen)
+    if note:
+        st.markdown(note)
 
-    header = "| Field | " + " | ".join(f"`{h}`" for h in data["headers"]) + " |"
-    divider = "| --- " * (len(data["headers"]) + 1) + "|"
-    for section in data["sections"]:
-        st.markdown(f"**{section['group']}**")
-        lines = [header, divider]
-        for field in section["fields"]:
-            # Baris yang BERBEDA ditebalkan + ditandai agar langsung terlihat.
-            mark = "**" if field["differs"] else ""
-            cells = " | ".join(f"{mark}{v}{mark}" for v in field["values"])
-            label = ("Δ " if field["differs"] else "") + field["label"]
-            lines.append(f"| {label} | {cells} |")
-        st.markdown(chr(10).join(lines))
-    # SATU baris penutup untuk seluruh tabel perbandingan: asal parameter +
-    # arti penanda Δ. Sebelumnya asal parameter diulang di tiap bagian.
-    st.caption(
-        "Baris bertanda Δ berbeda antar eksperimen; tidak ada peringkat "
-        "otomatis — penilaian mana yang lebih baik tetap milik pembaca. "
+    only_diff = st.checkbox(et.ONLY_DIFF_LABEL, key=_CMP_ONLY_DIFF_KEY,
+                            help="Baris yang nilainya sama disembunyikan.")
+    data = et.build_comparison(chosen, payload["param_keys"],
+                               only_differences=only_diff)
+
+    if not data["sections"]:
+        st.info(et.ALL_SAME_NOTE)
+    else:
+        st.html(_CMP_CSS + comparison_table_html(data))
+
+    st.markdown(
+        f"{data['diff_count']} dari {data['total_count']} baris berbeda; "
+        "baris yang disorot itulah yang berbeda. Tidak ada peringkat otomatis "
+        "— penilaian mana yang lebih baik tetap milik pembaca. "
         + et.PARAM_PROVENANCE
     )
 
+    # Aksi per eksperimen. Identitasnya memakai tabel yang SAMA dengan di atas,
+    # dan tombolnya memakai bobot kolom yang sama sehingga sejajar dengannya.
+    st.divider()
+    st.markdown("**Kelola eksperimen dalam perbandingan ini**")
+    st.html(_CMP_CSS + comparison_actions_html(chosen))
+
+    weights = comparison_column_weights(len(chosen))
+    detail_cols = st.columns(weights)
+    detail_cols[0].markdown("Buka detail")
+    for index, row in enumerate(chosen, start=1):
+        if detail_cols[index].button(
+                "Buka", key=f"_cmp_open_{row['_id']}",
+                use_container_width=True,
+                help=f"Buka detail lengkap {row['id']}."):
+            # Perbandingan ditutup lebih dulu supaya ia tidak terbuka kembali
+            # di belakang modal detail pada rerun berikutnya.
+            _close_comparison()
+            dlg.open_dialog(dlg.DETAIL_KEY, row["_id"])
+            st.rerun()
+
+    too_few = len(chosen) <= 2
+    drop_cols = st.columns(weights)
+    drop_cols[0].markdown("Buang dari perbandingan")
+    for index, row in enumerate(chosen, start=1):
+        if drop_cols[index].button(
+                "Buang", key=f"_cmp_drop_{row['_id']}",
+                use_container_width=True,
+                help=("Perbandingan memerlukan minimal dua eksperimen — "
+                      "membuang satu lagi akan menutupnya."
+                      if too_few else f"Keluarkan {row['id']} dari tabel.")):
+            _drop_from_comparison(row["_id"])
+            st.rerun()
+
     if st.button("Tutup", key="_hist_cmp_close"):
-        dlg.close_dialog(_COMPARE_KEY)
+        _close_comparison()
         st.rerun()
 
 
@@ -424,9 +661,9 @@ if hasattr(st, "dialog"):
     _comparison_dialog = dlg.dialog_decorator(
         "Bandingkan Eksperimen", _COMPARE_KEY, width="large")(_comparison_body)
 else:                                       # pragma: no cover - Streamlit lama
-    def _comparison_dialog(rows, param_keys):
+    def _comparison_dialog(ids, rows, param_keys):
         with st.expander("Bandingkan Eksperimen", expanded=True):
-            _comparison_body(rows, param_keys)
+            _comparison_body(ids, rows, param_keys)
 
 
 def _maybe_render_comparison(rows: list[dict], param_keys: list[str]) -> None:
@@ -434,12 +671,15 @@ def _maybe_render_comparison(rows: list[dict], param_keys: list[str]) -> None:
     detail, sehingga kontrol di dalamnya bekerja."""
     ids = dlg.dialog_state(_COMPARE_KEY)
     if not ids:
+        # Flag sudah bersih: payload ikut dibuang supaya perbandingan berikutnya
+        # tidak pernah memakai baris lama.
+        dlg.clear_payload(_COMPARE_KEY)
         return
-    chosen = [r for r in rows if r["_id"] in set(ids)]
-    if len(chosen) < 2:                     # data berubah sejak tombol ditekan
-        dlg.close_dialog(_COMPARE_KEY)
+    if len([r for r in rows if r["_id"] in set(ids)]) < 2:
+        dlg.close_dialog(_COMPARE_KEY)      # data berubah sejak tombol ditekan
+        dlg.clear_payload(_COMPARE_KEY)
         return
-    _comparison_dialog(chosen, param_keys)
+    _comparison_dialog(list(ids), rows, param_keys)
 
 
 # ─── Page ──────────────────────────────────────────────────────────────────
@@ -502,19 +742,20 @@ def _render_running_section(experiments) -> tuple:
 
         with st.container(border=True):
             top = st.columns([3, 1])
-            top[0].markdown(f"**{e.get('pipeline_id', '?')}** · {e.get('dataset_type', '?')}")
+            _mulai = (e.get("started_at") or e.get("created_at") or "-")[:19]
+            top[0].markdown(
+                f"**{e.get('pipeline_id', '?')}** · {e.get('dataset_type', '?')} · "
+                f"mulai {_mulai} · elapsed {format_elapsed(el)}")
             top[1].markdown(f"`{cur_status}`")
-            st.caption(f"Mulai {(e.get('started_at') or e.get('created_at') or '-')[:19]} · "
-                       f"Elapsed {format_elapsed(el)}")
             if pv["overall_percent"] is not None:
                 st.progress(min(max(pv["overall_percent"], 0), 100) / 100.0,
                             text=f"Progres keseluruhan: {pv['overall_percent']}%")
             if pv["stage_label"]:
                 st.markdown(f"**{pv['stage_label']}**")
             elif e.get("status") == "QUEUED":
-                st.caption("Menunggu worker mengambil tugas…")
+                st.markdown("Menunggu worker mengambil tugas…")
             else:
-                st.caption("Progres granular tidak tersedia untuk eksperimen ini.")
+                st.markdown("Progres granular tidak tersedia untuk eksperimen ini.")
             if st.button("Batalkan", key=f"dash_cancel_{eid}"):
                 r = cancel_experiment(eid)
                 if r.get("success"):
@@ -576,8 +817,23 @@ def _detail_payload(experiment_id: str) -> dict | None:
     if isinstance(cached, dict) and cached.get("_id") == experiment_id:
         return cached.get("full")
     full = get_full_experiment(experiment_id)
-    dlg.store_payload(dlg.DETAIL_KEY, {"_id": experiment_id, "full": full})
+    # Daftar berkas artefak disiapkan DI SINI juga. Sebelumnya ia disusun di
+    # dalam badan modal, sehingga direktori artefak ditelusuri ulang (plus
+    # `stat` per berkas) pada SETIAP interaksi di dalam modal — padahal isinya
+    # tidak berubah selama modal terbuka.
+    dlg.store_payload(dlg.DETAIL_KEY, {
+        "_id": experiment_id, "full": full,
+        "files": _build_artifact_files(experiment_id) if full else {},
+    })
     return full
+
+
+def _detail_artifact_files(experiment_id: str) -> dict:
+    """Berkas artefak yang sudah disiapkan saat modal dibuka."""
+    cached = dlg.payload(dlg.DETAIL_KEY)
+    if isinstance(cached, dict) and cached.get("_id") == experiment_id:
+        return cached.get("files") or {}
+    return {}
 
 
 def _render_mode_details(exp: dict) -> None:
@@ -653,7 +909,7 @@ def _detail_dialog_body(experiment_id: str) -> None:
         render_results(payload, key=f"dlg_{exp['id']}", pipeline_id=exp.get("pipeline_id", ""))
         _pdf_download_button(exp, metrics, metadata, key=f"dlgpdf_{exp['id']}")
         with st.expander("Artifact Viewer", expanded=False):
-            files = _build_artifact_files(exp["id"])
+            files = _detail_artifact_files(exp["id"])
             if files:
                 render_file_browser(files, state_key=f"dlg_artifacts_{exp['id']}")
             else:
@@ -721,13 +977,23 @@ def _render_selected_actions(selected_id: str) -> None:
             st.rerun()
 
 
-def _render_history(experiments: list[dict]) -> None:
+def _roc_column_visible() -> bool:
+    """Apakah kolom ROC-AUC termasuk yang sedang ditampilkan?
+
+    Dibaca dari pilihan kolom yang tersimpan, SEBELUM baris disusun — sehingga
+    artefak hanya dibuka bila nilainya memang akan terlihat.
+    """
+    chosen = st.session_state.get(_COLUMNS_KEY)
+    return "auc" in (chosen if chosen is not None else et.DEFAULT_COLUMNS)
+
+
+def _render_history(experiments: list[dict], all_rows: list[dict]) -> None:
     """Riwayat eksperimen: filter -> kolom bergrup -> bandingkan -> ekspor.
 
     Seluruh penyaringan berjalan pada data yang SUDAH dibaca sekali di
     ``render()``; tidak ada kueri tambahan ke basis data per interaksi.
+    ``all_rows`` disusun pemanggil supaya penyusunannya tidak terjadi dua kali.
     """
-    all_rows = _build_rows(experiments)
     params_map = _pipeline_params()
     param_keys = et.parameter_keys(lambda: params_map)
     all_columns = et.build_columns(param_keys)
@@ -748,14 +1014,19 @@ def _render_history(experiments: list[dict]) -> None:
             "Unduh CSV", data=et.to_csv(rows, columns).encode("utf-8"),
             file_name=et.csv_filename(), mime="text/csv",
             use_container_width=True, key="_hist_csv",
-            help="Mengikuti kolom & filter yang sedang aktif, lengkap dengan "
+            # Jumlah baris yang sedang tampil menempel di sini karena tombol
+            # ini mengikuti filter yang persis sama.
+            help=f"{et.result_summary(len(rows), len(all_rows))}. "
+                 "Mengikuti kolom & filter yang sedang aktif, lengkap dengan "
                  "keterangan semantik metrik per baris.",
         )
 
-    st.caption(et.result_summary(len(rows), len(all_rows)))
-    note = et.semantics_note(rows)
-    if note:
-        st.caption(note)
+    # Tidak ada lagi baris ringkasan di bawah kontrol. Semantik metrik (WAJIB)
+    # dan arti sorotan pindah ke tooltip header kolom metrik — menjelaskan
+    # angkanya di tempat angka itu dibaca.
+    metric_tooltip = " ".join(part for part in
+                              (et.semantics_note(rows), et.BEST_MARK_NOTE)
+                              if part)
 
     if not rows:
         st.info("Tidak ada eksperimen yang cocok dengan filter. Bersihkan "
@@ -770,7 +1041,7 @@ def _render_history(experiments: list[dict]) -> None:
     df = _grid_dataframe(rows, columns)
     grid_response = AgGrid(
         df,
-        gridOptions=_build_grid_options(df, columns),
+        gridOptions=_build_grid_options(df, columns, metric_tooltip),
         allow_unsafe_jscode=True,
         theme="streamlit",
         update_mode=GridUpdateMode.SELECTION_CHANGED,
@@ -778,8 +1049,6 @@ def _render_history(experiments: list[dict]) -> None:
         height=440,
         key="experiment_history_grid",
     )
-    st.caption(et.BEST_MARK_NOTE)
-
     selected_ids = _selected_ids(grid_response)
 
     # Satu baris terpilih -> panel aksi lama (detail / re-run / batalkan).
@@ -790,17 +1059,17 @@ def _render_history(experiments: list[dict]) -> None:
 
     cmp_cols = st.columns([2, 5])
     problem = et.compare_selection_error(selected_ids)
-    if cmp_cols[0].button(f"Bandingkan terpilih ({len(selected_ids)})",
-                          key="_hist_compare", use_container_width=True,
-                          disabled=bool(problem)):
+    # Sebab tombol tidak aktif (WAJIB tetap tersampaikan) menempel pada tombol
+    # itu sendiri, bukan sebagai baris keterangan di sebelahnya.
+    if cmp_cols[0].button(
+            f"Bandingkan terpilih ({len(selected_ids)})",
+            key="_hist_compare", use_container_width=True,
+            disabled=bool(problem),
+            help=problem or (f"Centang 2-{et.MAX_COMPARE} eksperimen untuk "
+                             f"membandingkannya, atau satu baris untuk membuka "
+                             f"detail & aksinya.")):
         dlg.open_dialog(_COMPARE_KEY, selected_ids)
         st.rerun()
-    if problem and selected_ids:
-        cmp_cols[1].caption(problem)
-    elif not selected_ids:
-        cmp_cols[1].caption(
-            f"Centang 2-{et.MAX_COMPARE} eksperimen untuk membandingkannya, "
-            f"atau satu baris untuk membuka detail & aksinya.")
 
     if len(selected_ids) <= 1 and remembered:
         _render_selected_actions(remembered)
@@ -833,20 +1102,28 @@ def render():
     if not experiments:
         st.info("Belum ada eksperimen. Buka halaman 'Run Experiment' untuk membuat satu.")
         st.session_state.pop("selected_experiment_id", None)
+        all_rows = []
     else:
-        _render_history(experiments)
+        # Baris disusun SEKALI di sini lalu dipakai ulang oleh riwayat dan
+        # dialog perbandingan. Sebelumnya keduanya memanggil `_build_rows`
+        # sendiri-sendiri, jadi seluruh pekerjaannya dikerjakan dua kali setiap
+        # kali dialog terbuka.
+        all_rows = _build_rows(experiments, with_roc=_roc_column_visible())
+        _render_history(experiments, all_rows)
 
     # -- Pop-up detail & perbandingan (pola flag, dipanggil dari alur utama
     #    supaya kontrol interaktif di dalamnya bekerja) --
     if dlg.is_open(dlg.DETAIL_KEY):
         _detail_dialog(dlg.dialog_state(dlg.DETAIL_KEY))
     if experiments and dlg.is_open(_COMPARE_KEY):
-        _maybe_render_comparison(_build_rows(experiments),
-                                 et.parameter_keys(_pipeline_params))
+        _maybe_render_comparison(all_rows, et.parameter_keys(_pipeline_params))
 
     # -- Auto-refresh the running dashboard (adaptive; paused while a pop-up is
     #    open so it is not disrupted). Broker is not probed on every rerun --
     if (running and auto and not dlg.is_open(dlg.DETAIL_KEY)
             and not dlg.is_open(_COMPARE_KEY)):
-        time.sleep(interval)
-        st.rerun()
+        # Sama seperti pemantauan di halaman Run Experiment: jeda yang dapat
+        # disela dan terikat pada halaman ini, sehingga berpindah halaman tidak
+        # menahan klik pengguna dan tidak meninggalkan sisa gambar.
+        if wait_before_refresh(interval, page=PAGE_NAME):
+            st.rerun()

@@ -84,7 +84,7 @@ def _render_interactive_cm(cm, label_mapping, eid: str) -> None:
     both HIKARI (weighted headline) and EVE cbr (natural-holdout)."""
     b = confusion_breakdown(cm, label_mapping)
     if not b:
-        st.caption("Confusion matrix tidak tersedia atau bukan biner.")
+        st.info("Confusion matrix tidak tersedia atau bukan biner.")
         return
 
     an, nn = b["attack_name"], b["normal_name"]
@@ -103,24 +103,24 @@ def _render_interactive_cm(cm, label_mapping, eid: str) -> None:
         st.markdown(
             f"<div style='background:{bg}; color:{fg}; border:1px solid {fg}33; "
             f"border-radius:8px; padding:10px; text-align:center;'>"
-            f"<div style='font-size:0.72rem; font-weight:600;'>{title}</div>"
+            f"<div style='font-size:0.95rem; font-weight:600;'>{title}</div>"
             f"<div style='font-size:1.5rem; font-weight:700; line-height:1.3;'>{count:,}</div>"
-            f"<div style='font-size:0.7rem; opacity:0.85;'>{_pct(count)} dari total</div>"
+            f"<div style='font-size:0.95rem; opacity:0.85;'>{_pct(count)} dari total</div>"
             f"</div>",
             unsafe_allow_html=True,
         )
 
     hdr = st.columns([1.1, 1, 1])
-    hdr[1].markdown(f"<div style='text-align:center; font-size:0.72rem; font-weight:600;'>Prediksi: {nn}</div>", unsafe_allow_html=True)
-    hdr[2].markdown(f"<div style='text-align:center; font-size:0.72rem; font-weight:600;'>Prediksi: {an}</div>", unsafe_allow_html=True)
+    hdr[1].markdown(f"<div style='text-align:center; font-size:0.95rem; font-weight:600;'>Prediksi: {nn}</div>", unsafe_allow_html=True)
+    hdr[2].markdown(f"<div style='text-align:center; font-size:0.95rem; font-weight:600;'>Prediksi: {an}</div>", unsafe_allow_html=True)
     r1 = st.columns([1.1, 1, 1])
-    r1[0].markdown(f"<div style='font-size:0.72rem; font-weight:600; padding-top:24px;'>Aktual: {nn}</div>", unsafe_allow_html=True)
+    r1[0].markdown(f"<div style='font-size:0.95rem; font-weight:600; padding-top:24px;'>Aktual: {nn}</div>", unsafe_allow_html=True)
     with r1[1]:
         _cell(tn, f"{nn} benar (TN)", "tn")
     with r1[2]:
         _cell(fp, "False alarm (FP)", "fp")
     r2 = st.columns([1.1, 1, 1])
-    r2[0].markdown(f"<div style='font-size:0.72rem; font-weight:600; padding-top:24px;'>Aktual: {an}</div>", unsafe_allow_html=True)
+    r2[0].markdown(f"<div style='font-size:0.95rem; font-weight:600; padding-top:24px;'>Aktual: {an}</div>", unsafe_allow_html=True)
     with r2[1]:
         _cell(fn, f"{an} LOLOS (FN)", "fn")
     with r2[2]:
@@ -129,14 +129,20 @@ def _render_interactive_cm(cm, label_mapping, eid: str) -> None:
     st.markdown("**Interpretasi keamanan**")
     mcols = st.columns(3)
     _rec = b["attack_recall"]
-    mcols[0].metric("Serangan terdeteksi", _pct(tp) if total else "—",
-                    help="TP / (TP+FN) — proporsi serangan yang tertangkap")
-    mcols[0].caption(f"{tp:,} dari {b['attack_total']:,} serangan"
-                     + (f" · recall {(_rec*100):.1f}%" if _rec is not None else ""))
-    mcols[1].metric("Serangan lolos (FN)", f"{fn:,}")
-    mcols[1].caption(f"{(fn / b['attack_total'] * 100):.1f}% serangan lolos" if b["attack_total"] else "—")
-    mcols[2].metric("Alarm palsu (FP)", f"{fp:,}")
-    mcols[2].caption(f"{(b['fp_rate']*100):.1f}% dari trafik normal" if b.get("fp_rate") is not None else "—")
+    mcols[0].metric(
+        "Serangan terdeteksi", _pct(tp) if total else "—",
+        help="TP / (TP+FN) — proporsi serangan yang tertangkap. "
+             + f"{tp:,} dari {b['attack_total']:,} serangan"
+             + (f" · recall {(_rec*100):.1f}%" if _rec is not None else ""))
+    mcols[1].metric(
+        "Serangan lolos (FN)", f"{fn:,}",
+        help=(f"{(fn / b['attack_total'] * 100):.1f}% serangan lolos"
+              if b["attack_total"] else "Jumlah serangan tidak diketahui."))
+    mcols[2].metric(
+        "Alarm palsu (FP)", f"{fp:,}",
+        help=(f"{(b['fp_rate']*100):.1f}% dari trafik normal"
+              if b.get("fp_rate") is not None else
+              "Proporsi terhadap trafik normal tidak tersedia."))
 
     explain = {
         "Serangan terdeteksi (TP)": f"**{tp:,}** {an} berhasil dikenali model — deteksi yang benar.",
@@ -169,6 +175,16 @@ def _render_interactive_fi(fi_list, pipeline_id: str, note, eid: str) -> None:
 
     rows = fi_list[:top_n]
     df = pd.DataFrame(rows)
+    # Asal bobot menempel pada KOLOM yang dijelaskannya, bukan sebagai baris
+    # keterangan di bawah tabel.
+    if note:
+        bobot_help = str(note)
+    elif pipeline_id and "lr" in pipeline_id.lower():
+        bobot_help = ("Bobot berasal dari nilai absolut koefisien Logistic "
+                      "Regression (bukan importance berbasis pohon).")
+    else:
+        bobot_help = "Bobot relatif antar fitur menurut model yang dilatih."
+
     if "importance" in df.columns and "feature" in df.columns:
         _max = max((float(r.get("importance", 0)) for r in rows), default=1.0) or 1.0
         st.dataframe(
@@ -177,18 +193,13 @@ def _render_interactive_fi(fi_list, pipeline_id: str, note, eid: str) -> None:
                 "feature": st.column_config.TextColumn("Fitur"),
                 "importance": st.column_config.ProgressColumn(
                     "Bobot", format="%.4f", min_value=0.0, max_value=_max,
+                    help=bobot_help,
                 ),
             },
             hide_index=True, use_container_width=True,
         )
     else:
         st.dataframe(df, use_container_width=True, hide_index=True)
-
-    if note:
-        st.caption(str(note))
-    elif pipeline_id and "lr" in pipeline_id.lower():
-        st.caption("Bobot berasal dari nilai absolut koefisien Logistic Regression "
-                   "(bukan importance berbasis pohon).")
 
 
 def _render_interactive_roc(metrics: dict, eid: str) -> None:
@@ -199,7 +210,7 @@ def _render_interactive_roc(metrics: dict, eid: str) -> None:
     auc = metrics.get("roc_auc")
     roc = metrics.get("roc_curve")
     if auc is None and not isinstance(roc, dict):
-        st.caption("ROC / AUC tidak tersedia untuk eksperimen ini.")
+        st.info("ROC / AUC tidak tersedia untuk eksperimen ini.")
         return
 
     col_chart, col_auc = st.columns([3, 1])
@@ -207,7 +218,11 @@ def _render_interactive_roc(metrics: dict, eid: str) -> None:
     tpr = roc.get("tpr") if isinstance(roc, dict) else None
     with col_auc:
         if auc is not None:
-            st.metric("ROC-AUC", f"{auc:.4f}")
+            st.metric(
+                "ROC-AUC", f"{auc:.4f}",
+                help=f"{_roc_quality(auc)}. Semakin kurva menjauhi garis "
+                     "diagonal (acuan acak, TPR = FPR), semakin baik model "
+                     "membedakan serangan dari trafik normal.")
 
     if isinstance(fpr, list) and isinstance(tpr, list) and fpr and tpr:
         n = len(fpr)
@@ -221,23 +236,21 @@ def _render_interactive_roc(metrics: dict, eid: str) -> None:
         with col_chart:
             st.line_chart(df, x="FPR", y=["TPR (model)", "Acuan acak"], height=320)
 
-        if auc is not None:
-            st.caption(
-                f"AUC = {auc:.4f} ({_roc_quality(auc)}). Semakin kurva **menjauhi garis "
-                "diagonal** (acuan acak, TPR = FPR), semakin baik model membedakan serangan "
-                "dari trafik normal."
-            )
-
         if n >= 2:
-            k = st.slider("Titik operasi pada kurva (indeks)", 0, n - 1, n // 2, key=f"roc_op_{eid}")
+            # (a) Kejujuran "ini titik kurva, BUKAN threshold" menempel pada
+            #     penggeser yang menghasilkannya.
+            k = st.slider(
+                "Titik operasi pada kurva (indeks)", 0, n - 1, n // 2,
+                key=f"roc_op_{eid}",
+                help="Titik pada kurva ROC — bukan nilai threshold; daftar "
+                     "threshold tidak disimpan di metrics.json.")
             oc = st.columns(2)
             oc[0].metric("TPR — serangan terdeteksi", f"{tpr[k] * 100:.1f}%")
             oc[1].metric("FPR — benign salah ditandai", f"{fpr[k] * 100:.1f}%")
-            st.caption("Titik pada kurva ROC (bukan nilai *threshold* — daftar threshold tidak "
-                       "disimpan di metrics.json).")
     elif auc is not None:
         with col_chart:
-            st.caption("Titik kurva ROC (fpr/tpr) tidak tersedia; hanya nilai AUC yang dilaporkan.")
+            st.info("Titik kurva ROC (fpr/tpr) tidak tersedia; hanya nilai "
+                    "AUC yang dilaporkan.")
 
 
 def _render_interactive_lc_or_holdout(metrics: dict, eid: str) -> None:
@@ -288,7 +301,7 @@ def _render_interactive_lc_or_holdout(metrics: dict, eid: str) -> None:
             else:
                 verdict = (f"Selisih train−validation akhir = {gap:.3f}; skor validasi akhir "
                            f"~{vm[-1]:.3f}.")
-            st.caption(verdict)
+            st.markdown(verdict)
         return
 
     nat = metrics.get("natural_holdout")
@@ -299,7 +312,9 @@ def _render_interactive_lc_or_holdout(metrics: dict, eid: str) -> None:
             "Pipeline EVE-cbr **tidak menghasilkan learning curve**. Sebagai gantinya, "
             "platform melaporkan evaluasi **dual-holdout**: *natural-holdout* (distribusi "
             "kelas asli — inilah metrik yang dilaporkan) dan *balanced-holdout* (kelas "
-            "diseimbangkan, sebagai pembanding separabilitas)."
+            "diseimbangkan, sebagai pembanding separabilitas). Metrik yang "
+            "dilaporkan platform = **natural-holdout** karena mencerminkan "
+            "distribusi kelas asli (apa adanya)."
         )
         labels = [
             ("precision_attack", "Precision (attack)"),
@@ -321,8 +336,7 @@ def _render_interactive_lc_or_holdout(metrics: dict, eid: str) -> None:
             }
             if chart:
                 st.bar_chart(pd.DataFrame(chart).T)
-        st.caption("Metrik yang dilaporkan platform = **natural-holdout** karena mencerminkan "
-                   "distribusi kelas asli (apa adanya).")
+
 
 
 def _render_per_class(metrics: dict) -> None:
