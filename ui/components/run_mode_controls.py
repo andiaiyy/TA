@@ -25,6 +25,10 @@ import logging
 
 import streamlit as st
 
+from ui.components.validator_messages import error_message
+
+from ui.i18n import t
+
 from orchestrator.run_mode import (
     ALL_RUN_MODES, DEFAULT_RUN_MODE, EXPLORATION_WARNING, PARAM_BOUNDS,
     RUN_MODE_EXPLORATION, RUN_MODE_LABELS, RUN_MODE_OFFICIAL, ParamError,
@@ -73,7 +77,7 @@ def render_mode_picker() -> str:
     modes = [RUN_MODE_OFFICIAL, RUN_MODE_EXPLORATION]
     current = selected_mode()
     choice = st.radio(
-        "Mode eksekusi",
+        t("re.lbl_run_mode"),
         modes,
         index=modes.index(current),
         key=MODE_STATE_KEY,
@@ -119,7 +123,7 @@ def _control_for(pipeline_id: str, row: dict):
 def render_locked_table(rows: list[dict]) -> None:
     """Seluruh ``fixed_params`` sebagai tabel — dipakai pada mode RESMI."""
     if not rows:
-        st.caption("Pipeline ini tidak mendeklarasikan `fixed_params`.")
+        st.caption(t("rmc.no_fixed_params"))
         return
     lines = ["| Parameter | Nilai | Status |", "| --- | --- | --- |"]
     for row in rows:
@@ -149,11 +153,10 @@ def render_param_form(pipeline_id: str) -> dict:
         return {}
 
     head = st.columns([3, 1])
-    head[0].markdown("**Parameter yang dapat disesuaikan**")
-    if head[1].button("Kembalikan ke bawaan", key=f"_pov_reset_{pipeline_id}",
+    head[0].markdown(t("rmc.adjustable_params"))
+    if head[1].button(t("re.btn_reset_defaults"), key=f"_pov_reset_{pipeline_id}",
                       use_container_width=True,
-                      help="Nilai bawaan pipeline menjadi titik awal; tombol "
-                           "ini mengembalikan seluruh isian ke nilai itu."):
+                      help=t("rmc.reset_help")):
         reset_overrides(pipeline_id)
         st.rerun()
 
@@ -173,7 +176,7 @@ def render_param_form(pipeline_id: str) -> dict:
         st.markdown(f"{CHANGED_MARK} Berbeda dari bawaan: {marks}")
 
     if locked:
-        with st.expander("Parameter yang tetap terkunci", expanded=False):
+        with st.expander(t("rmc.still_locked"), expanded=False):
             render_locked_table(locked)
 
     # Validasi lapis-UI: pesan muncul di dekat formulirnya, bukan setelah
@@ -182,7 +185,7 @@ def render_param_form(pipeline_id: str) -> dict:
     try:
         return validate_overrides(pipeline_id, overrides)
     except ParamError as e:
-        st.error(str(e))
+        st.error(error_message(e))
         return {}
 
 

@@ -19,8 +19,16 @@ import time
 
 import streamlit as st
 
-from database.models import ALL_ROLES, role_label
+from ui.components.validator_messages import error_message
+
+from database.models import (
+    ALL_ROLES, ROLE_CONTRIBUTOR, ROLE_RESEARCH_ADMIN, normalize_role,
+    role_label, status_label,
+)
+from ui.components.language_switch import render_language_switch
+from ui.i18n import t
 from ui.components import dialogs as dlg
+from ui.components.page_flags import clear_view_state
 from ui.components.sidebar_chrome import render_line
 from orchestrator.auth_service import (
     MAX_REASON_LENGTH, MAX_USERNAME_LENGTH, AuthError, authenticate,
@@ -65,7 +73,24 @@ _PICKABLE_ROLES = tuple(ALL_ROLES)
 
 # Label & keterangan pemilih mode. Labelnya PENDEK (satu kata/frasa); seluruh
 # penjelasan pindah ke tooltip supaya daftarnya tetap ringkas.
-_MODE_VISITOR = "Pengunjung"
+# Label mode diterjemahkan DI SINI, bukan di `database.models`: peran adalah
+# data, sedangkan sebutannya adalah teks antarmuka. Menaruh `t()` di lapis data
+# akan membalik urutan lapisan dan membuat modul data bergantung pada Streamlit.
+_ROLE_LABEL_KEYS = {
+    ROLE_CONTRIBUTOR: "mode.contributor",
+    ROLE_RESEARCH_ADMIN: "mode.research_admin",
+}
+
+
+def visitor_label() -> str:
+    """Sebutan mode pengunjung pada bahasa aktif."""
+    return t("mode.visitor")
+
+
+def role_display(role: str | None) -> str:
+    """Sebutan peran pada bahasa aktif; peran tak dikenal memakai label datanya."""
+    key = _ROLE_LABEL_KEYS.get(normalize_role(role))
+    return t(key) if key else role_label(role)
 _ROLE_HELP = ("Membuka formulir masuk. Memilih di sini tidak memberikan peran "
               "tersebut — peran ditentukan akun & statusnya.")
 _CURRENT_MODE_HELP = "Mode saat ini: membaca tanpa akun."
@@ -103,6 +128,9 @@ _MODE_PICK_HELP = f"{_ROLE_HELP} {_OTHER_ROLE_HELP}"
 # panggilan markdown dan ditutup di panggilan lain TIDAK pernah membungkus apa
 # pun (itu sebab percobaan sebelumnya gagal).
 _MODE_ANCHOR = '<span class="ids-mode-anchor"></span>'
+#: Penanda awal pasangan "label mode + dropdown". CSS terpusat memakainya
+#: untuk merapatkan jarak keduanya sehingga terbaca sebagai satu kesatuan.
+_MODE_LABEL_OPEN = '<span class="ids-mode-label"></span>'
 
 # Jeda kecil setelah beberapa kegagalan berturut-turut dalam satu session.
 # Sekadar memperlambat tebakan beruntun; bukan pengganti rate limiting nyata.
@@ -121,9 +149,31 @@ def is_authenticated() -> bool:
 
 
 def logout() -> None:
-    """Kembali ke mode pengunjung. Tidak menyentuh data/state eksperimen."""
+    """Kembali ke mode pengunjung. Tidak menyentuh data/state eksperimen.
+
+    Membersihkan SELURUH penanda sesi, bukan hanya identitas:
+
+    * identitas & hitungan percobaan masuk;
+    * flag modal (auth dan modal halaman lain);
+    * penanda sub-tampilan halaman — mode kontribusi, bagian yang terbuka,
+      pipeline yang sedang disunting beserta isinya.
+
+    Tanpa bagian terakhir, keluar dari akun Research Admin meninggalkan
+    ``_contrib_mode="review"`` sehingga pengunjung mendarat di sub-tampilan
+    peninjauan (yang lalu menolaknya) alih-alih di halaman awal — persis
+    "sisa tampilan lama" yang membuat perpindahan mode terasa tersendat.
+
+    Penanda dropdown mode TIDAK dihapus di sini: ``_settle_mode_pick`` menulis
+    ulang nilainya dari mode nyata pada render berikutnya, dan menghapus kunci
+    widget yang masih hidup justru memicu galat Streamlit.
+    """
     st.session_state.pop(SESSION_USER_KEY, None)
     st.session_state.pop(_ATTEMPTS_KEY, None)
+    st.session_state.pop(_SIGNUP_ATTEMPTS_KEY, None)
+    st.session_state.pop(_SIGNUP_DONE_KEY, None)
+    for key in dlg.DIALOG_KEYS:
+        st.session_state.pop(key, None)
+    clear_view_state()
     close_auth_dialog()
 
 
@@ -163,12 +213,12 @@ def mode_options() -> list[str]:
     Diturunkan dari daftar peran yang sama dengan yang dipakai lapis izin, jadi
     menambah peran di ``database/models`` langsung terlihat di sini.
     """
-    return [_MODE_VISITOR] + [role_label(role) for role in _PICKABLE_ROLES]
+    return [visitor_label()] + [role_display(role) for role in _PICKABLE_ROLES]
 
 
 def current_mode_label(user: dict | None) -> str:
-    """Mode yang BENAR-BENAR berlaku sekarang."""
-    return role_label(user.get("role")) if user else _MODE_VISITOR
+    """Mode yang BENAR-BENAR berlaku sekarang, pada bahasa aktif."""
+    return role_display(user.get("role")) if user else visitor_label()
 
 
 def _settle_mode_pick(current: str) -> None:
@@ -187,9 +237,25 @@ def _settle_mode_pick(current: str) -> None:
     penulisan ke ``session_state`` — pemilih mode tidak boleh menulis apa pun
     yang menyerupai pemberian hak, dan test menegakkannya lewat AST.
     """
+    # Mode yang tidak dikenal tidak boleh sampai ke widget — `st.selectbox`
+    # akan menolak nilai di luar daftar pilihannya.
+    options = mode_options()
+    if current not in options:                 # pragma: no cover - defensif
+        current = visitor_label()
+
+    # Setelah bahasa berganti, nilai yang tersimpan masih dalam bahasa LAMA
+    # ("Pengunjung" saat pilihannya kini "Visitor") sehingga tidak lagi ada di
+    # daftar. Disamakan ulang di sini — sebelum widget dibuat — supaya pergantian
+    # bahasa tidak menjatuhkan pemilih mode.
+    if st.session_state.get(_MODE_PICK_KEY) not in options:
+        st.session_state[_MODE_PICK_KEY] = current
+
     changed = st.session_state.get(_MODE_SHOWN_KEY) != current
     acted = st.session_state.pop(_MODE_ACTED_KEY, None) is not None
-    if changed or acted:
+    # Kunci widget bisa saja belum ada (render pertama) — nilainya harus
+    # ditulis juga, karena dropdown tidak lagi memakai `index=`.
+    missing = _MODE_PICK_KEY not in st.session_state
+    if changed or acted or missing:
         st.session_state[_MODE_PICK_KEY] = current
     st.session_state[_MODE_SHOWN_KEY] = current
 
@@ -222,15 +288,24 @@ def render_mode_switch() -> None:
             user = current_user()
 
             if st.session_state.pop(_SIGNUP_DONE_KEY, False):
-                st.success("Pendaftaran diterima — menunggu persetujuan.")
+                st.success(t("auth.account_created"))
 
-            # Identitas dalam satu baris kecil. Nama akun ditulis di sini,
-            # bukan di dalam daftar pilihan — daftar hanya memuat nama mode.
+            # Pengalih bahasa DULU. Ia setelan tampilan yang berdiri
+            # sendiri; menaruhnya di atas membuat label mode menempel pada
+            # dropdown yang menjelaskannya, bukan mengambang di antara dua
+            # kontrol yang tidak berhubungan.
+            render_language_switch()
+
+            # Identitas dalam satu baris kecil, TEPAT di atas dropdown mode:
+            # keduanya satu kesatuan — baris ini menyebut mode yang sedang
+            # berlaku, dropdown di bawahnya yang menggantinya. Nama akun
+            # ditulis di sini, bukan di dalam daftar pilihan.
+            st.markdown(_MODE_LABEL_OPEN, unsafe_allow_html=True)
             if user:
                 render_line(f"{user['username']} · "
-                            f"{role_label(user.get('role'))}", small=True)
+                            f"{role_display(user.get('role'))}", small=True)
             else:
-                render_line("Mode pengunjung", muted=True, small=True)
+                render_line(t("mode.visitor_line"), muted=True, small=True)
 
             # DROPDOWN, bukan barisan tombol. `st.selectbox` memakai baseui
             # Select: daftarnya memang dirender ke lapisan mengambang, TETAPI
@@ -242,9 +317,15 @@ def render_mode_switch() -> None:
             options = mode_options()
             current = current_mode_label(user)
             _settle_mode_pick(current)
+            # TANPA `index=`. Nilai dropdown datang HANYA dari session_state,
+            # yang baru saja disamakan dengan mode nyata oleh
+            # `_settle_mode_pick`. Memberi `index=` sekaligus menulis
+            # session_state membuat dua sumber kebenaran untuk satu widget —
+            # Streamlit sendiri memperingatkannya ("created with a default
+            # value but also had its value set via the Session State API"), dan
+            # itulah yang membuat pilihan tampak berkedip lalu melompat balik.
             choice = st.selectbox(
                 "Mode", options,
-                index=options.index(current) if current in options else 0,
                 key=_MODE_PICK_KEY, label_visibility="collapsed",
                 help=_MODE_PICK_HELP,
             )
@@ -255,17 +336,35 @@ def render_mode_switch() -> None:
             # & statusnya di basis data, dibaca ulang oleh
             # orchestrator.auth_service pada setiap aksi berisiko. Karena itu
             # tidak ada satu pun penulisan peran ke session_state di sini.
+            # Memilih mode yang SEDANG BERLAKU tidak melakukan apa-apa — tidak
+            # membuka modal, tidak mengeluarkan. Itu ditangani perbandingan di
+            # bawah: `choice == current` tidak masuk cabang mana pun.
             if choice != current:
                 _remember_mode_action(choice)
-                if choice == _MODE_VISITOR:
+                if choice == visitor_label():
                     logout()                 # Keluar, kembali membaca tanpa akun
                 else:
+                    # Memilih peran LAIN berarti "masuk sebagai akun lain".
+                    # Kalau sedang masuk, sesi sekarang diakhiri lebih dulu:
+                    # satu identitas pada satu waktu, dan dropdown karena itu
+                    # kembali menunjuk "Pengunjung" — keadaan yang sungguh
+                    # berlaku selama formulir masuk belum diisi.
+                    #
+                    # Peran TIDAK diberikan di sini. Yang menentukan peran tetap
+                    # akun & statusnya di basis data saat masuk.
+                    if user:
+                        logout()
                     request_auth_dialog(_MODE_LOGIN)
+                # SATU rerun untuk satu aksi — termasuk pada jalur "keluar lalu
+                # masuk sebagai akun lain" di atas.
                 st.rerun()
 
             if user and not is_account_active(user):
-                # Status akun — WAJIB tetap tersampaikan.
-                render_line("⏳ Menunggu persetujuan", muted=True, small=True)
+                # Akun yang tidak aktif hanya tersisa satu sebab: dinonaktifkan
+                # Research Admin. Statusnya dibaca dari labelnya sendiri, bukan
+                # ditulis ulang di sini, supaya tidak ada dua sumber kebenaran.
+                render_line(f"⏳ {status_label(user.get('status'))}",
+                            muted=True, small=True)
 
 
 # ── Siklus hidup flag modal ───────────────────────────────────────────────
@@ -341,8 +440,7 @@ def _render_login_tab() -> None:
         password = st.text_input("Password", type="password", key="login_password")
         submitted = st.form_submit_button("Masuk", type="primary",
                                           use_container_width=True)
-    st.caption("Belum punya akun? Pilih **Daftar** di atas untuk mengajukan "
-               "akun Kontributor.")
+    st.caption(t("auth.no_account_yet"))
 
     if not submitted:
         return
@@ -350,16 +448,20 @@ def _render_login_tab() -> None:
         close_auth_dialog()
         st.rerun()
     # Pesan generik: tidak membocorkan apakah username-nya yang tidak ada.
-    st.error("Username atau password salah.")
+    st.error(t("auth.bad_credentials"))
 
 
 def _render_signup_tab() -> None:
-    """Pendaftaran mandiri. Akun SELALU Kontributor berstatus menunggu
-    persetujuan — peran tidak pernah diambil dari masukan pengguna."""
+    """Pendaftaran mandiri. Akun SELALU Kontributor dan LANGSUNG AKTIF.
+
+    Peran tidak pernah diambil dari masukan pengguna: mendaftar bukan jalan
+    memperoleh Research Admin. Yang tidak perlu persetujuan adalah AKUN —
+    pengajuan PIPELINE tetap ditinjau Research Admin karena isinya kode yang
+    akan dieksekusi.
+    """
     attempts = int(st.session_state.get(_SIGNUP_ATTEMPTS_KEY, 0))
     if attempts >= _SIGNUP_LIMIT:
-        st.warning("Terlalu banyak pendaftaran dari sesi ini. Muat ulang "
-                   "halaman bila memang perlu mendaftar lagi.")
+        st.warning(t("auth.too_many_signups"))
         return
 
     with st.form("auth_signup_form"):
@@ -370,10 +472,10 @@ def _render_signup_tab() -> None:
                                 key="signup_confirm")
         reason = st.text_area("Keperluan (opsional)", key="signup_reason",
                               max_chars=MAX_REASON_LENGTH, height=70,
-                              help="Membantu Research Admin menilai permintaan.")
+                              help=t("auth.reason_help"))
         submitted = st.form_submit_button("Daftar", type="primary",
                                           use_container_width=True)
-    st.caption("Sudah punya akun? Pilih **Masuk** di atas.")
+    st.caption(t("auth.have_account"))
 
     if not submitted:
         return
@@ -381,7 +483,7 @@ def _render_signup_tab() -> None:
         register_account(username, password, confirm, reason)
     except AuthError as e:
         st.session_state[_SIGNUP_ATTEMPTS_KEY] = attempts + 1
-        st.error(str(e))          # pesan spesifik: ini pendaftaran, bukan login
+        st.error(error_message(e))          # pesan spesifik: ini pendaftaran, bukan login
         return
 
     # Jangan tinggalkan password yang barusan diketik di session_state.
@@ -416,7 +518,7 @@ if _HAS_ST_DIALOG:
         _auth_dialog = st.dialog("Masuk atau Daftar")(_auth_dialog_body)
 else:                                       # pragma: no cover - Streamlit < 1.37
     def _auth_dialog() -> None:
-        with st.expander("Masuk atau Daftar", expanded=True):
+        with st.expander(t("auth.dialog_title"), expanded=True):
             _auth_dialog_body()
 
 

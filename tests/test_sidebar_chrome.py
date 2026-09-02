@@ -30,9 +30,12 @@ PAGES = ["Progress & Status", "Run Experiment", "Add Pipeline & Dataset"]
 
 @pytest.mark.parametrize("page", PAGES)
 def test_breadcrumb_names_the_active_page(page):
+    """`page` adalah PENGENAL; yang tampil adalah labelnya pada bahasa aktif."""
+    from ui.components.sidebar_chrome import page_label
+
     text = breadcrumb_text(page)
-    assert text == f"{BREADCRUMB_ROOT} {BREADCRUMB_SEP} {page}"
-    assert page in text
+    assert text == f"{BREADCRUMB_ROOT} {BREADCRUMB_SEP} {page_label(page)}"
+    assert page_label(page) in text
 
 
 def test_breadcrumb_uses_an_arrow_separator():
@@ -276,8 +279,25 @@ def test_navigation_behaviour_is_unchanged():
     assert '_PAGE_ICONS = ("speedometer2", "play-circle", "plus-square")' in src
     assert '_DEFAULT_PAGE = "Progress & Status"' in src
     assert "default_index=_remembered_index()" in src
-    # Jalur cadangan tanpa option_menu tetap ada.
-    assert 'st.sidebar.radio("Navigation", _PAGES, index=_remembered_index())' in src
+    # Jalur cadangan tanpa option_menu tetap ada. Menunya kini menampilkan
+    # LABEL berbahasa, lalu memetakannya kembali ke pengenal halaman — routing
+    # tetap memakai `_PAGES`, jadi perilakunya tidak berubah.
+    assert "st.sidebar.radio(t(\"nav.section\"), labels," in src
+    assert "_PAGES[labels.index(chosen)]" in src
+
+
+def test_there_is_no_fourth_page_left_anywhere():
+    """Pengelolaan pipeline kontribusi hidup DI DALAM "Peninjauan Pengajuan",
+    bukan sebagai halaman tersendiri. Navigasi kembali tiga halaman."""
+    src = _app_src()
+    for leftover in ("ADMIN_PAGE", "_visible_pages", "_BASE_PAGES",
+                     "_BASE_ICONS", "manage_pipelines",
+                     "Kelola Pipeline Kontribusi"):
+        assert leftover not in src, leftover
+
+    # Tepat tiga cabang rute halaman. Dihitung dari `page == "` saja karena
+    # `elif page == "` memuat `if page == "` sebagai substring.
+    assert src.count('page == "') == 3
 
 
 def test_no_block_is_wrapped_in_a_heavy_bordered_box():
@@ -337,15 +357,17 @@ def test_the_breadcrumb_follows_the_page_the_menu_selected(tmp_path, page):
     at = _run_chrome(tmp_path, page)
 
     assert f"PAGE={page}" in " ".join(m.value for m in at.markdown)
-    crumbs = [m.value for m in at.sidebar.markdown if BREADCRUMB_ROOT in m.value]
+    crumbs = [m.value for m in at.sidebar.markdown
+              if escape(BREADCRUMB_ROOT) in m.value]
     assert len(crumbs) == 1, crumbs
     # Dibandingkan dalam bentuk ter-escape: "Progress & Status" memang menjadi
     # "Progress &amp; Status" di markup, dan escaping itu disengaja.
     assert escape(breadcrumb_text(page)) in crumbs[0]
-    # Halaman lain tidak ikut disebut.
+    # Halaman lain tidak ikut disebut (dibandingkan lewat LABEL-nya).
+    from ui.components.sidebar_chrome import page_label
     for other in PAGES:
         if other != page:
-            assert escape(other) not in crumbs[0]
+            assert escape(page_label(other)) not in crumbs[0]
 
 
 def test_the_module_defines_no_extra_text_sizes():

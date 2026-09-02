@@ -37,6 +37,7 @@ from database.models import (
     normalize_role, normalize_status, role_label, status_label,
 )
 from utils.timestamps import now_iso
+from orchestrator.user_errors import UserFacingMixin
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +53,7 @@ ADMIN_PASSWORD_ENV = "ADMIN_PASSWORD"
 DEFAULT_ADMIN_USERNAME = "admin"
 
 
-class AuthError(ValueError):
+class AuthError(UserFacingMixin, ValueError):
     """Kesalahan yang layak ditampilkan ke pengguna (validasi, duplikat)."""
 
 
@@ -183,21 +184,27 @@ def require_upload(user: dict | None, db_path: str | None = None) -> None:
         if user_status(current) == STATUS_PENDING:
             raise PermissionDenied(
                 "Akun Anda masih menunggu persetujuan Research Admin, jadi "
-                "belum dapat mengunggah.")
+                "belum dapat mengunggah.",
+                key="err.denied_pending_account")
         raise PermissionDenied(
-            "Masuk sebagai Kontributor atau Research Admin untuk mengunggah.")
+            "Masuk sebagai Kontributor atau Research Admin untuk mengunggah.",
+            key="err.denied_upload")
 
 
 def require_approve(user: dict | None, db_path: str | None = None) -> None:
     current = _fresh_identity(user, db_path)
     if not can_approve(current):
-        raise PermissionDenied("Hanya Research Admin yang dapat menyetujui unggahan.")
+        raise PermissionDenied(
+            "Hanya Research Admin yang dapat menyetujui unggahan.",
+            key="err.denied_approve")
 
 
 def require_manage_users(user: dict | None, db_path: str | None = None) -> None:
     current = _fresh_identity(user, db_path)
     if not can_manage_users(current):
-        raise PermissionDenied("Hanya Research Admin yang dapat mengelola pengguna.")
+        raise PermissionDenied(
+            "Hanya Research Admin yang dapat mengelola pengguna.",
+            key="err.denied_manage_users")
 
 
 # ── Hashing ───────────────────────────────────────────────────────────────
@@ -209,7 +216,8 @@ def hash_password(plain: str, *, iterations: int = _ITERATIONS) -> str:
     sama tetap menghasilkan hash berbeda.
     """
     if not isinstance(plain, str) or plain == "":
-        raise AuthError("Password tidak boleh kosong.")
+        raise AuthError("Password tidak boleh kosong.",
+                        key="err.password_empty")
     salt = secrets.token_bytes(_SALT_BYTES)
     digest = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"), salt, iterations)
     return f"{_ALGORITHM}${iterations}${salt.hex()}${digest.hex()}"
@@ -286,13 +294,19 @@ def create_user(username: str, password: str, role: str = ROLE_CONTRIBUTOR,
     """
     username = (username or "").strip()
     if not username:
-        raise AuthError("Username tidak boleh kosong.")
+        raise AuthError("Username tidak boleh kosong.",
+                        key="err.username_empty")
     if len(password or "") < MIN_PASSWORD_LENGTH:
-        raise AuthError(f"Password minimal {MIN_PASSWORD_LENGTH} karakter.")
+        raise AuthError(f"Password minimal {MIN_PASSWORD_LENGTH} karakter.",
+                        key="err.password_min",
+                        values={"min": MIN_PASSWORD_LENGTH})
     if role not in ALL_ROLES:
-        raise AuthError(f"Role tidak dikenal: {role}")
+        raise AuthError(f"Role tidak dikenal: {role}",
+                        key="err.unknown_role", values={"role": role})
     if status not in ALL_USER_STATUSES:
-        raise AuthError(f"Status tidak dikenal: {status}")
+        raise AuthError(f"Status tidak dikenal: {status}",
+                        key="err.unknown_status",
+                        values={"status": status})
 
     conn = get_connection(db_path)
     try:
@@ -305,7 +319,9 @@ def create_user(username: str, password: str, role: str = ROLE_CONTRIBUTOR,
         )
         conn.commit()
     except sqlite3.IntegrityError as e:
-        raise AuthError(f"Username '{username}' sudah dipakai.") from e
+        raise AuthError(f"Username '{username}' sudah dipakai.",
+                        key="err.username_taken",
+                        values={"username": username}) from e
     finally:
         conn.close()
 
@@ -377,24 +393,34 @@ def register_account(username: str, password: str, confirm: str,
     """
     username = (username or "").strip()
     if not username:
-        raise AuthError("Username tidak boleh kosong.")
+        raise AuthError("Username tidak boleh kosong.",
+                        key="err.username_empty")
     if len(username) < MIN_USERNAME_LENGTH:
-        raise AuthError(f"Username minimal {MIN_USERNAME_LENGTH} karakter.")
+        raise AuthError(f"Username minimal {MIN_USERNAME_LENGTH} karakter.",
+                        key="err.username_min",
+                        values={"min": MIN_USERNAME_LENGTH})
     if len(username) > MAX_USERNAME_LENGTH:
-        raise AuthError(f"Username maksimal {MAX_USERNAME_LENGTH} karakter.")
+        raise AuthError(f"Username maksimal {MAX_USERNAME_LENGTH} karakter.",
+                        key="err.username_max",
+                        values={"max": MAX_USERNAME_LENGTH})
     if not USERNAME_PATTERN.match(username):
         raise AuthError("Username hanya boleh huruf, angka, titik, garis bawah, "
-                        "atau tanda hubung.")
+                        "atau tanda hubung.", key="err.username_charset")
     if len(password or "") < MIN_PASSWORD_LENGTH:
-        raise AuthError(f"Password minimal {MIN_PASSWORD_LENGTH} karakter.")
+        raise AuthError(f"Password minimal {MIN_PASSWORD_LENGTH} karakter.",
+                        key="err.password_min",
+                        values={"min": MIN_PASSWORD_LENGTH})
     if (password or "") != (confirm or ""):
-        raise AuthError("Konfirmasi password tidak sama.")
+        raise AuthError("Konfirmasi password tidak sama.",
+                        key="err.password_mismatch")
 
     reason = (reason or "").strip()[:MAX_REASON_LENGTH] or None
     # Username ganda memang boleh disebut spesifik di PENDAFTARAN (pemohon
     # perlu tahu harus memilih nama lain); pesan gagal LOGIN tetap generik.
     if get_user(username, db_path) is not None:
-        raise AuthError(f"Username '{username}' sudah dipakai.")
+        raise AuthError(f"Username '{username}' sudah dipakai.",
+                        key="err.username_taken",
+                        values={"username": username})
 
     # `requested_at` & `reason` tetap dicatat untuk ketertelusuran, meski
     # akunnya tidak lagi menunggu persetujuan.
@@ -421,14 +447,19 @@ def set_user_status(username: str, status: str, *, actor: dict | None,
     """
     require_manage_users(actor, db_path)
     if status not in ALL_USER_STATUSES:
-        raise AuthError(f"Status tidak dikenal: {status}")
+        raise AuthError(f"Status tidak dikenal: {status}",
+                        key="err.unknown_status",
+                        values={"status": status})
 
     username = (username or "").strip()
     target = get_user(username, db_path)
     if target is None:
-        raise AuthError(f"Pengguna '{username}' tidak ditemukan.")
+        raise AuthError(f"Pengguna '{username}' tidak ditemukan.",
+                        key="err.user_not_found",
+                        values={"username": username})
     if status != STATUS_ACTIVE and (actor or {}).get("username") == username:
-        raise AuthError("Anda tidak dapat menonaktifkan akun Anda sendiri.")
+        raise AuthError("Anda tidak dapat menonaktifkan akun Anda sendiri.",
+                        key="err.cannot_disable_self")
 
     conn = get_connection(db_path)
     try:
@@ -456,10 +487,13 @@ def set_user_role(username: str, role: str, *, actor: dict | None,
     peran Research Admin (pendaftaran mandiri tidak pernah bisa)."""
     require_manage_users(actor, db_path)
     if role not in ALL_ROLES:
-        raise AuthError(f"Role tidak dikenal: {role}")
+        raise AuthError(f"Role tidak dikenal: {role}",
+                        key="err.unknown_role", values={"role": role})
     username = (username or "").strip()
     if get_user(username, db_path) is None:
-        raise AuthError(f"Pengguna '{username}' tidak ditemukan.")
+        raise AuthError(f"Pengguna '{username}' tidak ditemukan.",
+                        key="err.user_not_found",
+                        values={"username": username})
 
     conn = get_connection(db_path)
     try:

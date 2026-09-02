@@ -37,6 +37,7 @@ from __future__ import annotations
 import json
 import logging
 import math
+from orchestrator.user_errors import UserFacingMixin
 
 logger = logging.getLogger(__name__)
 
@@ -183,7 +184,7 @@ LOCKED_NO_CHOICES = "nilai teks tanpa daftar pilihan tidak diteruskan ke model"
 LOCKED_UNSUPPORTED = "tipe nilainya tidak dapat disesuaikan dari formulir"
 
 
-class ParamError(ValueError):
+class ParamError(UserFacingMixin, ValueError):
     """Parameter masukan pengguna ditolak. Pesannya ditampilkan apa adanya."""
 
 
@@ -349,7 +350,9 @@ def validate_override(key, value, spec) -> object:
 
     if kind == "bool":
         if not isinstance(value, bool):
-            raise ParamError(f"`{key}` harus bernilai benar/salah (boolean).")
+            raise ParamError(
+                f"`{key}` harus bernilai benar/salah (boolean).",
+                key="err.param_not_bool", values={"param": key})
         return value
 
     if kind == "int":
@@ -357,27 +360,38 @@ def validate_override(key, value, spec) -> object:
         # True tidak diam-diam menjadi 1.
         if isinstance(value, bool) or not isinstance(value, int):
             raise ParamError(
-                f"`{key}` harus bilangan bulat (bawaannya {spec['default']!r})."
+                f"`{key}` harus bilangan bulat (bawaannya {spec['default']!r}).",
+                key="err.param_not_int",
+                values={"param": key, "default": repr(spec["default"])}
             )
         return _check_number(key, value, spec)
 
     if kind == "float":
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise ParamError(
-                f"`{key}` harus bilangan (bawaannya {spec['default']!r})."
+                f"`{key}` harus bilangan (bawaannya {spec['default']!r}).",
+                key="err.param_not_number",
+                values={"param": key, "default": repr(spec["default"])}
             )
         value = float(value)
         if math.isnan(value) or math.isinf(value):
-            raise ParamError(f"`{key}` harus bilangan berhingga.")
+            raise ParamError(f"`{key}` harus bilangan berhingga.",
+                             key="err.param_not_finite",
+                             values={"param": key})
         return _check_number(key, value, spec)
 
     if kind == "choice":
         if not isinstance(value, str):
-            raise ParamError(f"`{key}` harus salah satu pilihan yang tersedia.")
+            raise ParamError(
+                f"`{key}` harus salah satu pilihan yang tersedia.",
+                key="err.param_not_choice_type", values={"param": key})
         if value not in spec["choices"]:
             raise ParamError(
                 f"`{key}` = {value!r} bukan pilihan yang tersedia "
-                f"({', '.join(spec['choices'])})."
+                f"({', '.join(spec['choices'])}).",
+                key="err.param_bad_choice",
+                values={"param": key, "value": repr(value),
+                        "choices": ", ".join(spec["choices"])}
             )
         return value
 
@@ -395,7 +409,8 @@ def validate_overrides(pipeline_id: str, overrides: dict | None, *,
     if not overrides:
         return {}
     if not isinstance(overrides, dict):
-        raise ParamError("Parameter harus berupa pasangan nama–nilai.")
+        raise ParamError("Parameter harus berupa pasangan nama–nilai.",
+                         key="err.param_not_a_mapping")
 
     pinfo = _pipeline_info(pipeline_id, info)
     locked = locked_params(pipeline_id, info=pinfo)
@@ -412,7 +427,10 @@ def validate_overrides(pipeline_id: str, overrides: dict | None, *,
             )
         if key not in specs:
             raise ParamError(
-                f"`{key}` terkunci: {protected_reason(key, locked[key], pinfo)}."
+                f"`{key}` terkunci: {protected_reason(key, locked[key], pinfo)}.",
+                key="err.param_locked",
+                values={"param": key,
+                        "reason": protected_reason(key, locked[key], pinfo)}
             )
         clean[key] = validate_override(key, value, specs[key])
     return clean

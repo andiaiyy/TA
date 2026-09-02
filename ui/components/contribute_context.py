@@ -24,6 +24,8 @@ import logging
 
 import streamlit as st
 
+from ui.i18n import t
+
 from ui.components.instructions import inject_css, render_flow
 
 logger = logging.getLogger(__name__)
@@ -37,11 +39,20 @@ AFTER_UPLOAD_FLOW = [
     ("✅", "Dataset tersimpan"),
     ("👤", "Pipeline ditinjau"),
 ]
-AFTER_UPLOAD_FLOW_ALT = (
-    "Setelah berkas lolos pemeriksaan otomatis: dataset langsung tersimpan; "
-    "pipeline menunggu tinjauan Research Admin karena berisi kode yang "
-    "dieksekusi."
-)
+AFTER_UPLOAD_FLOW_ALT = "ap.after_upload_alt"
+
+#: Indeks langkah → kunci label. Ikon & urutannya tetap di konstanta di atas.
+AFTER_UPLOAD_FLOW_KEYS = ("ap.flow_upload", "ap.flow_check_file",
+                          "ap.flow_dataset_stored", "ap.flow_pipeline_reviewed")
+
+
+def after_upload_flow_display():
+    """Langkah alur setelah unggah, pada bahasa aktif."""
+    from ui.i18n import t
+
+    return [(icon, t(key))
+            for (icon, _label), key in zip(AFTER_UPLOAD_FLOW,
+                                           AFTER_UPLOAD_FLOW_KEYS)]
 
 
 # ── Ringkasan keadaan platform ────────────────────────────────────────────
@@ -124,47 +135,70 @@ def capability(user: dict | None) -> dict:
     lapis aksi — dan kalimatnya dipilih dari boolean itu, bukan dari peran.
     Jadi tampilan ini tidak mungkin menjanjikan hak yang sebenarnya ditolak.
     """
-    from database.models import role_label
     from orchestrator.auth_service import can_approve, can_upload
 
     may_upload, may_review = bool(can_upload(user)), bool(can_approve(user))
 
     # Frasa, bukan kalimat — apa yang boleh dilakukan, tanpa kata pengisi.
+    from ui.i18n import t
+
     if not user:
-        label = "Mode pengunjung"
+        label = t("ap.cap_visitor_label")
         # Disebut spesifik: OBJEK yang dapat dibaca dan diperiksa,
         # plus batasnya. Sesuai perilaku nyata — `can_upload(None)`
         # False, sedangkan diagnosa kecocokan dataset berada sebelum
         # gerbang izin sehingga pengunjung benar-benar dapat
         # menjalankannya.
-        what = ("dapat membaca persyaratan dan memeriksa kecocokan "
-                "dataset; mengunggah memerlukan akun Kontributor")
+        what = t("ap.cap_visitor_what")
     else:
-        label = role_label(user.get("role")) or "Pengguna"
+        label = role_display(user.get("role")) or t("ap.cap_user_fallback")
         if may_review:
-            what = "mengajukan, meninjau, mengelola pengguna"
+            what = t("ap.cap_may_review")
         elif may_upload:
-            what = "mengajukan pipeline & dataset"
+            what = t("ap.cap_may_upload")
         else:
-            what = "menunggu persetujuan — belum dapat mengajukan"
+            what = t("ap.cap_pending")
 
     return {"label": label, "what": what,
             "may_upload": may_upload, "may_review": may_review}
+
+
+#: Peran tersimpan → kunci label tampilan. Nilai perannya sendiri
+#: (`contributor`, `research_admin`) TIDAK berbahasa dan tidak diubah.
+ROLE_LABEL_KEYS = {
+    "contributor": "ap.role_contributor",
+    "research_admin": "ap.role_research_admin",
+}
+
+
+def role_display(role: str | None) -> str:
+    """Nama peran pada bahasa aktif.
+
+    Peran yang belum punya kunci jatuh kembali ke label lama, bukan ke teks
+    kosong — peran baru tetap terbaca meski belum diterjemahkan.
+    """
+    from database.models import normalize_role, role_label
+    from ui.i18n import t
+
+    key = ROLE_LABEL_KEYS.get(normalize_role(role))
+    return t(key) if key else role_label(role)
 
 
 def render_capability(user: dict | None) -> None:
     """Satu baris status + ajakan masuk bila memang relevan."""
     from ui.views.login import render_login_prompt
 
+    from ui.i18n import t
+
     cap = capability(user)
     _status = f"**{cap['label']}** — {cap['what']}"
     if user and not cap["may_upload"]:
-        _status += " Menunggu persetujuan — halaman tetap dapat dibaca."
+        _status += " " + t("ap.cap_pending_readable")
     st.markdown(_status)
     if not user:
         # Keterangan WAJIB "kenapa aksi tak tersedia" — diringkas sependek
         # mungkin; penunjuk jalur masuknya ditambahkan render_login_prompt.
-        render_login_prompt("Mengajukan berkas memerlukan akun.")
+        render_login_prompt(t("ap.cap_login_prompt"))
 
 
 
@@ -193,27 +227,41 @@ def submission_counts(user: dict | None) -> dict:
 
 def render_after_upload(user: dict | None) -> None:
     """Alur pasca-unggah + ringkasan antrean pengajuan milik pengguna."""
-    render_flow(AFTER_UPLOAD_FLOW, alt=AFTER_UPLOAD_FLOW_ALT)
+    from ui.i18n import t
+
+    render_flow(after_upload_flow_display(), alt=t(AFTER_UPLOAD_FLOW_ALT))
 
     counts = submission_counts(user)
     if not counts:
         return
 
     from database.models import SUBMISSION_PENDING
-    order = [(SUBMISSION_PENDING, "Menunggu tinjauan"), ("approved", "Disetujui"),
-             ("rejected", "Ditolak")]
-    parts = [f"{label}: **{counts[key]}**" for key, label in order if counts.get(key)]
+    from ui.i18n import t
+
+    # Status pengajuan adalah PENGENAL di basis data; hanya labelnya dipetakan.
+    order = [(SUBMISSION_PENDING, "ap.sub_pending"),
+             ("approved", "ap.sub_approved"),
+             ("rejected", "ap.sub_rejected")]
+    parts = [f"{t(label_key)}: **{counts[key]}**"
+             for key, label_key in order if counts.get(key)]
     other = sum(v for k, v in counts.items() if k not in dict(order))
     if other:
-        parts.append(f"lainnya: **{other}**")
+        parts.append(f"{t('ap.sub_other')}: **{other}**")
     if parts:
-        st.caption("Pengajuan Anda — " + " · ".join(parts) + ".")
+        st.caption(t("ap.sub_yours", parts=" · ".join(parts)))
 
 
 def render_related_pages() -> None:
-    """Kaitan ke halaman lain, satu baris."""
-    st.markdown("Setelah disetujui, dataset & pipeline muncul di "
-                "**Run Experiment**.")
+    """Kaitan ke halaman lain, satu baris.
+
+    Dua aturan yang BERBEDA, dan bedanya disebut: dataset tersimpan langsung
+    setelah lolos pemeriksaan, sementara pipeline menunggu persetujuan karena
+    isinya kode yang akan dieksekusi. Kalimat lama menyamakan keduanya,
+    sehingga pengunggah dataset menunggu sesuatu yang tidak pernah datang.
+    """
+    from ui.i18n import t
+
+    st.markdown(t("ap.related_pages", page=t("page.run_experiment")))
 
 
 # ── Panel konteks (dipakai di tampilan awal halaman) ──────────────────────
@@ -227,7 +275,7 @@ def render_page_context(user: dict | None) -> None:
     inject_css()
     render_platform_summary()
     render_capability(user)
-    with st.expander("Apa yang terjadi setelah saya mengunggah?", expanded=False):
+    with st.expander(t("ctx.after_upload_q"), expanded=False):
         render_after_upload(user)
     # Kaitan ke halaman lain tetap di tampilan utama: satu baris, dan justru
     # inilah alasan seseorang mengunggah.

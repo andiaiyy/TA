@@ -29,9 +29,12 @@ from html import escape
 
 import streamlit as st
 
-# Panjang maksimum keterangan satu baris sebelum dipotong elipsis.
+from ui.i18n import t
+
+# Panjang maksimum ringkasan satu baris (dipakai penyusun keterangan
+# algoritma di modal). Nama research pipeline pada baris katalog TIDAK memakai
+# batas karakter: pemotongannya ditentukan lebar nyata oleh CSS.
 SUMMARY_CHARS = 90
-TITLE_CHARS = 70
 
 # Kunci get_info yang layak tampil sebagai RINGKASAN satu baris per algoritma,
 # menurut urutan keinformatifannya. Yang pertama tersedia yang dipakai.
@@ -49,17 +52,17 @@ _DETAIL_FIELDS = (
     ("paper", "Penelitian sumber"),
 )
 
-# Awalan kunci `st.container(key=…)` untuk kartu katalog. Streamlit menambahkan
-# kelas `st-key-<key>` pada elemen berkunci, dan ITULAH kaitan CSS-nya — bukan
-# testid yang ditebak. Ada test yang mencocokkan awalan ini dengan bundel
-# frontend yang benar-benar terpasang. Nilainya dimiliki `theme` supaya satu
-# konstanta melayani gaya dan kode sekaligus.
-from ui.components.theme import CARD_KEY_PREFIX
+# Awalan kunci `st.container(key=…)` untuk satu BARIS katalog. Streamlit
+# menambahkan kelas `st-key-<key>` pada elemen berkunci, dan ITULAH kaitan
+# CSS-nya — bukan testid yang ditebak. Ada test yang mencocokkan awalan ini
+# dengan bundel frontend yang benar-benar terpasang. Nilainya dimiliki `theme`
+# supaya satu konstanta melayani gaya dan kode sekaligus.
+from ui.components.theme import ROW_KEY_PREFIX
 
 
-def card_key(dataset_type: str) -> str:
-    """Kunci container untuk satu kartu research pipeline."""
-    return CARD_KEY_PREFIX + str(dataset_type)
+def row_key(dataset_type: str) -> str:
+    """Kunci container untuk satu baris research pipeline."""
+    return ROW_KEY_PREFIX + str(dataset_type)
 
 
 _CSS = """
@@ -67,7 +70,70 @@ _CSS = """
 .ids-cat-title { font-size: 1.05rem; font-weight: 600; margin: .2rem 0 .15rem; }
 .ids-cat-short { font-size: .86rem; opacity: .7; line-height: 1.6;
                  margin-bottom: .45rem; }
-.ids-cat-chips { display: flex; flex-wrap: wrap; gap: .3rem; margin: .1rem 0 .5rem; }
+
+/* ── Baris katalog: TIGA TINGKAT TEKS yang jelas berbeda ───────────────
+   Perbedaannya dibuat oleh tiga sumbu sekaligus — ukuran, bobot, dan
+   keredupan — supaya terbaca sekilas, bukan cuma sedikit berbeda:
+
+     1. nama penelitian  1.25rem · bobot 600 · opacity 1
+     2. keterangan utama 0.95rem · bobot 400 · opacity 1
+     3. penjelasan       0.84rem · bobot 400 · opacity .55
+
+   Jarak DI DALAM baris sengaja rapat (≤ .35rem); jarak ANTAR baris dipegang
+   padding besar di theme.py. Perataan kiri semuanya sama: tidak ada indentasi
+   tambahan pada tingkat mana pun. */
+.ids-cat-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: .5rem 1rem; flex-wrap: wrap;    /* layar sempit: meta turun ke bawah */
+    /* Lebar MENGIKUTI wadahnya, dengan batas atas supaya baris tidak terlalu
+       panjang di layar lebar. Tidak ada lebar tetap di mana pun. */
+    width: 100%;
+    max-width: var(--ids-cat-textw, 46rem);
+    margin: 0 0 .3rem;
+}
+.ids-cat-name {
+    font-size: 1.25rem; font-weight: 600; line-height: 1.3;
+    /* Boleh menyusut DI BAWAH lebar isinya. Tanpa `min-width: 0` sebuah item
+       flex menolak menyusut, dan metadata di sebelahnya akan terdorong keluar
+       pada lebar sempit. */
+    flex: 1 1 auto; min-width: 0;
+    overflow-wrap: anywhere; margin: 0;
+}
+/* Metadata kanan atas, sejajar baris nama. `margin-left: auto` menahannya di
+   kanan pada lebar berapa pun; begitu ia membungkus ke baris baru, ia kembali
+   rata kiri bersama nama. Tidak pernah ikut menyusut sampai terpotong. */
+.ids-cat-meta {
+    font-size: .84rem; opacity: .6; white-space: nowrap;
+    flex: 0 0 auto; margin-left: auto; text-align: right;
+}
+.ids-cat-lead {
+    font-size: .95rem; font-weight: 400; line-height: 1.5;
+    width: 100%;
+    max-width: var(--ids-cat-textw, 46rem);
+    overflow-wrap: anywhere; margin: 0 0 .25rem;
+}
+/* Penjelasan: SATU baris, dipotong elipsis oleh LEBAR NYATA saat itu — bukan
+   pada jumlah karakter tetap. Melebarkan jendela atau menutup sidebar langsung
+   menampilkan lebih banyak teks. Teks lengkapnya tetap ada di atribut `title`
+   (tooltip) dan di pop-up Detail — tidak ada yang hilang. */
+.ids-cat-note {
+    font-size: .84rem; font-weight: 400; opacity: .55; line-height: 1.5;
+    width: 100%;
+    max-width: var(--ids-cat-textw, 46rem);
+    min-width: 0;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin: 0 0 .35rem;
+}
+@media (prefers-reduced-motion: reduce) {
+    .ids-cat-head, .ids-cat-name, .ids-cat-lead, .ids-cat-note {
+        transition: none !important;
+    }
+}
+/* Chip membungkus ke baris berikutnya, tidak pernah terpotong, dan ikut
+   batas lebar blok teks yang sama. */
+.ids-cat-chips { display: flex; flex-wrap: wrap; gap: .3rem;
+                 margin: .1rem 0 .5rem;
+                 max-width: var(--ids-cat-textw, 46rem); }
 .ids-cat-chip {
     display: inline-block; padding: .08rem .55rem; border-radius: 999px;
     font-size: .76rem; line-height: 1.6; white-space: nowrap;
@@ -161,7 +227,9 @@ def research_scope(dataset_type: str) -> str:
     """Penjelasan singkat satu kalimat, dari bidang `scope` sumber atribusi."""
     try:
         from config.research_attribution import get_research_attribution
-        return (get_research_attribution(dataset_type) or {}).get("scope", "")
+        attribution = get_research_attribution(dataset_type) or {}
+        key = attribution.get("scope_key")
+        return t(key) if key else attribution.get("scope", "")
     except Exception:                       # pragma: no cover - defensif
         return ""
 
@@ -522,7 +590,7 @@ def render_phase_graph(pipeline_id: str, info: dict) -> None:
     """
     stages = phase_graph_stages(pipeline_id, info)
     if not stages:
-        st.caption("Tahapan pipeline ini tidak terdaftar.")
+        st.caption(t("re.msg_no_stages"))
         return
     markup = phase_graph_svg(stages)
     if hasattr(st, "html"):
@@ -539,6 +607,56 @@ def render_phase_graph(pipeline_id: str, info: dict) -> None:
 def _line(text: str, css_class: str) -> None:
     st.markdown(f'<div class="{css_class}">{escape(str(text))}</div>',
                 unsafe_allow_html=True)
+
+
+def row_meta_text(group: dict) -> str:
+    """Metadata kanan atas — HANYA dari data yang sudah ada.
+
+    Dua keping, keduanya sudah dipakai di tempat lain pada halaman ini: kode
+    jenis dataset (``dataset_type``) dan banyaknya algoritma pada research
+    pipeline itu. Tidak ada informasi baru yang diperkenalkan di sini.
+    """
+    count = len(group.get("algorithms") or [])
+    parts = [str(group.get("dataset_type") or "").strip()]
+    if count:
+        parts.append(f"{count} algoritma")
+    return " · ".join(p for p in parts if p)
+
+
+def row_head_html(group: dict) -> str:
+    """Tiga tingkat teks satu baris katalog + metadata kanan atas.
+
+    Urutannya: nama penelitian (+metadata rata kanan) -> keterangan utama ->
+    penjelasan redup. Ketiganya dari sumber terstruktur:
+
+    * nama         -> ``config/research_attribution`` (nama beratribusi);
+    * keterangan   -> bidang ``scope`` sumber atribusi yang sama;
+    * penjelasan   -> kredit paper (``get_info()['paper']`` / registry).
+
+    Penjelasan DIPOTONG satu baris oleh CSS (``text-overflow: ellipsis``),
+    bukan dipotong di sini — teks lengkapnya tetap utuh di atribut ``title``
+    sehingga muncul sebagai tooltip, dan tetap tersedia di pop-up Detail.
+    """
+    # Nama TIDAK dipotong pada jumlah karakter: berapa yang muat ditentukan
+    # lebar baris yang sedang tersedia, bukan angka tetap. Ia membungkus bila
+    # perlu, dan langsung menampilkan lebih banyak begitu sidebar ditutup atau
+    # jendela diperlebar.
+    name = escape(str(group.get("title") or ""))
+    meta = escape(row_meta_text(group))
+    lead = str(group.get("short") or "").strip()
+    note = str(group.get("paper") or "").strip()
+
+    parts = [
+        f'<div class="ids-cat-head"><div class="ids-cat-name">{name}</div>'
+        f'<div class="ids-cat-meta">{meta}</div></div>'
+    ]
+    if lead:
+        parts.append(f'<div class="ids-cat-lead" title="{escape(lead)}">'
+                     f'{escape(lead)}</div>')
+    if note:
+        parts.append(f'<div class="ids-cat-note" title="{escape(note)}">'
+                     f'{escape(note)}</div>')
+    return "".join(parts)
 
 
 def chips_html(names) -> str:
@@ -587,14 +705,11 @@ def render_catalog(catalog=None, *, on_detail=None,
 
     requested = None
     for group in catalog:
-        # KARTU BERKOTAK, bukan blok yang dipisah garis. Wadah berbatas milik
-        # Streamlit memberi garis tipis + sudut membulat; latar, lebar maksimum,
-        # jarak dalam/antar kartu, dan efek sorot ditambahkan CSS terpusat lewat
-        # kelas `st-key-<key>` yang muncul karena container ini berkunci.
-        with st.container(border=True, key=card_key(group["dataset_type"])):
-            _line(shorten(group["title"], TITLE_CHARS), "ids-cat-title")
-            if group.get("short"):
-                _line(group["short"], "ids-cat-short")
+        # BARIS, bukan kartu: container TANPA batas. Garis pemisah selebar
+        # penuh, padding, dan efek sorot datang dari CSS terpusat lewat kelas
+        # `st-key-<key>` yang muncul karena container ini berkunci.
+        with st.container(border=False, key=row_key(group["dataset_type"])):
+            st.markdown(row_head_html(group), unsafe_allow_html=True)
 
             names = [a["algorithm"] for a in group.get("algorithms") or []]
             st.markdown(chips_html(names), unsafe_allow_html=True)
@@ -602,17 +717,17 @@ def render_catalog(catalog=None, *, on_detail=None,
             # Dua kolom berukuran SAMA -> kedua tombol selebar & setinggi sama,
             # sejajar pada satu garis dasar; lebar tetapnya dikunci di CSS.
             cols = st.columns([1, 1, 3])
-            if cols[0].button("Run Pipeline", type="primary",
+            if cols[0].button(t("re.btn_run_short"), type="primary",
                               key=f"cat_run_{group['dataset_type']}",
                               use_container_width=True,
-                              help="Cari dataset yang cocok untuk pipeline ini."):
+                              help=t("re.help_find_dataset")):
                 requested = group["dataset_type"]
                 if on_run is not None:
                     on_run(requested)
             # Aksi SEKUNDER — sengaja lebih tenang daripada aksi utama.
-            if cols[1].button("Detail", key=f"cat_detail_{group['dataset_type']}",
+            if cols[1].button(t("re.btn_detail"), key=f"cat_detail_{group['dataset_type']}",
                               type="tertiary", use_container_width=True,
-                              help="Keterangan lengkap & tahapan pipeline."):
+                              help=t("re.help_full_detail")):
                 requested = group["dataset_type"]
                 if on_detail is not None:
                     on_detail(requested)
@@ -640,8 +755,7 @@ def render_modal_body(group: dict) -> None:
     st.markdown(rows_html(modal_rows(group)), unsafe_allow_html=True)
 
     st.markdown("**Tahapan pipeline**")
-    st.caption("Tahapannya berbeda antar algoritma — grafnya mengikuti tahap "
-               "yang benar-benar dijalankan masing-masing.")
+    st.caption(t("cat.stages_differ"))
     algorithms = group.get("algorithms") or []
     if algorithms:
         tabs = st.tabs([a["algorithm"] for a in algorithms])
@@ -655,7 +769,7 @@ def render_modal_body(group: dict) -> None:
                 st.markdown(f"**{algorithm}**")
                 _render_value(value)
 
-    with st.expander("Persyaratan dataset", expanded=False):
+    with st.expander(t("re.dlg_dataset_req"), expanded=False):
         _render_dataset_requirements(group["dataset_type"])
 
 
@@ -675,6 +789,6 @@ def _render_dataset_requirements(dataset_type: str) -> None:
     try:
         from ui.views.run_experiment import _render_dataset_requirements as presenter
     except Exception:                       # pragma: no cover - defensif
-        st.caption("Persyaratan dataset tidak tersedia.")
+        st.caption(t("re.msg_no_requirements"))
         return
     presenter(dataset_type)

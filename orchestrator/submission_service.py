@@ -81,17 +81,27 @@ def _sanitize(filename: str, allowed_suffixes: tuple[str, ...]) -> str:
     direktori, karakter aneh, dan ekstensi di luar daftar."""
     name = (filename or "").strip()
     if not name or name != Path(name).name or "/" in name or "\\" in name:
-        raise SubmissionError(f"Nama berkas tidak aman: {filename!r}")
+        raise SubmissionError(
+            f"Nama berkas tidak aman: {filename!r}",
+            key="err.unsafe_filename",
+            values={"filename": repr(filename)})
     if name in (".", ".."):
-        raise SubmissionError(f"Nama berkas tidak aman: {filename!r}")
+        raise SubmissionError(
+            f"Nama berkas tidak aman: {filename!r}",
+            key="err.unsafe_filename",
+            values={"filename": repr(filename)})
     if any(ch not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-"
            for ch in name):
         raise SubmissionError(
-            f"Nama berkas hanya boleh huruf/angka/._- : {filename!r}")
+            f"Nama berkas hanya boleh huruf/angka/._- : {filename!r}",
+            key="err.filename_charset", values={"filename": repr(filename)})
     if Path(name).suffix.lower() not in allowed_suffixes:
         raise SubmissionError(
             f"Ekstensi tidak didukung: {filename!r} "
-            f"(diizinkan: {', '.join(allowed_suffixes)})")
+            f"(diizinkan: {', '.join(allowed_suffixes)})",
+            key="err.unsupported_extension",
+            values={"ext": repr(filename),
+                    "allowed": ", ".join(allowed_suffixes)})
     return name
 
 
@@ -110,7 +120,8 @@ def _unique_target(directory: Path, name: str) -> Path:
         candidate = directory / f"{stem}__{i}{suffix}"
         if not candidate.exists():
             return candidate
-    raise SubmissionError("Terlalu banyak berkas dengan nama serupa.")
+    raise SubmissionError("Terlalu banyak berkas dengan nama serupa.",
+            key="err.too_many_similar_names")
 
 
 def _write_stream(src, target: Path) -> StoredFile:
@@ -151,7 +162,9 @@ def _move_into(source: Path, directory: Path, *, refuse_overwrite: bool) -> Path
         if refuse_overwrite:
             raise SubmissionError(
                 f"`{source.name}` sudah ada di `{directory.name}/`. Ganti nama "
-                f"berkasnya — platform tidak menimpa berkas yang sudah ada.")
+                f"berkasnya — platform tidak menimpa berkas yang sudah ada.",
+                key="err.dataset_file_exists",
+                values={"filename": source.name, "folder": directory.name})
         target = _unique_target(directory, source.name)
     shutil.move(str(source), str(target))
     return target
@@ -275,7 +288,8 @@ def submit_pipeline(files: list[tuple[str, str]], entry_filename: str, *,
     """
     require_upload(user, db_path)
     if not files:
-        raise SubmissionError("Tidak ada berkas untuk diajukan.")
+        raise SubmissionError("Tidak ada berkas untuk diajukan.",
+            key="err.no_files_to_submit")
     safe_entry = _sanitize(entry_filename, PIPELINE_SUFFIXES)
 
     pending_root = SUBMISSION_DIRS[KIND_PIPELINE][SUBMISSION_PENDING]
@@ -295,7 +309,9 @@ def submit_pipeline(files: list[tuple[str, str]], entry_filename: str, *,
                 entry_hash = stored.sha256
         if not entry_hash:
             raise SubmissionError(
-                f"Entry point `{safe_entry}` tidak ada di antara berkas paket.")
+                f"Entry point `{safe_entry}` tidak ada di antara berkas paket.",
+                key="err.entry_not_in_files",
+                values={"filename": safe_entry})
 
         meta = dict(metadata or {})
         meta["files"] = written
@@ -337,7 +353,10 @@ def _finish_review(submission_id: int, status: str, actor: dict, note: str,
 def _load_pending(submission_id: int, db_path: str | None) -> dict:
     item = get_submission(submission_id, db_path)
     if item is None:
-        raise SubmissionError(f"Pengajuan #{submission_id} tidak ditemukan.")
+        raise SubmissionError(
+            f"Pengajuan #{submission_id} tidak ditemukan.",
+            key="err.submission_not_found",
+            values={"number": submission_id})
     if item["status"] != SUBMISSION_PENDING:
         raise SubmissionError(
             f"Pengajuan #{submission_id} sudah berstatus {item['status']}.")
@@ -364,9 +383,25 @@ def approve_submission(submission_id: int, *, actor: dict | None, note: str = ""
     """
     require_approve(actor, db_path)
     item = _load_pending(submission_id, db_path)
+
+    # GERBANG UJI COBA. Pipeline hanya boleh disetujui setelah benar-benar
+    # dijalankan di platform ini, pada kode yang persis sama dengan yang akan
+    # disetujui. Diperiksa di sini — bukan hanya di tampilan — supaya
+    # memanggil fungsi ini langsung tidak dapat melewatinya.
+    from orchestrator.trial_service import approval_blocker
+
+    blocked = approval_blocker(item, db_path)
+    if blocked:
+        raise SubmissionError(
+            "Pengajuan ini belum lolos uji coba pada platform, sehingga belum "
+            "dapat disetujui.", key=blocked)
+
     source = Path(item["stored_path"])
     if not source.exists():
-        raise SubmissionError(f"Berkas pengajuan tidak ditemukan: {source}")
+        raise SubmissionError(
+            f"Berkas pengajuan tidak ditemukan: {source}",
+            key="err.submission_file_missing",
+            values={"path": str(source)})
 
     if item["kind"] == KIND_DATASET:
         destination_dir = Path(DATASETS_DIR)
@@ -388,9 +423,27 @@ def approve_submission(submission_id: int, *, actor: dict | None, note: str = ""
     except Exception:
         shutil.move(str(moved), str(source))     # kembalikan seperti semula
         raise
+    _discard_trials_quietly(submission_id, db_path)
     logger.info("Pengajuan #%s disetujui oleh %s -> %s",
                 submission_id, actor["username"], moved)
     return get_submission(submission_id, db_path)
+
+
+def _discard_trials_quietly(submission_id: int, db_path: str | None) -> None:
+    """Buang hasil uji setelah keputusan diambil.
+
+    Kegagalan membersihkan TIDAK boleh membatalkan keputusan yang sudah sah —
+    berkasnya sudah pindah dan statusnya sudah tercatat. Sisanya ditangani
+    pembersihan berkala (`trial_service.cleanup_stale_trials`).
+    """
+    try:
+        from orchestrator.trial_service import discard_trials
+
+        discard_trials(submission_id, db_path)
+    except Exception:                        # pragma: no cover - defensif
+        logger.exception(
+            "Gagal membuang hasil uji pengajuan #%s — akan dibersihkan "
+            "pembersihan berkala", submission_id)
 
 
 def _pipeline_registration_plan(item: dict, dataset_type: str | None) -> tuple[str, str, str]:
@@ -400,11 +453,13 @@ def _pipeline_registration_plan(item: dict, dataset_type: str | None) -> tuple[s
     if not resolved_type:
         raise SubmissionError(
             "Pipeline ini belum punya dataset_type. Tentukan dataset target "
-            "saat meninjau sebelum menyetujui.")
+            "saat meninjau sebelum menyetujui.",
+            key="err.no_dataset_type")
     entry_class = (metadata.get("entry_class") or "").strip()
     if not entry_class:
         raise SubmissionError(
-            "Nama kelas entry point tidak diketahui pada metadata pengajuan.")
+            "Nama kelas entry point tidak diketahui pada metadata pengajuan.",
+            key="err.no_entry_class")
     name = (metadata.get("name") or Path(item["original_filename"]).stem)
     return name, resolved_type, entry_class
 
@@ -434,7 +489,8 @@ def reject_submission(submission_id: int, *, actor: dict | None, note: str,
     """
     require_approve(actor, db_path)
     if not (note or "").strip():
-        raise SubmissionError("Catatan alasan wajib diisi saat menolak.")
+        raise SubmissionError("Catatan alasan wajib diisi saat menolak.",
+            key="err.reject_reason_required")
     item = _load_pending(submission_id, db_path)
     source = Path(item["stored_path"])
 
@@ -449,6 +505,7 @@ def reject_submission(submission_id: int, *, actor: dict | None, note: str,
         if moved != source:
             shutil.move(str(moved), str(source))
         raise
+    _discard_trials_quietly(submission_id, db_path)
     logger.info("Pengajuan #%s ditolak oleh %s", submission_id, actor["username"])
     return get_submission(submission_id, db_path)
 

@@ -6,6 +6,8 @@ from html import escape
 import time
 
 import streamlit as st
+
+from ui.i18n import t
 import pandas as pd
 
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
@@ -25,6 +27,7 @@ from ui.components.dashboard import (
 )
 from orchestrator import run_mode as rm
 from ui.components import experiment_table as et
+from ui.components.sections import prose
 from ui.components.page_flags import wait_before_refresh
 
 # Nama halaman ini di menu ui/app.py. Dipakai mengikat pembaruan
@@ -246,8 +249,8 @@ def _grid_dataframe(rows: list[dict], columns: list[dict]) -> pd.DataFrame:
     return pd.DataFrame(data)
 
 
-_COLUMN_WIDTHS = {"Pipeline": 210, "Berkas": 200, "Waktu": 150,
-                  "Hash dataset": 130, "Dataset": 130, "Pemilik": 120}
+_COLUMN_WIDTHS = {"pipeline": 210, "berkas": 200, "waktu": 150,
+                  "dataset_hash": 130, "dataset": 130, "pemilik": 120}
 
 
 def _build_grid_options(df: pd.DataFrame, columns: list[dict],
@@ -272,7 +275,7 @@ def _build_grid_options(df: pd.DataFrame, columns: list[dict],
         children = []
         for col in cols:
             spec = {"headerName": col["label"], "field": col["label"],
-                    "width": _COLUMN_WIDTHS.get(col["label"], 120)}
+                    "width": _COLUMN_WIDTHS.get(col["key"], 120)}
             if col["kind"] == et.KIND_METRIC:
                 spec.update({"type": "numericColumn",
                              "valueFormatter": _METRIC_FORMATTER,
@@ -321,7 +324,7 @@ def _render_column_picker(all_columns: list[dict]) -> list[str]:
     current = _selected_columns(all_columns)
     grouped = et.columns_by_group(all_columns)
 
-    with st.popover("Kolom", use_container_width=False):
+    with st.popover(t("ps.dlg_columns"), use_container_width=False):
         picked: list[str] = []
         for group in et.GROUP_ORDER:
             cols = grouped.get(group) or []
@@ -330,14 +333,18 @@ def _render_column_picker(all_columns: list[dict]) -> list[str]:
             labels = {c["label"]: c["key"] for c in cols}
             default = [c["label"] for c in cols if c["key"] in current]
             chosen = st.multiselect(
-                group, list(labels), default=default,
+                # Judul kelompok ikut bahasa; `key` tetap memakai PENGENAL
+                # kelompok, jadi pilihan pengguna tidak hilang saat bahasa
+                # diganti.
+                et.group_label(group), list(labels), default=default,
                 key=f"_hist_cols_{group}",
                 # Asal-usul parameter menempel pada grup yang dijelaskannya,
                 # bukan sebagai baris keterangan terpisah.
-                help=et.PARAM_PROVENANCE if group == et.GROUP_PARAM else None,
+                help=(t(et.PARAM_PROVENANCE_KEY)
+                      if group == et.GROUP_PARAM else None),
             )
             picked += [labels[label] for label in chosen]
-        if st.button("Kembalikan ke set inti", key="_hist_cols_reset"):
+        if st.button(t("ps.btn_core_columns"), key="_hist_cols_reset"):
             for group in et.GROUP_ORDER:
                 st.session_state.pop(f"_hist_cols_{group}", None)
             st.session_state[_COLUMNS_KEY] = list(et.DEFAULT_COLUMNS)
@@ -354,31 +361,31 @@ def _render_filters(rows: list[dict]) -> dict:
     options = et.filter_options(rows)
     saved = st.session_state.get(_FILTER_KEY) or {}
 
-    with st.popover("Filter", use_container_width=False):
-        pipelines = st.multiselect("Pipeline", options["pipelines"],
+    with st.popover(t("ps.dlg_filter"), use_container_width=False):
+        pipelines = st.multiselect(t("ps.f_pipeline"), options["pipelines"],
                                    default=saved.get("pipelines") or [],
                                    key="_hist_f_pipeline")
-        datasets = st.multiselect("Dataset", options["datasets"],
+        datasets = st.multiselect(t("ps.f_dataset"), options["datasets"],
                                   default=saved.get("datasets") or [],
                                   key="_hist_f_dataset")
-        statuses = st.multiselect("Status", options["statuses"],
+        statuses = st.multiselect(t("ps.f_status"), options["statuses"],
                                   default=saved.get("statuses") or [],
                                   key="_hist_f_status")
         # Kosong = SEMUA mode. Run eksplorasi tidak pernah disembunyikan secara
         # bawaan — penyaringan mode adalah pilihan pengguna.
         modes = st.multiselect(
-            "Mode eksekusi", options["modes"],
+            t("ps.f_run_mode"), options["modes"],
             default=saved.get("modes") or [],
             format_func=lambda m: et.MODE_FILTER_LABELS.get(m, m),
             key="_hist_f_mode",
-            help=et.MODE_FILTER_DEFAULT_NOTE,
+            help=t(et.MODE_FILTER_DEFAULT_NOTE_KEY),
         )
         cols = st.columns(2)
-        start = cols[0].date_input("Dari tanggal", value=saved.get("start"),
+        start = cols[0].date_input(t("ps.f_date_from"), value=saved.get("start"),
                                    key="_hist_f_start", format="YYYY-MM-DD")
-        end = cols[1].date_input("Sampai tanggal", value=saved.get("end"),
+        end = cols[1].date_input(t("ps.f_date_to"), value=saved.get("end"),
                                  key="_hist_f_end", format="YYYY-MM-DD")
-        if st.button("Bersihkan filter", key="_hist_f_clear"):
+        if st.button(t("ps.btn_clear_filter"), key="_hist_f_clear"):
             for key in ("_hist_f_pipeline", "_hist_f_dataset", "_hist_f_status",
                         "_hist_f_mode", "_hist_f_start", "_hist_f_end"):
                 st.session_state.pop(key, None)
@@ -396,8 +403,8 @@ def _render_filters(rows: list[dict]) -> dict:
 def _render_expression_search(rows: list[dict]) -> list[dict]:
     """Pencarian ekspresi sederhana pada metrik. Parser TERBATAS — tanpa
     eval/exec; ekspresi tak dikenal memberi pesan, bukan crash."""
-    text = st.text_input("Cari metrik", value="", key="_hist_expr",
-                         placeholder="mis. f1 > 0.8 and accuracy >= 0.9",
+    text = st.text_input(t("ps.f_metric_search"), value="", key="_hist_expr",
+                         placeholder=t("ps.f_metric_hint"),
                          help=et.EXPR_HELP, label_visibility="collapsed")
     if not (text or "").strip():
         return rows
@@ -540,7 +547,8 @@ def comparison_table_html(data: dict) -> str:
     for section in data["sections"]:
         body.append(
             f'<tr class="ids-cmp-group"><td colspan="{len(headers) + 1}">'
-            f'{escape(str(section["group"]))}</td></tr>')
+            f'{escape(str(section.get("group_label") or section["group"]))}'
+            f'</td></tr>')
         for field in section["fields"]:
             row_class = "ids-cmp-diff" if field["differs"] else ""
             align = "ids-cmp-r" if field["align"] == et.ALIGN_RIGHT else "ids-cmp-l"
@@ -577,13 +585,15 @@ def comparison_actions_html(rows) -> str:
     cols = ('<colgroup><col class="ids-cmp-labelcol" />'
             + '<col />' * len(headers) + '</colgroup>')
     body = []
-    for label, key in (("Pipeline", "pipeline"), ("Mode", "mode")):
+    for label, key in ((t("ps.cmp_row_pipeline"), "pipeline"),
+                       (t("ps.cmp_row_mode"), "mode")):
         body.append(
             "<tr>" + _cell_html(label, "ids-cmp-label")
             + "".join(_cell_html(r.get(key, "—"), "ids-cmp-l") for r in rows)
             + "</tr>")
     head = ('<thead><tr>'
-            + _cell_html("Eksperimen", "ids-cmp-label", tag="th")
+            + _cell_html(t("ps.cmp_col_experiment"), "ids-cmp-label",
+                         tag="th")
             + "".join(_cell_html(h, "", tag="th") for h in headers)
             + "</tr></thead>")
     return (f'<div class="ids-cmp-scroll"><table class="ids-cmp">{cols}{head}'
@@ -602,37 +612,35 @@ def _comparison_body(ids: list[str], rows: list[dict],
     if note:
         st.markdown(note)
 
-    only_diff = st.checkbox(et.ONLY_DIFF_LABEL, key=_CMP_ONLY_DIFF_KEY,
-                            help="Baris yang nilainya sama disembunyikan.")
+    only_diff = st.checkbox(t(et.ONLY_DIFF_LABEL_KEY), key=_CMP_ONLY_DIFF_KEY,
+                            help=t("ps.cmp_hide_same"))
     data = et.build_comparison(chosen, payload["param_keys"],
                                only_differences=only_diff)
 
     if not data["sections"]:
-        st.info(et.ALL_SAME_NOTE)
+        st.info(t(et.ALL_SAME_NOTE_KEY))
     else:
         st.html(_CMP_CSS + comparison_table_html(data))
 
-    st.markdown(
-        f"{data['diff_count']} dari {data['total_count']} baris berbeda; "
-        "baris yang disorot itulah yang berbeda. Tidak ada peringkat otomatis "
-        "— penilaian mana yang lebih baik tetap milik pembaca. "
-        + et.PARAM_PROVENANCE
-    )
+    prose(t("ps.cmp_reading", diff=data["diff_count"],
+              total=data["total_count"])
+          + " " + t(et.PARAM_PROVENANCE_KEY),
+          key="cmp_reading")
 
     # Aksi per eksperimen. Identitasnya memakai tabel yang SAMA dengan di atas,
     # dan tombolnya memakai bobot kolom yang sama sehingga sejajar dengannya.
     st.divider()
-    st.markdown("**Kelola eksperimen dalam perbandingan ini**")
+    st.markdown(t("ps.cmp_manage"))
     st.html(_CMP_CSS + comparison_actions_html(chosen))
 
     weights = comparison_column_weights(len(chosen))
     detail_cols = st.columns(weights)
-    detail_cols[0].markdown("Buka detail")
+    detail_cols[0].markdown(t("ps.btn_open_detail"))
     for index, row in enumerate(chosen, start=1):
         if detail_cols[index].button(
-                "Buka", key=f"_cmp_open_{row['_id']}",
+                t("ps.btn_open_short"), key=f"_cmp_open_{row['_id']}",
                 use_container_width=True,
-                help=f"Buka detail lengkap {row['id']}."):
+                help=t("ps.help_open_detail", id=row["id"])):
             # Perbandingan ditutup lebih dulu supaya ia tidak terbuka kembali
             # di belakang modal detail pada rerun berikutnya.
             _close_comparison()
@@ -641,14 +649,13 @@ def _comparison_body(ids: list[str], rows: list[dict],
 
     too_few = len(chosen) <= 2
     drop_cols = st.columns(weights)
-    drop_cols[0].markdown("Buang dari perbandingan")
+    drop_cols[0].markdown(t("ps.btn_drop_compare"))
     for index, row in enumerate(chosen, start=1):
         if drop_cols[index].button(
-                "Buang", key=f"_cmp_drop_{row['_id']}",
+                t("ps.btn_drop_short"), key=f"_cmp_drop_{row['_id']}",
                 use_container_width=True,
-                help=("Perbandingan memerlukan minimal dua eksperimen — "
-                      "membuang satu lagi akan menutupnya."
-                      if too_few else f"Keluarkan {row['id']} dari tabel.")):
+                help=(t("ps.help_drop_too_few") if too_few
+                      else t("ps.help_drop", id=row["id"]))):
             _drop_from_comparison(row["_id"])
             st.rerun()
 
@@ -657,13 +664,15 @@ def _comparison_body(ids: list[str], rows: list[dict],
         st.rerun()
 
 
-if hasattr(st, "dialog"):
-    _comparison_dialog = dlg.dialog_decorator(
-        "Bandingkan Eksperimen", _COMPARE_KEY, width="large")(_comparison_body)
-else:                                       # pragma: no cover - Streamlit lama
-    def _comparison_dialog(ids, rows, param_keys):
-        with st.expander("Bandingkan Eksperimen", expanded=True):
-            _comparison_body(ids, rows, param_keys)
+def _comparison_dialog(ids, rows, param_keys):
+    """Modal perbandingan, judulnya disusun pada bahasa yang sedang aktif."""
+    if hasattr(st, "dialog"):
+        dlg.dialog_decorator(t("ps.dlg_compare"), _COMPARE_KEY,
+                             width="large")(_comparison_body)(
+            ids, rows, param_keys)
+        return
+    with st.expander(t("ps.dlg_compare"), expanded=True):  # pragma: no cover
+        _comparison_body(ids, rows, param_keys)
 
 
 def _maybe_render_comparison(rows: list[dict], param_keys: list[str]) -> None:
@@ -706,26 +715,24 @@ def _render_running_section(experiments) -> tuple:
     running = select_running(experiments)
 
     head = st.columns([3, 1, 1])
-    head[0].subheader("Sedang Berjalan")
+    head[0].subheader(t("ps.running_title"))
     if hasattr(head[1], "toggle"):
         auto = head[1].toggle("Auto-refresh", value=True, key="_dash_auto")
     else:
         auto = head[1].checkbox("Auto-refresh", value=True, key="_dash_auto")
-    if head[2].button("Perbarui", use_container_width=True, key="_dash_refresh"):
+    if head[2].button(t("ps.btn_refresh_now"), use_container_width=True, key="_dash_refresh"):
         st.session_state["_dash_nonce"] = st.session_state.get("_dash_nonce", 0) + 1
         st.rerun()
 
     if not running:
-        st.info("Tidak ada eksperimen yang sedang berjalan. "
-                "Buka **Run Experiment** dari menu di sidebar untuk memulai.")
+        st.info(t("ps.empty_running"))
         return running, bool(auto), 6
 
     health = _dash_health(st.session_state.get("_dash_nonce", 0))
     async_mode = health.get("mode") == "async"
     can_read_progress = (not async_mode) or bool(health.get("broker_ok"))
     if async_mode and not health.get("broker_ok", True):
-        st.warning("Broker (Redis) tidak tersambung — progres granular tidak tersedia; "
-                   "menampilkan status & elapsed saja.")
+        st.warning(t("ps.msg_broker_down"))
 
     for e in running:
         eid = e["id"]
@@ -753,15 +760,15 @@ def _render_running_section(experiments) -> tuple:
             if pv["stage_label"]:
                 st.markdown(f"**{pv['stage_label']}**")
             elif e.get("status") == "QUEUED":
-                st.markdown("Menunggu worker mengambil tugas…")
+                st.markdown(t("ps.msg_waiting_worker"))
             else:
-                st.markdown("Progres granular tidak tersedia untuk eksperimen ini.")
-            if st.button("Batalkan", key=f"dash_cancel_{eid}"):
+                st.markdown(t("ps.msg_no_granular"))
+            if st.button(t("ps.btn_cancel_short"), key=f"dash_cancel_{eid}"):
                 r = cancel_experiment(eid)
                 if r.get("success"):
-                    st.warning("Eksperimen dibatalkan.")
+                    st.warning(t("ps.msg_cancelled"))
                 else:
-                    st.error(r.get("message", "Gagal membatalkan."))
+                    st.error(r.get("message") or t("ps.msg_cancel_failed"))
                 st.rerun()
 
     return running, bool(auto), 6
@@ -798,12 +805,12 @@ def _pdf_download_button(exp: dict, metrics: dict, metadata: dict, key: str) -> 
             feature_names=(metadata or {}).get("feature_names"),
         ))
         st.download_button(
-            "Download PDF Report", data=pdf_bytes,
+            t("ps.btn_pdf"), data=pdf_bytes,
             file_name=f"experiment_report_{exp['id'][:8]}.pdf",
             mime="application/pdf", key=key,
         )
     except Exception as e:  # never break the dialog on a PDF failure
-        st.caption(f"PDF tidak dapat dibuat: {type(e).__name__}")
+        st.caption(t("ps.msg_pdf_failed_kind", kind=type(e).__name__))
 
 
 def _detail_payload(experiment_id: str) -> dict | None:
@@ -853,20 +860,18 @@ def _render_mode_details(exp: dict) -> None:
 
     if not used:
         if locked:
-            st.caption(
-                "Parameter (definisi pipeline saat ini — eksperimen ini "
-                f"dijalankan sebelum parameter dicatat per run): "
-                f"{rm.format_params(locked)}"
-            )
+            st.caption(t("ps.params_legacy_line",
+                          params=rm.format_params(locked)))
         return
 
     changed = rm.changed_keys(used, locked)
-    st.caption("Parameter yang dipakai (direkam saat run): "
-               + rm.format_params(used, locked))
+    st.caption(t("ps.params_used_line",
+                 params=rm.format_params(used, locked)))
     if changed:
-        st.caption(f"Berbeda dari bawaan: {', '.join(f'`{k}`' for k in sorted(changed))}.")
+        st.caption(t("ps.params_differs_line",
+                     keys=", ".join(f"`{k}`" for k in sorted(changed))))
     else:
-        st.caption("Seluruh parameter sama dengan nilai terkunci pipeline.")
+        st.caption(t("ps.params_locked"))
 
 
 def _detail_dialog_body(experiment_id: str) -> None:
@@ -876,7 +881,7 @@ def _detail_dialog_body(experiment_id: str) -> None:
     preserved for HIKARI and EVE-cbr."""
     full = _detail_payload(experiment_id)
     if not full:
-        st.error("Eksperimen tidak ditemukan.")
+        st.error(t("ps.msg_not_found"))
         if st.button("Tutup", key=f"dlg_close_missing_{experiment_id}"):
             dlg.close_dialog(dlg.DETAIL_KEY)
             dlg.clear_payload(dlg.DETAIL_KEY)
@@ -890,16 +895,17 @@ def _detail_dialog_body(experiment_id: str) -> None:
     st.markdown(f"**{exp['pipeline_id']}** · {exp['dataset_type']} · "
                 f"`{exp['status']}` · {rm.run_mode_badge(exp.get('run_mode'))}")
     _render_mode_details(exp)
-    st.caption(f"ID `{exp['id']}` · Created {(exp.get('created_at') or '-')[:19]} · "
-               f"Completed {(exp.get('completed_at') or '-')[:19]}")
+    st.caption(t("ps.detail_identity", id=exp["id"],
+                 created=(exp.get("created_at") or "-")[:19],
+                 completed=(exp.get("completed_at") or "-")[:19]))
     # Ketertelusuran pipeline TERUNGGAH: versi + SHA-256 berkasnya. Pipeline
     # bawaan tidak menampilkan apa-apa di sini — definisinya ada di git.
     if exp.get("pipeline_version") or exp.get("pipeline_hash"):
-        st.caption(
-            f"Pipeline terunggah · versi {exp.get('pipeline_version') or '-'} · "
-            f"SHA-256 `{(exp.get('pipeline_hash') or '-')[:16]}…` · "
-            f"dataset SHA-256 `{(exp.get('dataset_hash') or '-')[:16]}…`"
-        )
+        st.caption(t(
+            "ps.detail_traceability",
+            version=exp.get("pipeline_version") or "-",
+            pipeline_hash=(exp.get("pipeline_hash") or "-")[:16],
+            dataset_hash=(exp.get("dataset_hash") or "-")[:16]))
 
     if exp["status"] == "FINISHED" and metrics:
         payload = normalize_result_payload(
@@ -908,35 +914,37 @@ def _detail_dialog_body(experiment_id: str) -> None:
         )
         render_results(payload, key=f"dlg_{exp['id']}", pipeline_id=exp.get("pipeline_id", ""))
         _pdf_download_button(exp, metrics, metadata, key=f"dlgpdf_{exp['id']}")
-        with st.expander("Artifact Viewer", expanded=False):
+        with st.expander(t("ps.exp_artifact_viewer"), expanded=False):
             files = _detail_artifact_files(exp["id"])
             if files:
                 render_file_browser(files, state_key=f"dlg_artifacts_{exp['id']}")
             else:
-                st.info("Artefak belum tersedia atau direktori artefak kosong.")
+                st.info(t("ps.empty_artifacts"))
     elif exp["status"] == "FAILED":
         em = exp.get("error_message", "Unknown")
         if em == "Cancelled by user":
-            st.warning("Eksperimen dibatalkan oleh pengguna.")
+            st.warning(t("ps.msg_cancelled_by_user"))
         else:
-            st.error(f"Gagal: {em}")
+            st.error(t("ps.msg_failed_with", error=em))
     else:
-        st.info(f"Eksperimen berstatus {exp['status']}. Hasil belum tersedia.")
+        st.info(t("ps.msg_status_no_result", status=exp["status"]))
 
     st.markdown("---")
     act = st.columns(3)
     if exp["status"] in ("QUEUED", "RUNNING"):
-        if act[0].button("Batalkan", key=f"dlg_cancel_{exp['id']}"):
+        if act[0].button(t("ps.btn_cancel_short"),
+                         key=f"dlg_cancel_{exp['id']}"):
             cancel_experiment(exp["id"])
             dlg.close_dialog(dlg.DETAIL_KEY)
             dlg.clear_payload(dlg.DETAIL_KEY)
             st.rerun()
-    if act[1].button("Re-run", key=f"dlg_rerun_{exp['id']}"):
+    if act[1].button(t("ps.btn_rerun"), key=f"dlg_rerun_{exp['id']}"):
         r = rerun_experiment(exp["id"])
         if r.get("success"):
-            st.success(f"Baru: `{r['experiment_id'][:8]}…` — tutup dan segarkan.")
+            st.success(t("ps.msg_rerun_started",
+                         id=r["experiment_id"][:8]))
         else:
-            st.error(r.get("error", "Gagal."))
+            st.error(r.get("error") or t("ps.msg_failed_short"))
     if act[2].button("Tutup", key=f"dlg_close_{exp['id']}"):
         dlg.close_dialog(dlg.DETAIL_KEY)
         dlg.clear_payload(dlg.DETAIL_KEY)
@@ -945,8 +953,12 @@ def _detail_dialog_body(experiment_id: str) -> None:
 
 # Didekorasi lewat util supaya on_dismiss (tombol X / Esc / klik di luar) selalu
 # terpasang — tanpa itu flagnya tetap hidup dan modal terbuka lagi tiap rerun.
-_detail_dialog = dlg.dialog_decorator(
-    "Detail Eksperimen", dlg.DETAIL_KEY, width="large")(_detail_dialog_body)
+# Didekorasi SAAT DIPANGGIL: judul yang disusun di tingkat modul akan membeku
+# pada bahasa yang kebetulan aktif ketika modul ini diimpor.
+def _detail_dialog(experiment_id):
+    """Modal detail, judulnya disusun pada bahasa yang sedang aktif."""
+    dlg.dialog_decorator(t("ps.dlg_detail_title"), dlg.DETAIL_KEY,
+                         width="large")(_detail_dialog_body)(experiment_id)
 
 
 def _render_selected_actions(selected_id: str) -> None:
@@ -958,21 +970,24 @@ def _render_selected_actions(selected_id: str) -> None:
     exp = full["experiment"]
     # Mode ikut pada baris ringkas ini juga: tidak boleh ada tempat di mana
     # sebuah run eksplorasi terlihat seperti run resmi.
-    st.markdown(f"**Terpilih:** `{exp['id'][:8]}` — {exp['pipeline_id']} · "
-                f"`{exp['status']}` · {rm.run_mode_badge(exp.get('run_mode'))}")
+    st.markdown(t("ps.detail_selected_line", id=exp["id"][:8],
+                  pipeline=exp["pipeline_id"], status=exp["status"],
+                  badge=rm.run_mode_badge(exp.get("run_mode"))))
     cols = st.columns(3)
-    if cols[0].button("Lihat detail", key=f"open_{selected_id}", type="primary",
+    if cols[0].button(t("ps.btn_detail"), key=f"open_{selected_id}", type="primary",
                       use_container_width=True):
         dlg.open_dialog(dlg.DETAIL_KEY, selected_id)
         st.rerun()
-    if cols[1].button("Re-run", key=f"rerun_{selected_id}", use_container_width=True):
+    if cols[1].button(t("ps.btn_rerun"), key=f"rerun_{selected_id}", use_container_width=True):
         r = rerun_experiment(selected_id)
         if r.get("success"):
-            st.success(f"Baru: `{r['experiment_id'][:8]}…` — segarkan tabel.")
+            st.success(t("ps.msg_rerun_refresh",
+                         id=r["experiment_id"][:8]))
         else:
-            st.error(r.get("error", "Gagal."))
+            st.error(r.get("error") or t("ps.msg_failed_short"))
     if exp["status"] in ("QUEUED", "RUNNING"):
-        if cols[2].button("Batalkan", key=f"cancel_{selected_id}", use_container_width=True):
+        if cols[2].button(t("ps.btn_cancel_short"), key=f"cancel_{selected_id}",
+                          use_container_width=True):
             cancel_experiment(selected_id)
             st.rerun()
 
@@ -1011,31 +1026,29 @@ def _render_history(experiments: list[dict], all_rows: list[dict]) -> None:
 
     with bar[3]:
         st.download_button(
-            "Unduh CSV", data=et.to_csv(rows, columns).encode("utf-8"),
+            t("ps.btn_csv"), data=et.to_csv(rows, columns).encode("utf-8"),
             file_name=et.csv_filename(), mime="text/csv",
             use_container_width=True, key="_hist_csv",
             # Jumlah baris yang sedang tampil menempel di sini karena tombol
             # ini mengikuti filter yang persis sama.
-            help=f"{et.result_summary(len(rows), len(all_rows))}. "
-                 "Mengikuti kolom & filter yang sedang aktif, lengkap dengan "
-                 "keterangan semantik metrik per baris.",
+            help=t("ps.help_csv_summary",
+                   summary=et.result_summary(len(rows), len(all_rows))),
         )
 
     # Tidak ada lagi baris ringkasan di bawah kontrol. Semantik metrik (WAJIB)
     # dan arti sorotan pindah ke tooltip header kolom metrik — menjelaskan
     # angkanya di tempat angka itu dibaca.
     metric_tooltip = " ".join(part for part in
-                              (et.semantics_note(rows), et.BEST_MARK_NOTE)
+                              (et.semantics_note(rows),
+                               t(et.BEST_MARK_NOTE_KEY))
                               if part)
 
     if not rows:
-        st.info("Tidak ada eksperimen yang cocok dengan filter. Bersihkan "
-                "filter lewat tombol **Filter**.")
+        st.info(t("ps.empty_filtered"))
         st.session_state.pop("selected_experiment_id", None)
         return
     if not columns:
-        st.warning("Tidak ada kolom yang dipilih. Pilih kolom lewat tombol "
-                   "**Kolom**.")
+        st.warning(t("ps.empty_columns"))
         return
 
     df = _grid_dataframe(rows, columns)
@@ -1062,12 +1075,10 @@ def _render_history(experiments: list[dict], all_rows: list[dict]) -> None:
     # Sebab tombol tidak aktif (WAJIB tetap tersampaikan) menempel pada tombol
     # itu sendiri, bukan sebagai baris keterangan di sebelahnya.
     if cmp_cols[0].button(
-            f"Bandingkan terpilih ({len(selected_ids)})",
+            t("ps.btn_compare_selected", count=len(selected_ids)),
             key="_hist_compare", use_container_width=True,
             disabled=bool(problem),
-            help=problem or (f"Centang 2-{et.MAX_COMPARE} eksperimen untuk "
-                             f"membandingkannya, atau satu baris untuk membuka "
-                             f"detail & aksinya.")):
+            help=problem or t("ps.help_compare_hint", max=et.MAX_COMPARE)):
         dlg.open_dialog(_COMPARE_KEY, selected_ids)
         st.rerun()
 
@@ -1089,7 +1100,7 @@ def _selected_ids(grid_response) -> list[str]:
 
 
 def render():
-    st.title("Progress & Status")
+    st.title(t("page.progress"))
 
     experiments = list_all_experiments()
 
@@ -1097,10 +1108,10 @@ def render():
     running, auto, interval = _render_running_section(experiments)
 
     st.markdown("---")
-    st.subheader("Riwayat Eksperimen")
+    st.subheader(t("ps.history_title"))
 
     if not experiments:
-        st.info("Belum ada eksperimen. Buka halaman 'Run Experiment' untuk membuat satu.")
+        st.info(t("ps.empty_history_alt"))
         st.session_state.pop("selected_experiment_id", None)
         all_rows = []
     else:

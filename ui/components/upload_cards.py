@@ -53,9 +53,16 @@ def _svg(label: str, body: str) -> str:
     )
 
 
+def _art_alt(key: str) -> str:
+    """Teks alternatif gambar kartu pada bahasa aktif."""
+    from ui.i18n import t
+
+    return t(key)
+
+
 def pipeline_art() -> str:
     """Berkas kode: lembar dengan sudut terlipat + tanda kurung sudut."""
-    return _svg("Berkas kode",
+    return _svg(_art_alt("ap.art_pipeline"),
                 '<path d="M16 6h22l12 12v40a2 2 0 0 1-2 2H16a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>'
                 '<path d="M38 6v12h12"/>'
                 '<path d="M26 34l-6 6 6 6"/>'
@@ -64,7 +71,7 @@ def pipeline_art() -> str:
 
 def dataset_art() -> str:
     """Tumpukan data: tiga lapis silinder — lambang kumpulan baris data."""
-    return _svg("Tumpukan data",
+    return _svg(_art_alt("ap.art_dataset"),
                 '<ellipse cx="32" cy="14" rx="20" ry="7"/>'
                 '<path d="M12 14v12c0 3.9 9 7 20 7s20-3.1 20-7V14"/>'
                 '<path d="M12 26v12c0 3.9 9 7 20 7s20-3.1 20-7V26"/>'
@@ -73,7 +80,7 @@ def dataset_art() -> str:
 
 def review_art() -> str:
     """Dokumen bertanda centang — pengajuan yang ditinjau lalu disetujui."""
-    return _svg("Dokumen dengan tanda centang",
+    return _svg(_art_alt("ap.art_review"),
                 '<path d="M14 6h26l10 10v30a2 2 0 0 1-2 2H14a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2z"/>'
                 '<path d="M40 6v10h10"/>'
                 '<path d="M20 26h16M20 34h10"/>'
@@ -82,7 +89,7 @@ def review_art() -> str:
 
 def users_art() -> str:
     """Sosok pengguna dengan kartu identitas — pengelolaan akun & peran."""
-    return _svg("Sosok pengguna",
+    return _svg(_art_alt("ap.art_users"),
                 '<circle cx="24" cy="20" r="8"/>'
                 '<path d="M10 48c0-7.7 6.3-14 14-14s14 6.3 14 14"/>'
                 '<rect x="34" y="30" width="20" height="14" rx="2"/>'
@@ -111,50 +118,49 @@ def card_html(*, art: str, tint: str, title: str, text: str,
 #
 # `need` menunjuk hak yang diperlukan; halaman yang menghitungnya, kartu hanya
 # membaca hasilnya.
+# Nilainya KUNCI, bukan kalimat: konstanta modul dievaluasi sekali saat
+# impor, jadi kalimat di sini akan membeku pada bahasa yang kebetulan aktif.
+# `mode`, `need`, `tint`, dan `badge` tetap pengenal — ia tidak berbahasa.
 CARDS = (
     {
         "mode": "pipeline",
-        "title": "Unggah Pipeline",
-        "text": "Berkas .py pipeline. Diperiksa statis terhadap kontrak & "
-                "aturan keamanan sebelum ditinjau.",
-        "button": "Unggah pipeline",
+        "title": "ap.card_pipeline_title",
+        "text": "ap.card_pipeline_text",
+        "button": "ap.card_pipeline_button",
         "tint": TINT_PIPELINE,
         "need": "upload",
         "badge": "",
-        "denied": "Perlu akun Kontributor.",
+        "denied": "ap.card_need_contributor",
     },
     {
         "mode": "dataset",
-        "title": "Unggah Dataset",
-        "text": "Berkas .csv / .ndjson / .jsonl. Langsung diperiksa "
-                "kecocokannya dengan tiap research pipeline.",
-        "button": "Unggah dataset",
+        "title": "ap.card_dataset_title",
+        "text": "ap.card_dataset_text",
+        "button": "ap.card_dataset_button",
         "tint": TINT_DATASET,
         "need": "upload",
         "badge": "",
-        "denied": "Perlu akun Kontributor.",
+        "denied": "ap.card_need_contributor",
     },
     {
         "mode": "review",
-        "title": "Peninjauan Pengajuan",
-        "text": "Baca pengajuan yang masuk, lalu setujui atau tolak berikut "
-                "catatan alasannya.",
-        "button": "Buka peninjauan",
+        "title": "ap.card_review_title",
+        "text": "ap.card_review_text",
+        "button": "ap.card_review_button",
         "tint": TINT_REVIEW,
         "need": "approve",
         "badge": "Research Admin",
-        "denied": "Khusus Research Admin.",
+        "denied": "ap.card_admin_only",
     },
     {
         "mode": "users",
-        "title": "Kelola Pengguna",
-        "text": "Aktifkan akun yang menunggu persetujuan, ubah peran, dan "
-                "lihat daftar pengguna.",
-        "button": "Buka kelola pengguna",
+        "title": "ap.card_users_title",
+        "text": "ap.card_users_text",
+        "button": "ap.card_users_button",
         "tint": TINT_USERS,
         "need": "manage_users",
         "badge": "Research Admin",
-        "denied": "Khusus Research Admin.",
+        "denied": "ap.card_admin_only",
     },
 )
 
@@ -164,15 +170,52 @@ _ART = {"pipeline": pipeline_art, "dataset": dataset_art,
 # Dua baris berisi dua kartu.
 CARDS_PER_ROW = 2
 
+#: Kartu yang HANYA milik Research Admin.
+ADMIN_MODES = ("review", "users")
+
+#: Satu baris bagi pengunjung: jalur peninjauan tetap disebut keberadaannya,
+#: tanpa menampilkan kartunya. Kontributor TIDAK mendapat baris ini — bagi
+#: mereka jalur itu memang bukan sesuatu yang bisa ditempuh.
+VISITOR_ADMIN_NOTE = "ap.visitor_admin_note"
+
+
+def visible_cards(*, may_approve: bool, may_manage_users: bool,
+                  signed_in: bool, cards=CARDS) -> tuple:
+    """Kartu yang DIRENDER. Murni — mudah diperiksa tanpa menjalankan halaman.
+
+    Tiga keadaan:
+
+    * **Research Admin** — keempat kartu.
+    * **Kontributor** — hanya dua kartu unggah. Kartu admin tidak ditampilkan
+      sama sekali: bagi kontributor, kartu mati hanya menjadi gangguan atas
+      jalur yang memang tidak bisa mereka tempuh.
+    * **Pengunjung** — dua kartu unggah (tombolnya mati, dengan ajakan masuk)
+      plus satu baris keterangan; lihat :data:`VISITOR_ADMIN_NOTE`.
+
+    Ini SEMATA tampilan. Penegakan izin tetap di fungsi aksinya
+    (``require_approve`` / ``require_manage_users``), jadi menyembunyikan kartu
+    tidak pernah menjadi satu-satunya penghalang.
+    """
+    admin = bool(may_approve or may_manage_users)
+    if admin and signed_in:
+        return tuple(cards)
+    return tuple(c for c in cards if c["mode"] not in ADMIN_MODES)
+
 
 def card_rows(cards=CARDS, per_row: int = CARDS_PER_ROW) -> list[tuple]:
-    """Bagi kartu menjadi baris-baris berisi ``per_row`` kartu. Murni."""
+    """Bagi kartu menjadi baris-baris berisi ``per_row`` kartu. Murni.
+
+    Baris terakhir yang tidak penuh tetap dibagi rata oleh pemanggilnya
+    (``st.columns(len(row))``), sehingga dua kartu mengisi lebar yang sama
+    dengan empat kartu — tidak ada kolom kosong yang menganga.
+    """
     cards = tuple(cards)
     return [cards[i:i + per_row] for i in range(0, len(cards), per_row)]
 
 
 def render_upload_cards(*, may_upload: bool, may_approve: bool = False,
                         may_manage_users: bool = False,
+                        signed_in: bool | None = None,
                         counts: dict | None = None,
                         on_choose=None) -> str | None:
     """Keempat kartu, dua baris berisi dua. Mengembalikan mode terpilih atau None.
@@ -186,19 +229,30 @@ def render_upload_cards(*, may_upload: bool, may_approve: bool = False,
     ``counts`` opsional: {"review": n, "users": n} untuk menambahkan satu baris
     keterangan jumlah antrean pada kartu yang bersangkutan.
     """
+    from ui.i18n import t
+
     allowed = {"upload": bool(may_upload), "approve": bool(may_approve),
                "manage_users": bool(may_manage_users)}
     counts = counts or {}
 
+    # `signed_in` tidak diwajibkan supaya pemanggil lama tetap bekerja: bila
+    # tidak diberikan, ia disimpulkan dari hak yang ada.
+    if signed_in is None:
+        signed_in = bool(may_upload or may_approve or may_manage_users)
+
+    cards = visible_cards(may_approve=may_approve,
+                          may_manage_users=may_manage_users,
+                          signed_in=signed_in)
+
     chosen = None
-    for row in card_rows():
+    for row in card_rows(cards):
         cols = st.columns(len(row), gap="medium")
         for col, card in zip(cols, row):
             with col:
                 permitted = allowed.get(card["need"], False)
                 st.markdown(
                     card_html(art=_ART[card["mode"]](), tint=card["tint"],
-                              title=card["title"], text=card["text"],
+                              title=t(card["title"]), text=t(card["text"]),
                               badge=card["badge"]),
                     unsafe_allow_html=True)
 
@@ -206,16 +260,24 @@ def render_upload_cards(*, may_upload: bool, may_approve: bool = False,
                 if not permitted:
                     # Kartu tetap tampil; keterangannya menunjuk ke pemilih mode
                     # di sidebar, karena tidak ada lagi tombol "Masuk" di sini.
-                    note = f"{card['denied']} {SIGN_IN_HINT}"
+                    note = f"{t(card['denied'])} {t('ap.card_denied_hint')}"
                 if note:
                     st.markdown(
                         f'<div class="ids-card-note">{escape(note)}</div>',
                         unsafe_allow_html=True)
 
-                if st.button(card["button"], key=f"contrib_go_{card['mode']}",
+                if st.button(t(card["button"]),
+                             key=f"contrib_go_{card['mode']}",
                              use_container_width=True, type="primary",
                              disabled=not permitted):
                     chosen = card["mode"]
                     if on_choose is not None:
                         on_choose(chosen)
+
+    # Pengunjung: keberadaan jalur admin tetap disebut, kartunya tidak.
+    if not signed_in:
+        st.markdown(
+            f'<div class="ids-card-note">'
+            f'{escape(t(VISITOR_ADMIN_NOTE))}</div>',
+            unsafe_allow_html=True)
     return chosen

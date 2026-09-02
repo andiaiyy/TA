@@ -34,6 +34,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from ui.i18n import t
+
 from config.research_attribution import get_research_short_label
 from config.settings import DATASETS_DIR, STORAGE_DIR
 from contracts.dataset_schemas import supported_datasets
@@ -46,9 +48,10 @@ from orchestrator.auth_service import (
     AuthError, PermissionDenied, can_approve, can_manage_users, can_upload,
     create_user_as, list_users, require_upload, set_user_role, set_user_status,
 )
-from orchestrator.dynamic_registry import (
-    DynamicRegistryError, list_registered, set_pipeline_active,
-)
+from config.settings import DATASETS_DIR
+from database import trials as trial_db
+from orchestrator import trial_service
+from ui.i18n import CATALOG
 from orchestrator.submission_service import (
     approve_submission, list_submissions, read_submission_sources,
     reject_submission, submit_dataset, submit_pipeline,
@@ -68,7 +71,14 @@ from ui.components.pipeline_upload import (
 from ui.components.instructions import (
     render_dataset_instructions, render_pipeline_instructions,
 )
+from ui.components import submission_review as sr
 from ui.components.contribute_context import render_page_context
+from ui.components import tables as tbl
+from ui.components.validator_messages import (
+    check_message, error_message,
+)
+from ui.components.sections import prose, render_facts, render_section
+from utils.timestamps import now_iso
 from ui.components.upload_cards import render_upload_cards
 from ui.views._artifact_browser import format_size
 from ui.views.login import current_user, render_login_prompt
@@ -120,6 +130,7 @@ def _render_choice_boxes() -> None:
         may_upload=bool(can_upload(user)),
         may_approve=bool(can_approve(user)),
         may_manage_users=bool(can_manage_users(user)),
+        signed_in=bool(user),
         counts=_admin_queue_notes(user),
     )
     if mode:
@@ -142,12 +153,6 @@ def _admin_queue_notes(user: dict | None) -> dict:
             notes["review"] = f"{n} pengajuan menunggu tinjauan."
         except Exception:                   # pragma: no cover - defensive
             pass
-    if can_manage_users(user):
-        try:
-            n = len([u for u in list_users() if u["status"] == STATUS_PENDING])
-            notes["users"] = f"{n} pendaftaran menunggu persetujuan."
-        except Exception:                   # pragma: no cover - defensive
-            pass
     return notes
 
 
@@ -158,6 +163,23 @@ _STATUS_LABEL = {
     "approved": "Disetujui",
     "rejected": "Ditolak",
 }
+
+
+def _my_submission_columns():
+    """Kolom "Pengajuan saya" — jenis kolom yang sama dengan tabel lain.
+
+    FUNGSI, bukan konstanta: konstanta modul dievaluasi sekali saat impor, jadi
+    judul kolomnya akan terkunci pada bahasa yang kebetulan aktif saat itu dan
+    tidak pernah ikut berganti. Pola yang sama dipakai `sidebar_progress`.
+    """
+    return (
+        tbl.column("#", "id", kind=tbl.KIND_MARK, width="4.5rem"),
+        tbl.column(t("ap.col_file"), "filename", kind=tbl.KIND_NAME),
+        tbl.column(t("ap.col_kind"), "kind", kind=tbl.KIND_STATUS),
+        tbl.column(t("ap.col_status"), "status", kind=tbl.KIND_STATUS),
+        tbl.column(t("ap.col_time"), "when", kind=tbl.KIND_TIME),
+        tbl.column(t("ap.lbl_review_note"), "note"),
+    )
 
 
 def _render_my_submissions() -> None:
@@ -175,27 +197,70 @@ def _render_my_submissions() -> None:
 
     st.divider()
     st.markdown("Pengajuan saya")
-    for item in mine[:10]:
-        # SATU baris per pengajuan. Sebelumnya empat caption kecil di empat
-        # kolom terpisah — terbaca sebagai serakan, bukan sebagai daftar.
-        note = item.get("review_note")
-        tail = f"catatan: {note}" if note else (item["submitted_at"] or "")[:19]
-        st.markdown(
-            f"`#{item['id']}` **{item['original_filename']}** — {item['kind']} · "
-            f"{_STATUS_LABEL.get(item['status'], item['status'])} · {tail}")
+    # Tabel yang SAMA dengan tabel lain di halaman ini. Dulu satu baris markdown
+    # per pengajuan, dipotong diam-diam pada 10 — pembaca tidak pernah tahu ada
+    # berapa seluruhnya. `limit` kini menyebutkan totalnya.
+    rows = [{
+        "id": f"#{item['id']}",
+        "filename": item["original_filename"],
+        "kind": item["kind"],
+        "status": _STATUS_LABEL.get(item["status"], item["status"]),
+        "when": item.get("submitted_at") or "",
+        "note": item.get("review_note") or "",
+    } for item in mine]
+    tbl.render_table(_my_submission_columns(), rows, limit=10,
+                     empty="Belum ada pengajuan.")
+
+
+def _render_pending_section(pending: list, user: dict) -> None:
+    """Bagian "Menunggu tinjauan" — antrean pengajuan pipeline.
+
+    Judul bagiannya memakai pola baku yang sama dengan "Aktif" dan "Riwayat
+    versi", jadi ketiganya terbaca sebagai bagian yang setara.
+    """
+    from ui.views import manage_pipelines as mp
+
+    render_section(t("ap.sec_pending", count=len(pending)),
+                   help=t("ap.help_only_pipelines_reviewed"))
+    # Dua kejujuran WAJIB, satu baris — dipakai apa adanya dari modul penyaji.
+    prose(f"{t(mp.STATIC_CHECK_NOTE_KEY)} {t(mp.NEW_VERSION_NOTE_KEY)}",
+          key="review_notes")
+
+    # IKHTISAR antrean: seluruh pengajuan berdampingan, memakai hasil periksa
+    # yang MEMANG sudah dihitung untuk kartunya (cache yang sama, bukan
+    # pembacaan kedua). Kartu di bawahnya tetap berupa expander karena ia
+    # memuat widget — pemilih dataset, catatan, tombol setujui/tolak — dan
+    # widget Streamlit tidak dapat hidup di dalam sel tabel HTML.
+    def _reviewed(item):
+        return _reviewed_package(item["id"], item.get("file_hash") or "", item)
+
+    tbl.render_table(sr.PENDING_COLUMNS, sr.pending_table_rows(pending, _reviewed),
+                     empty=t(sr.EMPTY_STATE_KEY))
+    for item in pending:
+        _render_submission_review_card(item, user)
 
 
 def _render_review_flow() -> None:
-    """Peninjauan pengajuan — hanya Research Admin.
+    """Peninjauan pengajuan + pengelolaan pipeline kontribusi.
+
+    Sub-tampilan ini memuat TIGA bagian: **Menunggu tinjauan**, **Aktif**, dan
+    **Riwayat versi**. Dua yang terakhir beserta penyunting dan perbandingan
+    versinya disajikan modul ``ui/views/manage_pipelines``; fungsinya DIPANGGIL,
+    bukan disalin ke sini.
+
+    Ketiganya dipisahkan segmented control di atas — SATU bagian tampil pada
+    satu waktu (alasannya ditulis di ``manage_pipelines``). Keadaan tiap bagian
+    hidup di ``session_state`` dan tidak dibuang oleh perpindahan.
 
     Izin diperiksa DI SINI dan sekali lagi di dalam ``approve_submission`` /
-    ``reject_submission``, jadi menyembunyikan tombol tidak pernah menjadi
-    satu-satunya penghalang.
+    ``reject_submission`` / ``save_new_version``, jadi menyembunyikan tombol
+    tidak pernah menjadi satu-satunya penghalang.
     """
+    from ui.views import manage_pipelines as mp
     user = current_user()
-    st.subheader("Peninjauan Pengajuan")
+    st.subheader(t("ap.sec_review"))
     if not can_approve(user):
-        st.error("Hanya Research Admin yang dapat meninjau pengajuan.")
+        st.error(t("ap.denied_review"))
         return
 
     try:
@@ -206,14 +271,19 @@ def _render_review_flow() -> None:
 
     # Hanya PIPELINE yang ditinjau: isinya kode yang akan dieksekusi. Dataset
     # tersimpan langsung, jadi tidak pernah masuk antrean ini lagi.
-    pending = [s for s in waiting if s["kind"] == KIND_PIPELINE]
-    st.markdown(
-        "Hanya pipeline yang ditinjau — isinya kode yang dieksekusi; dataset "
-        "tersimpan langsung."
-        + ("" if pending else
-           " Tidak ada pengajuan pipeline yang menunggu tinjauan."))
-    for item in pending:
-        _render_submission_review_card(item, user)
+    # TERLAMA MENUNGGU LEBIH DULU — antrean tinjauan, bukan tumpukan.
+    pending = sr.sort_pending([s for s in waiting if s["kind"] == KIND_PIPELINE])
+    active_count = len(mp.active_rows())
+    section = mp.render_section_switch(len(pending), active_count)
+
+    if section == mp.SECTION_ACTIVE:
+        mp.render_active(user)
+        return
+    if section == mp.SECTION_HISTORY:
+        mp.render_history()
+        return
+
+    _render_pending_section(pending, user)
 
     # Data lama: pengajuan dataset yang terlanjur menunggu sebelum aturan ini
     # berubah. Tidak dibuang — disetujui lewat jalur yang sudah ada, sehingga
@@ -221,14 +291,12 @@ def _render_review_flow() -> None:
     legacy = [s for s in waiting if s["kind"] == KIND_DATASET]
     if legacy:
         st.divider()
-        st.markdown(
-            "**Pengajuan dataset lama** — dataset tidak lagi memerlukan "
-            "persetujuan. Selesaikan pengajuan ini agar berkasnya masuk ke "
-            "`storage/datasets/`.")
+        prose(
+            t("ap.msg_legacy_dataset_submission"), key="legacy_dataset")
         for item in legacy:
             cols = st.columns([5, 2])
             cols[0].markdown(f"`#{item['id']}` **{item['original_filename']}**")
-            if cols[1].button("Selesaikan", key=f"legacy_ds_{item['id']}",
+            if cols[1].button(t("ap.btn_finish"), key=f"legacy_ds_{item['id']}",
                               use_container_width=True):
                 try:
                     approve_submission(item["id"], actor=user,
@@ -242,7 +310,8 @@ def _render_review_flow() -> None:
                     st.rerun()
 
     st.divider()
-    _render_registered_pipelines(user)
+    mp.render_active(user)
+    mp.render_history()
 
     st.divider()
     history = [s for s in list_submissions() if s["status"] != SUBMISSION_PENDING]
@@ -257,118 +326,321 @@ def _render_review_flow() -> None:
             f"oleh {item.get('reviewed_by') or '-'}{note}")
 
 
-def _render_registered_pipelines(user: dict) -> None:
-    """Pipeline terunggah yang sudah terdaftar + aksi aktif/nonaktif.
+@st.cache_data(ttl=60, show_spinner=False)
+def _reviewed_package(submission_id: int, file_hash: str, _item: dict) -> dict:
+    """Pemeriksaan STATIS berkas tersimpan, dihitung sekali per pengajuan.
 
-    Menonaktifkan menarik pipeline dari daftar pilihan TANPA menghapus record
-    atau berkasnya, sehingga eksperimen lama tetap dapat ditelusuri lewat
-    versi & hash yang sudah tercatat."""
+    Kuncinya (id, hash titik masuk) tidak berubah selama pengajuan itu belum
+    diputuskan, jadi membuka/menutup kartu tidak memicu validasi ulang. Tidak
+    ada kode pengajuan yang di-import maupun dijalankan di sini.
+    """
+    return sr.review_stored_package(_item)
+
+
+def _render_check_groups(entry: dict) -> None:
+    """Rincian pemeriksaan satu berkas, dikelompokkan Struktur & Keamanan."""
+    groups = entry.get("groups") or {}
+    _render_group(GROUP_STRUCTURE, groups.get(GROUP_STRUCTURE) or [])
+    _render_group(GROUP_SECURITY, groups.get(GROUP_SECURITY) or [])
+
+
+# ── Langkah UJI COBA (sebelum keputusan) ──────────────────────────────────
+
+def _trial_dataset_options() -> list[tuple[str, str]]:
+    """[(label, path)] dataset yang tersedia di platform.
+
+    Dibaca lewat mekanisme yang sama dengan halaman Run Experiment, jadi
+    daftarnya persis dataset yang memang dapat dipakai eksperimen.
+    """
+    from ui.views.run_experiment import _dataset_options_cached
+
     try:
-        rows = list_registered()
-    except Exception as e:                  # pragma: no cover - defensive
-        st.warning(f"Daftar tidak terbaca: {e}")
+        options, _sizes = _dataset_options_cached(0, str(DATASETS_DIR))
+    except Exception:                        # pragma: no cover - defensif
+        logger.exception("Daftar dataset uji tidak terbaca")
+        return []
+    return [(label, path) for label, path in options]
+
+
+def _render_trial_compatibility(dataset_type: str, dataset_path: str) -> None:
+    """Ringkasan kecocokan dataset — memakai diagnosa yang SUDAH ADA.
+
+    Tujuannya mencegah uji coba yang gagal hanya karena datasetnya jelas tidak
+    cocok: kegagalan seperti itu tidak mengatakan apa pun tentang pipelinenya.
+    """
+    from orchestrator.dataset_diagnostics import diagnose_dataset
+    from ui.components.validator_messages import diagnostic_message, diagnostic_title
+
+    st.markdown(f"**{t('trial.compat_heading')}**")
+    try:
+        report = diagnose_dataset(dataset_path, dataset_type)
+    except Exception:
+        st.caption(t("trial.compat_unavailable"))
         return
-    # Judul + keadaan + aturan versi: SATU baris untuk seluruh bagian.
-    st.markdown(
-        "**Pipeline terunggah terdaftar**"
-        + (" — versi bersifat immutable: menyetujui nama yang sama lagi "
-           "membuat versi baru, versi lama tidak pernah berubah." if rows else
-           " — belum ada pipeline terunggah yang disetujui."))
-    if not rows:
+    # `diagnose_dataset` mengembalikan DICT (ramah cache/JSON), bukan objek.
+    checks = (report or {}).get("checks") or []
+    if not checks:
+        st.caption(t("trial.compat_unavailable"))
+        return
+    mark = {"pass": "✔", "warn": "⚠", "fail": "✖"}
+    lines = []
+    for check in checks:
+        status = (check or {}).get("status") or ""
+        lines.append(f"- {mark.get(status, '·')} **{diagnostic_title(check)}** "
+                     f"— {diagnostic_message(check)}")
+    st.markdown("\n".join(lines))
+
+
+def _render_trial_outcome(trial: dict) -> None:
+    """Hasil satu uji coba, apa adanya.
+
+    Kegagalan dilaporkan LENGKAP: tahap, jenis, dan pesannya. Itulah yang
+    dicari peninjau — "uji gagal" saja tidak menolong siapa pun.
+    """
+    st.caption(t("trial.tested_by", who=trial["started_by"],
+                 when=(trial.get("started_at") or "")[:19],
+                 dataset=trial.get("dataset_type") or "—"))
+    if trial["status"] == trial_db.STATUS_PASSED:
+        st.success(t("trial.result_passed",
+                     rows=trial.get("rows_used") or "—",
+                     seconds=trial.get("duration_s") or "—"))
+        metrics = trial.get("metrics") or {}
+        if metrics:
+            render_facts([(name, f"{value:.4f}"
+                           if isinstance(value, float) else str(value))
+                          for name, value in metrics.items()])
+        else:
+            st.caption(t("trial.no_metrics"))
+        return
+    st.error(t("trial.result_failed", stage=trial.get("error_stage") or "—"))
+    st.markdown(t("trial.failure_detail",
+                  kind=trial.get("error_kind") or "—",
+                  message=trial.get("error_message") or "—"))
+
+
+def _render_trial_step(item: dict, user: dict | None) -> None:
+    """Pilih dataset → lihat kecocokan → jalankan uji → baca hasilnya."""
+    st.markdown(f"**{t('trial.heading')}**")
+    limits = trial_service.TRIAL_LIMITS
+    st.caption(t("trial.intro", rows=f"{limits['max_rows']:,}".replace(",", "."),
+                 seconds=limits["max_seconds"]))
+
+    blocker = trial_service.trial_blocker(item)
+    if blocker:
+        st.info(t(blocker))
         return
 
-    for row in rows:
-        with st.container(border=True):
-            cols = st.columns([3, 2, 2, 2])
-            cols[0].markdown(
-                f"`{row['pipeline_id']}` · "
-                f"{get_research_short_label(row['dataset_type'])} · "
-                f"{'Aktif' if row['active'] else 'Nonaktif'}")
-            label = "Nonaktifkan" if row["active"] else "Aktifkan"
-            if cols[3].button(
-                    label, key=f"reg_toggle_{row['pipeline_id']}",
-                    use_container_width=True,
-                    help=f"kelas {row['entry_class']} · "
-                         f"SHA-256 {row['file_hash'][:12]}…"):
-                try:
-                    set_pipeline_active(row["pipeline_id"], not row["active"],
-                                        actor=user)
-                except (AuthError, DynamicRegistryError) as e:
-                    st.error(str(e))
-                else:
-                    st.rerun()
+    from orchestrator.trial_dataset_service import attachment_of, human_size
 
+    dataset_type = (item.get("metadata") or {}).get("dataset_type")
+    attachment = attachment_of(item)
+
+    # Sumber dataset. Lampiran hanya ditawarkan bila memang ada — pengajuan
+    # tanpa lampiran tetap dapat diuji lewat dataset platform (Tahap 1).
+    sources = [trial_service.SOURCE_PLATFORM]
+    if attachment:
+        sources.append(trial_service.SOURCE_ATTACHED)
+    source_labels = {
+        trial_service.SOURCE_PLATFORM: t("td.source_platform"),
+        trial_service.SOURCE_ATTACHED: t("td.source_attached"),
+    }
+    source = st.radio(
+        t("td.lbl_source"), sources, horizontal=True,
+        format_func=lambda value: source_labels[value],
+        key=f"trial_src_{item['id']}")
+    if not attachment:
+        st.caption(t("td.no_attachment_hint"))
+
+    picked = None
+    if source == trial_service.SOURCE_ATTACHED:
+        # Keterangan lampiran ditampilkan SEBELUM dijalankan, supaya peninjau
+        # tahu berkas apa yang akan dipakai.
+        st.markdown(t("td.attachment_facts",
+                      filename=attachment.get("filename") or "—",
+                      size=human_size(attachment.get("size") or 0),
+                      when=(attachment.get("uploaded_at") or "")[:19]))
+        if attachment.get("note"):
+            st.caption(t("td.contributor_note", note=attachment["note"]))
+        st.caption(t("td.sample_caveat"))
+        if dataset_type:
+            _render_trial_compatibility(dataset_type,
+                                        attachment.get("stored_path") or "")
+        ready = True
+    else:
+        options = _trial_dataset_options()
+        if not options:
+            st.info(t("trial.compat_unavailable"))
+            return
+        # Nilainya PATH (pengenal berkas), labelnya dibentuk `format_func` —
+        # dropdown tidak pernah menampilkan nilai mentah.
+        labels = {path: label for label, path in options}
+        picked = st.selectbox(
+            t("trial.lbl_dataset"), list(labels),
+            index=None, placeholder=t("trial.ph_dataset"),
+            format_func=lambda path: labels.get(path, path),
+            key=f"trial_ds_{item['id']}")
+        if picked and dataset_type:
+            _render_trial_compatibility(dataset_type, picked)
+        ready = bool(picked)
+
+    if st.button(t("trial.btn_run"), key=f"trial_run_{item['id']}",
+                 disabled=not ready, use_container_width=True):
+        with st.spinner(t("trial.running")):
+            try:
+                trial_service.run_trial(
+                    item["id"], dataset_type=dataset_type,
+                    dataset_path=picked, actor=user, source=source)
+            except (AuthError, trial_service.TrialError) as e:
+                st.error(error_message(e))
+            else:
+                st.rerun()
+
+    latest = trial_db.latest_trial(item["id"])
+    if latest:
+        _render_trial_outcome(latest)
+        # Uji yang sudah tidak berlaku dikatakan APA ADANYA di sebelah
+        # hasilnya, supaya hasil "BERHASIL" yang basi tidak terbaca sebagai
+        # izin untuk menyetujui.
+        if (latest["status"] == trial_db.STATUS_PASSED
+                and latest["package_hash"]
+                != trial_service.submission_fingerprint(item)):
+            st.warning(t("trial.gate_stale"))
+
+
+def _render_file_review(row: dict) -> None:
+    """Satu berkas paket: peran, ukuran, penjelasan pengunggah, temuan, kode."""
+    entry = row["entry"]
+    mark = "✔" if row["ok"] else "✖"
+    size = f" · {format_size(row['size'])}" if row.get("size") else ""
+    header = f"{mark} {row['filename']} · {row['role']}{size}"
+
+    with st.expander(header, expanded=not row["ok"]):
+        # Penjelasan PENGUNGGAH — konteks yang paling membantu peninjau, dan
+        # selama ini hanya ada di dalam blob JSON.
+        if row["description"]:
+            st.markdown(f"Penjelasan pengunggah: {row['description']}")
+
+        if not entry.get("ok"):
+            st.error(entry.get("error") or "Berkas tidak dapat diperiksa.")
+            return
+
+        if row["role"] == ROLE_SUPPORT:
+            st.markdown(t("ap.note_support_file"))
+
+        _render_check_groups(entry)
+
+        lines = sr.finding_lines(entry)
+        if lines:
+            st.markdown("Temuan ada di baris: "
+                        + ", ".join(f"**{n}**" for n in lines)
+                        + " — nomornya tercetak di sisi kiri kode.")
+
+        # Kode dengan NOMOR BARIS, dalam wadah yang dapat digulir sehingga
+        # berkas panjang tidak mendominasi layar.
+        source = entry.get("source") or ""
+        with st.container(height=320, border=True):
+            st.code(sr.numbered_source(source), language="python")
+        st.download_button(
+            t("ap.btn_download_file"), data=source.encode("utf-8"),
+            file_name=row["filename"], mime="text/x-python",
+            key=f"review_dl_{row['filename']}_{id(entry)}",
+            help=t("ap.help_open_outside"))
 
 
 def _render_submission_review_card(item: dict, user: dict) -> None:
-    header = (f"#{item['id']} · {item['kind']} · {item['original_filename']} · "
-              f"{format_size(item['file_size'])} · oleh {item['submitted_by']}")
-    with st.expander(header, expanded=False):
-        st.caption(f"Diajukan {(item['submitted_at'] or '')[:19]} · "
-                   f"SHA-256 `{item['file_hash'][:16]}…`")
+    """Satu pengajuan: identitas, berkas, pemeriksaan, kode, keputusan.
 
-        metadata = item.get("metadata") or {}
-        validation = item.get("validation") or {}
-        if metadata:
-            st.markdown("Metadata")
-            st.json(metadata, expanded=False)
+    Seluruh isinya berasal dari pengajuan yang TERSIMPAN. Kode hanya
+    ditampilkan sebagai teks — tidak pernah di-import maupun dijalankan.
+    """
+    reviewed = _reviewed_package(item["id"], item.get("file_hash") or "", item)
+    row = sr.summary_row(item, reviewed)
 
-        if item["kind"] == KIND_PIPELINE:
-            st.markdown("Hasil validasi statis")
-            st.json(validation, expanded=False)
-            # Kode ditampilkan sebagai TEKS — tidak pernah diimpor/dieksekusi.
-            for name, source in read_submission_sources(item):
-                st.caption(f"`{name}`")
-                st.code(source, language="python")
-            st.caption("Kode ditampilkan sebagai teks; platform tidak pernah "
-                       "mengimpor atau menjalankannya.")
-        else:
-            st.markdown("Profil & kompatibilitas saat diajukan")
-            st.json(validation, expanded=False)
-            st.caption("Angka profil berasal dari sampel saat pengajuan "
-                       "(berkas tidak dimuat seluruhnya).")
+    with st.expander(sr.summary_line(row), expanded=False):
+        # 1. Identitas & metadata — pasangan label–nilai ringkas.
+        render_facts(sr.metadata_rows(item))
 
-        chosen_type = None
-        if item["kind"] == KIND_PIPELINE:
-            options = list(supported_datasets())
-            meta_type = (item.get("metadata") or {}).get("dataset_type")
-            chosen_type = st.selectbox(
-                "Dataset target", options,
-                index=options.index(meta_type) if meta_type in options else None,
-                format_func=_dataset_label, placeholder="Pilih dataset_type…",
-                key=f"review_dtype_{item['id']}",
-                help="Menentukan di bawah research pipeline mana pipeline ini muncul.",
-            )
+        # 2 & 3. Berkas paket: SELURUHNYA, titik masuk lebih dulu.
+        files = sr.file_rows(item, reviewed)
+        st.markdown(f"**Berkas paket** — {len(files)}, "
+                    f"{row['verdict_text']}.")
+        for file_row in files:
+            _render_file_review(file_row)
 
-        note = st.text_input("Catatan tinjauan", key=f"review_note_{item['id']}",
-                             placeholder="Wajib diisi saat menolak")
+        warnings = sr.warning_checks(reviewed)
+        if warnings:
+            st.warning(t(sr.WARNING_REMINDER_KEY))
+
+        # 4. Uji coba — SEBELUM keputusan, karena ia syarat persetujuan.
+        st.divider()
+        _render_trial_step(item, user)
+
+        # 5. Keputusan.
+        st.divider()
+        options = list(supported_datasets())
+        meta_type = (item.get("metadata") or {}).get("dataset_type")
+        chosen_type = st.selectbox(
+            t("ap.lbl_target_dataset"), options,
+            index=options.index(meta_type) if meta_type in options else None,
+            format_func=_dataset_label, placeholder=t("ap.ph_target_dataset"),
+            key=f"review_dtype_{item['id']}",
+            help=t("ap.help_dataset_type"),
+        )
+        note = st.text_input(
+            t("ap.lbl_review_note"), key=f"review_note_{item['id']}",
+            placeholder=t("ap.ph_review_note"))
+        st.markdown(t(sr.APPROVAL_CONSEQUENCE_KEY))
+
+        # Alasan tombol nonaktif SELALU dinyatakan — tombol mati tanpa
+        # keterangan membuat peninjau menebak apa yang kurang.
+        gate = trial_service.approval_blocker(item)
         cols = st.columns(2)
-        if cols[0].button("Setujui", key=f"review_approve_{item['id']}",
-                          type="primary", use_container_width=True):
+        if cols[0].button(t("action.approve"),
+                          key=f"review_approve_{item['id']}",
+                          type="primary", use_container_width=True,
+                          disabled=bool(gate), help=t(gate) if gate else None):
             try:
                 approve_submission(item["id"], actor=user, note=note,
                                    dataset_type=chosen_type)
             except AuthError as e:
-                st.error(str(e))
+                st.error(error_message(e))
             else:
+                registered = _latest_registration(item)
+                st.success(
+                    f"Disetujui. {registered}"
+                    f" Ditinjau {user['username']} pada "
+                    f"{now_iso()[:19]}."
+                    + (f" Catatan: {note}" if note.strip() else ""))
                 st.rerun()
+        # Menolak TANPA alasan tidak dijalankan sama sekali — berkasnya tetap
+        # ada, hanya statusnya yang berubah.
         if cols[1].button("Tolak", key=f"review_reject_{item['id']}",
-                          use_container_width=True):
-            try:
-                reject_submission(item["id"], actor=user, note=note)
-            except AuthError as e:
-                st.error(str(e))
+                          use_container_width=True,
+                          help=t("ap.help_reject_reason")):
+            if not note.strip():
+                st.error(t("ap.msg_need_reject_reason"))
             else:
-                st.rerun()
+                try:
+                    reject_submission(item["id"], actor=user, note=note)
+                except AuthError as e:
+                    st.error(error_message(e))
+                else:
+                    st.rerun()
 
-        if item["kind"] == KIND_PIPELINE:
-            st.caption("Menyetujui mendaftarkan pipeline sebagai versi baru "
-                       "(`uploaded.<nama>@v<N>`) sehingga dapat dipilih & "
-                       "dijalankan. `config/pipeline_registry.py` tidak "
-                       "disentuh; versi lama tidak pernah ditimpa.")
-        else:
-            st.caption("Menyetujui memindahkan berkas ke `storage/datasets/` "
-                       "sehingga dapat dipilih di Run Experiment.")
+
+def _latest_registration(item: dict) -> str:
+    """Kalimat konfirmasi: identitas & hash versi yang barusan terdaftar."""
+    try:
+        from orchestrator.dynamic_registry import list_registered
+        rows = [r for r in list_registered()
+                if r.get("submission_id") == item["id"]]
+    except Exception:                       # pragma: no cover - defensif
+        rows = []
+    if not rows:
+        return "Pipeline terdaftar dan langsung dapat dijalankan."
+    newest = max(rows, key=lambda r: r["version"])
+    return (f"`{newest['pipeline_id']}` aktif sebagai versi {newest['version']} "
+            f"(hash `{(newest['file_hash'] or '')[:12]}…`).")
 
 
 # ── Kelola pengguna (Research Admin) ──────────────────────────────────────
@@ -381,69 +653,41 @@ def _render_users_flow() -> None:
     (`create_user_as` / `set_user_active`), sehingga menyembunyikan menu saja
     tidak pernah menjadi satu-satunya penghalang."""
     user = current_user()
-    st.subheader("Kelola Pengguna")
+    st.subheader(t("ap.sec_users"))
     if not can_manage_users(user):
-        st.error("Hanya Research Admin yang dapat mengelola pengguna.")
+        st.error(t("ap.denied_users"))
         return
 
-    pending = [u for u in list_users() if u["status"] == STATUS_PENDING]
-    st.markdown(
-        f"**Menunggu persetujuan ({len(pending)})** — akun yang menunggu tidak "
-        f"memiliki hak apa pun sampai diaktifkan."
-        + ("" if pending else " Tidak ada pendaftaran yang menunggu."))
-    for row in pending:
-        with st.container(border=True):
-            cols = st.columns([3, 3, 2, 2])
-            cols[0].markdown(f"`{row['username']}`")
-            if cols[2].button(
-                    "Aktifkan", key=f"user_activate_{row['username']}",
-                    type="primary", use_container_width=True,
-                    help=f"Didaftarkan {(row.get('requested_at') or '')[:19]} · "
-                         f"{row.get('reason') or 'tanpa keterangan'}"):
-                try:
-                    set_user_status(row["username"], STATUS_ACTIVE, actor=user)
-                except AuthError as e:
-                    st.error(str(e))
-                else:
-                    st.rerun()
-            if cols[3].button("Tolak", key=f"user_reject_{row['username']}",
-                              use_container_width=True):
-                try:
-                    set_user_status(row["username"], STATUS_DISABLED, actor=user)
-                except AuthError as e:
-                    st.error(str(e))
-                else:
-                    st.rerun()
-
-    st.divider()
+    # Tidak ada lagi antrean persetujuan AKUN: pendaftaran langsung aktif.
+    # Menonaktifkan / mengaktifkan kembali tetap tersedia di daftar pengguna di
+    # bawah, karena itu keputusan sadar seorang Research Admin — bukan antrean.
     st.markdown("Buat akun baru")
     with st.form("contrib_create_user"):
         cols = st.columns(3)
         new_username = cols[0].text_input("Username", key="contrib_new_username")
         new_password = cols[1].text_input("Password", type="password",
                                           key="contrib_new_password")
-        new_role = cols[2].selectbox("Peran", ALL_ROLES, index=ALL_ROLES.index(ROLE_CONTRIBUTOR),
+        new_role = cols[2].selectbox(t("ap.lbl_role"), ALL_ROLES, index=ALL_ROLES.index(ROLE_CONTRIBUTOR),
                                      format_func=role_label, key="contrib_new_role")
-        created = st.form_submit_button("Buat akun", type="primary")
+        created = st.form_submit_button(t("ap.btn_create_account"), type="primary")
     if created:
         try:
             created_user = create_user_as(user, new_username, new_password, new_role)
         except AuthError as e:            # termasuk PermissionDenied
-            st.error(str(e))
+            st.error(error_message(e))
         else:
             st.success(f"Akun `{created_user['username']}` dibuat "
                        f"({created_user['role_label']}).")
 
     st.divider()
-    st.markdown("**Daftar pengguna** — password tidak pernah ditampilkan; "
-                "hanya turunan bersaltnya yang disimpan.")
+    st.markdown(t("ap.note_user_list"))
     try:
         users = list_users()
     except Exception as e:                # pragma: no cover - defensive
         st.error(f"Gagal membaca daftar pengguna: {e}")
         return
     if not users:
-        st.markdown("Belum ada akun.")
+        st.markdown(t("ap.empty_no_accounts"))
         return
 
     for row in users:
@@ -467,7 +711,7 @@ def _render_users_flow() -> None:
                                     STATUS_DISABLED if active else STATUS_ACTIVE,
                                     actor=user)
                 except AuthError as e:
-                    st.error(str(e))
+                    st.error(error_message(e))
                 else:
                     st.rerun()
             # Peran Research Admin HANYA diberikan dari sini — tidak pernah
@@ -481,7 +725,7 @@ def _render_users_flow() -> None:
                                   ROLE_RESEARCH_ADMIN if promote else ROLE_CONTRIBUTOR,
                                   actor=user)
                 except AuthError as e:
-                    st.error(str(e))
+                    st.error(error_message(e))
                 else:
                     st.rerun()
 
@@ -531,11 +775,11 @@ def _render_group(title: str, checks: list[dict]) -> None:
     for c in checks:
         icon = _STATUS_ICON.get(c["status"], "·")
         line = f" _(baris {c['line']})_" if c.get("line") else ""
-        st.markdown(f"- {icon} **{c['name']}** — {c['message']}{line}")
+        st.markdown(f"- {icon} **{c['name']}** — {check_message(c)}{line}")
 
 
 def _render_package_report(result: dict, form: dict) -> None:
-    st.subheader("Hasil validasi")
+    st.subheader(t("ap.sec_validation"))
     n_files = len(result["files"])
     if result["valid"]:
         st.success(f"Valid — {n_files} berkas lolos, entry point "
@@ -560,7 +804,7 @@ def _render_package_report(result: dict, form: dict) -> None:
                 st.markdown("Perlu diperbaiki")
                 for c in item["blocking_failures"]:
                     line = f" _(baris {c['line']})_" if c.get("line") else ""
-                    st.markdown(f"- {c['message']}{line}")
+                    st.markdown(f"- {check_message(c)}{line}")
             if item["role"] == ROLE_SUPPORT:
                 st.caption(
                     "Berkas pendukung: kontrak pipeline tidak berlaku, aturan "
@@ -571,17 +815,112 @@ def _render_package_report(result: dict, form: dict) -> None:
             _render_group(GROUP_SECURITY, item["groups"][GROUP_SECURITY])
 
     if not result["valid"]:
-        st.markdown("Perbaiki poin ✖ di atas lalu unggah ulang. Unduhan "
-                    "dan cuplikan registry muncul setelah paket valid.")
+        st.markdown(t("ap.msg_fix_then_reupload"))
         return
 
     _render_valid_followup(result, form)
 
 
+
+
+# ── Dataset uji lampiran: formulir kontributor ────────────────────────────
+
+def _render_trial_dataset_form() -> tuple[object, str]:
+    """(berkas, keterangan) dataset uji opsional.
+
+    Mengembalikan (None, "") bila kontributor tidak melampirkan apa pun —
+    pengajuan tanpa lampiran adalah jalur yang sah dan tetap berjalan.
+    """
+    from orchestrator.trial_dataset_service import (
+        DATASET_SUFFIXES, MAX_TRIAL_DATASET_BYTES, human_size,
+        inspect_attachment,
+    )
+
+    st.markdown(f"**{t('td.heading')}**")
+    # SATU baris keterangan: apa gunanya berkas ini, dan batasnya. Halaman
+    # ini berkuota teks kecil — memecahnya menjadi dua tidak menambah
+    # kejelasan, hanya menambah baris.
+    st.caption(t("td.intro") + " "
+               + t("td.limit_note",
+                   limit=human_size(MAX_TRIAL_DATASET_BYTES),
+                   formats=", ".join(DATASET_SUFFIXES)))
+
+    picked = st.file_uploader(
+        t("td.lbl_file"), type=[s.lstrip(".") for s in DATASET_SUFFIXES],
+        accept_multiple_files=False, key="contrib_trial_dataset")
+    note = st.text_input(t("td.lbl_note"), key="contrib_trial_dataset_note",
+                         placeholder=t("td.ph_note"))
+    if picked is None:
+        return None, ""
+
+    size = len(picked.getvalue())
+    if size > MAX_TRIAL_DATASET_BYTES:
+        # Ditolak DI SINI juga, dengan menyebut angkanya — kontributor tahu
+        # seberapa harus dikecilkan tanpa menebak.
+        st.error(t("td.err_too_large", size=human_size(size),
+                   limit=human_size(MAX_TRIAL_DATASET_BYTES)))
+        return None, note
+
+    st.success(t("td.attached_ok", filename=picked.name,
+                 size=human_size(size)))
+    _render_attachment_structure(picked)
+    return picked, note
+
+
+def _render_attachment_structure(upload) -> None:
+    """Ringkasan pemeriksaan struktur, lewat diagnosa yang SUDAH ADA.
+
+    Ditampilkan kepada kontributor sebelum ia mengajukan, supaya ia tahu
+    berkasnya terbaca dengan benar — bukan menemukannya saat ditolak peninjau.
+    """
+    import tempfile
+    from pathlib import Path as _Path
+
+    from orchestrator.trial_dataset_service import inspect_attachment
+
+    st.markdown(f"**{t('td.structure_heading')}**")
+    tmp = _Path(tempfile.mkdtemp()) / (upload.name or "sample.csv")
+    try:
+        tmp.write_bytes(upload.getvalue())
+        result = inspect_attachment(str(tmp))
+    except Exception:                        # pragma: no cover - defensif
+        st.info(t("td.structure_none"))
+        return
+
+    # Struktur yang tidak dikenal BUKAN kegagalan: pipeline yang dilampiri
+    # dataset seperti ini justru sering membaca strukturnya sendiri.
+    matched = [r.get("dataset_type") for r in result.get("reports") or []
+               if r.get("compatible")]
+    st.info(t("td.compatible_with", types=", ".join(matched)) if matched
+            else t("td.structure_none"))
+
+
+def _attach_trial_dataset(submission: dict, upload, note: str) -> None:
+    """Simpan lampiran & catat keterangannya pada pengajuan yang baru dibuat."""
+    from pathlib import Path as _Path
+
+    from orchestrator.trial_dataset_service import (
+        TrialDatasetError, attach_to_submission, store_attachment,
+    )
+
+    if upload is None:
+        return
+    try:
+        info = store_attachment(
+            upload, upload.name,
+            package_name=_Path(submission["stored_path"]).name, note=note)
+        attach_to_submission(submission["id"], info)
+    except (TrialDatasetError, OSError) as exc:
+        # Pengajuannya sendiri SUDAH tercatat; lampiran yang gagal disimpan
+        # tidak membatalkannya — peninjau tetap dapat menguji dengan dataset
+        # platform.
+        st.warning(error_message(exc))
+
+
 def _render_valid_followup(result: dict, form: dict) -> None:
     """Unduh + cuplikan registry terisi metadata + panduan aktivasi manual."""
     st.divider()
-    st.info("Paket valid — pipeline **belum aktif**, menunggu aktivasi manual.")
+    st.info(t("ap.msg_valid_not_active"))
 
     st.markdown("Unduh berkas tervalidasi")
     cols = st.columns(min(3, len(result["files"])) or 1)
@@ -604,11 +943,12 @@ def _render_valid_followup(result: dict, form: dict) -> None:
             key="contrib_login_stage",
         )
     else:
-        if st.button("Ajukan untuk ditinjau", key="contrib_submit_pipeline",
+        # Lampiran dikumpulkan SEBELUM tombol: nilainya harus sudah ada saat
+        # pengajuan dibuat.
+        trial_upload, trial_note = _render_trial_dataset_form()
+        if st.button(t("ap.btn_submit_review"), key="contrib_submit_pipeline",
                      type="primary",
-                     help="Paket diajukan untuk ditinjau Research Admin. "
-                          "Menyetujui menandai paket sebagai layak — "
-                          "pendaftaran ke registry tetap dilakukan manual."):
+                     help=t("ap.help_submit_review")):
             # Nama kelas entry point dibaca STATIS dari AST — dibutuhkan
             # peninjau untuk mendaftarkan pipeline saat menyetujui.
             static_meta = extract_registry_metadata(entry_item["source"],
@@ -631,10 +971,9 @@ def _render_valid_followup(result: dict, form: dict) -> None:
             except (AuthError, OSError) as e:
                 st.error(f"Gagal mengajukan: {e}")
             else:
-                st.success(
-                    f"Diajukan sebagai pengajuan #{submission['id']}. "
-                    f"Menunggu peninjauan Research Admin — pipeline ini "
-                    f"**belum** aktif dan belum dapat dijalankan.")
+                _attach_trial_dataset(submission, trial_upload, trial_note)
+                st.success(t("ap.msg_submitted_n",
+                                  number=submission["id"]))
 
     st.divider()
     entry = next(f for f in result["files"] if f["role"] == ROLE_ENTRY)
@@ -657,18 +996,17 @@ def _render_valid_followup(result: dict, form: dict) -> None:
 
     st.divider()
     st.markdown("Langkah aktivasi (manual, oleh pengembang)")
-    st.markdown(
+    prose(
         "1. Letakkan berkas paket di `pipelines/<subdirektori riset>/`.\n"
         "2. Import kelas entry point di `config/pipeline_registry.py`.\n"
         "3. Tambahkan entri di atas ke `PIPELINE_REGISTRY`.\n"
         "4. Commit + review lewat git.\n"
-        "5. Rebuild/restart aplikasi & worker."
-    )
-    st.markdown(
-        "Validasi statis menyaring masalah umum, bukan jaminan mutlak — "
-        "tinjauan manusia tetap diperlukan. Platform tidak menulis ke registry "
-        "atau ke `pipelines/`, dan tidak menjalankan berkas yang diunggah."
-    )
+        "5. Rebuild/restart aplikasi & worker.",
+        key="activation_steps")
+    prose(
+        t("ap.note_static_not_absolute") + " "
+        + t("ap.note_no_registry_write"),
+        key="activation_note")
 
 
 # ── Jalur pipeline ────────────────────────────────────────────────────────
@@ -685,7 +1023,7 @@ def _dataset_label(dataset_type: str) -> str:
 
 
 def _render_pipeline_flow() -> None:
-    st.subheader("Unggah Pipeline")
+    st.subheader(t("ap.sec_upload_pipeline"))
     _render_pipeline_requirements()
     st.divider()
 
@@ -695,7 +1033,7 @@ def _render_pipeline_flow() -> None:
     may_upload = _render_upload_gate("pipeline")
 
     uploaded = st.file_uploader(
-        "Berkas pipeline", type=["py"], accept_multiple_files=True,
+        t("ap.lbl_pipeline_files"), type=["py"], accept_multiple_files=True,
         key="contrib_pipeline_files", disabled=not may_upload,
         help="Boleh lebih dari satu berkas `.py`. Tepat satu di antaranya "
              "menjadi entry point.",
@@ -713,30 +1051,29 @@ def _render_pipeline_flow() -> None:
                 size = 0
             cols[0].markdown(f"`{f.name}` · {format_size(size)}")
             descriptions[f.name] = cols[1].text_input(
-                "Peran berkas", key=f"contrib_desc_{f.name}",
+                t("ap.lbl_file_role"), key=f"contrib_desc_{f.name}",
                 placeholder="mis. entry point / helper preprocessing",
-                help="Penjelasan singkat untuk peninjau.",
+                help=t("ap.help_file_role"),
             )
 
     st.divider()
-    st.markdown("**Metadata pipeline** — mengisi cuplikan entri registry; "
-                "tidak memengaruhi hasil validasi.")
+    st.markdown(t("ap.note_metadata"))
     c1, c2 = st.columns(2)
-    name = c1.text_input("Nama pipeline", key="contrib_meta_name",
+    name = c1.text_input(t("ap.lbl_pipeline_name"), key="contrib_meta_name",
                          placeholder="mis. Random Forest — HIKARI2021")
     dtype_options = list(supported_datasets()) + [_OTHER_DATASET_OPTION]
     dtype_choice = c2.selectbox(
-        "Research pipeline", dtype_options, index=None,
+        t("ap.lbl_research_pipeline"), dtype_options, index=None,
         format_func=_dataset_label, placeholder="Pilih research pipeline…",
         key="contrib_meta_dtype",
         help="Menentukan `dataset_type` pada entri registry.",
     )
     algorithm = c1.text_input("Algoritma", key="contrib_meta_algo",
                               placeholder="mis. Random Forest")
-    paper = c2.text_input("Paper / rujukan", key="contrib_meta_paper",
+    paper = c2.text_input(t("ap.lbl_paper"), key="contrib_meta_paper",
                           placeholder="mis. Rayyan (2024), Universitas Hasanuddin")
-    notes = st.text_area("Catatan", key="contrib_meta_notes", height=80,
-                         help="Opsional — ikut ditampilkan pada laporan.")
+    notes = st.text_area(t("ap.lbl_note"), key="contrib_meta_notes", height=80,
+                         help=t("ap.help_optional_report"))
 
     form = {
         "name": name,
@@ -746,7 +1083,7 @@ def _render_pipeline_flow() -> None:
         "notes": notes,
     }
 
-    if st.button("Unggah & Validasi", type="primary", key="contrib_validate",
+    if st.button(t("ap.btn_upload_validate"), type="primary", key="contrib_validate",
                  disabled=not may_upload):
         problems = []
         if not uploaded:
@@ -927,9 +1264,8 @@ def _render_dataset_requirements_overview() -> None:
 
 
 def _render_dataset_flow() -> None:
-    st.subheader("Tambah Dataset")
-    st.markdown("Kecocokan berkas diperiksa terhadap seluruh research pipeline "
-                "sekaligus — tidak perlu memilih pipeline lebih dulu.")
+    st.subheader(t("ap.sec_add_dataset"))
+    st.markdown(t("ap.note_checked_against_all"))
     _render_dataset_requirements_overview()
 
     st.divider()
@@ -991,12 +1327,10 @@ def _render_dataset_upload_tab() -> None:
     st.divider()
     target = _dataset_target_path(safe)
     if target.exists():
-        st.error(f"`{safe}` sudah ada di `storage/datasets/`. Ganti nama "
-                 f"berkasnya — platform tidak menimpa dataset yang sudah ada.")
+        st.error(t("ap.err_file_exists", filename=safe))
         return
     if not diag.get("compatible_types"):
-        st.warning("Belum cocok dengan research pipeline mana pun — tetap "
-                   "boleh disimpan.")
+        st.warning(t("ap.msg_not_compatible_yet"))
     st.markdown(f"Tujuan: `{target}`")
 
     user = current_user()
@@ -1013,10 +1347,9 @@ def _render_dataset_upload_tab() -> None:
     # pengaman sebelum titik ini tetap berlaku (batas ukuran, sanitasi nama,
     # penolakan menimpa, ekstensi yang diizinkan), dan `save_dataset_upload`
     # tetap memanggil `require_upload` sehingga izinnya ditegakkan di lapis aksi.
-    if st.button("Simpan dataset", type="primary",
+    if st.button(t("ap.btn_save_dataset"), type="primary",
                  key="contrib_submit_dataset",
-                 help="Tersimpan langsung setelah berkas lolos pemeriksaan "
-                      "kecocokan — dataset tidak melewati tinjauan."):
+                 help=t("ap.help_dataset_direct")):
         try:
             written = save_dataset_upload(uploaded, target, user=user)
         except (AuthError, PermissionDenied, OSError) as e:
@@ -1026,8 +1359,8 @@ def _render_dataset_upload_tab() -> None:
         # penelusuran folder berikutnya dipaksa membaca ulang dari disk.
         from ui.views.run_experiment import invalidate_dataset_options
         invalidate_dataset_options()
-        st.success(f"Tersimpan sebagai `{safe}` ({format_size(written)}). "
-                   f"Sudah dapat dipilih di halaman Run Experiment.")
+        st.success(t("ap.msg_saved_as", filename=safe,
+                            size=format_size(written)))
 
 
 def _render_dataset_server_tab() -> None:
@@ -1037,8 +1370,7 @@ def _render_dataset_server_tab() -> None:
     # Pembacaan folder memakai mekanisme yang SAMA dengan halaman Run Experiment.
     from ui.views.run_experiment import _all_dataset_options, _diagnose_selected
 
-    st.markdown("Berkas yang sudah berada di `storage/datasets/`. Tidak ada "
-                "penyalinan dan tidak ada batas ukuran.")
+    st.markdown(t("ap.help_register_existing"))
     try:
         options = [p for p, _dtype in _all_dataset_options()]
     except Exception as e:                 # pragma: no cover - defensive
@@ -1056,12 +1388,12 @@ def _render_dataset_server_tab() -> None:
             return Path(path).name
 
     chosen = st.selectbox("Berkas dataset", options, index=None,
-                          format_func=_label, placeholder="Pilih berkas…",
+                          format_func=_label, placeholder=t("ap.ph_pick_file"),
                           key="contrib_server_dataset")
     if not chosen:
         return
 
-    if st.button("Periksa kecocokan dataset", type="primary",
+    if st.button(t("ap.btn_check_compat"), type="primary",
                  key="contrib_check_server"):
         st.session_state["_contrib_server_checked"] = chosen
     if st.session_state.get("_contrib_server_checked") != chosen:
@@ -1108,7 +1440,7 @@ def _render_dataset_profile(profile: dict, filename: str, size_bytes: int) -> No
     # Jumlah baris TIDAK pernah diklaim sebagai total bila hanya dari sampel.
     rows_text = f"≥ {rows:,} (sampel)" if profile.get("sampled") else f"{rows:,}"
 
-    st.subheader("Profil dataset")
+    st.subheader(t("ap.sec_dataset_profile"))
 
     pairs: list[tuple[str, str]] = [
         ("Berkas", f"`{filename}`"),
@@ -1191,10 +1523,9 @@ def _render_compatibility(diag: dict) -> None:
         return
 
     compatible = diag.get("compatible_types") or []
-    st.subheader("Kompatibilitas")
+    st.subheader(t("ap.sec_compatibility"))
     if not compatible:
-        st.warning("Belum cocok dengan research pipeline mana pun. Penyebab dan "
-                   "langkah perbaikannya per pipeline ada di bawah.")
+        st.warning(t("ap.msg_no_match_anywhere"))
 
     for dtype, result in _sorted_results(diag):
         # Satu blok per research pipeline; nama beratribusi ringkas, bukan ID mentah.
@@ -1232,14 +1563,14 @@ def _render_compatibility(diag: dict) -> None:
 # ── Entry point halaman ───────────────────────────────────────────────────
 
 def render() -> None:
-    st.title("Add Pipeline & Dataset")
+    st.title(t("page.contribute"))
 
     mode = st.session_state.get(_MODE_KEY)
     if mode not in ("pipeline", "dataset", "users", "review"):
         _render_choice_boxes()
         return
 
-    if st.button("← Kembali", key="contrib_back"):
+    if st.button(t("ap.btn_back"), key="contrib_back"):
         for key in (_MODE_KEY, _RESULT_KEY, _FORM_KEY):
             st.session_state.pop(key, None)
         st.rerun()

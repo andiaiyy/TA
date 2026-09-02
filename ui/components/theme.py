@@ -74,6 +74,36 @@ STACK_WIDTH = "40rem"
 # Lebar minimum tabel perbandingan sebelum wadahnya menggulir mendatar.
 CMP_MIN_W = "34rem"
 
+# ── PROSA vs BLOK DATA ───────────────────────────────────────────────────
+# Batas lebar baca HANYA berlaku untuk prosa (kalimat & paragraf penjelasan).
+# Blok data — tabel, blok kode, tampilan perbandingan, daftar berkas, pasangan
+# label-nilai, baris katalog, formulir — mengikuti lebar penuh kolomnya.
+# `ch` mengikat batasnya pada lebar KARAKTER, jadi ia ikut skala huruf pengguna
+# alih-alih terkunci pada piksel.
+PROSE_W = "78ch"
+#: Awalan kunci container penanda prosa (lihat `sections.prose`).
+PROSE_KEY = "ids-prose-"
+
+# Lebar minimum kolom teks diff sebelum wadahnya menggulir mendatar.
+DIFF_MIN_W = "30rem"
+
+# ── Tabel baku ───────────────────────────────────────────────────────────
+# Tinggi baris, padding sel, dan tinggi maksimum wadah — SATU nilai untuk
+# seluruh tabel, sehingga dua tabel di halaman yang sama tidak mungkin punya
+# kepadatan yang berbeda. Semuanya rem, bukan piksel.
+TABLE_ROW_H = "2.2rem"
+TABLE_PAD = "0.38rem 0.5rem"
+#: Wadah tabel menggulir setelah setinggi ini — daftar panjang tidak lagi
+#: mendorong seluruh halaman ke bawah.
+TABLE_MAX_H = "26rem"
+#: Lebar minimum sebelum wadahnya menggulir mendatar.
+TABLE_MIN_W = "34rem"
+
+# Huruf monospace untuk kode & diff: lebar karakter seragam supaya baris yang
+# sebanding benar-benar sejajar. Daftar cadangan, bukan satu nama font.
+MONO_STACK = ('ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, '
+              '"Liberation Mono", monospace')
+
 # Testid tata letak Streamlit. Seperti SEG_GROUP di atas, nilainya diambil dari
 # bundel frontend yang terpasang dan dijaga test — bukan ditebak.
 COL_ROW = "stHorizontalBlock"
@@ -84,7 +114,7 @@ MAIN_BLOCK = "stMainBlockContainer"
 # Awalan kunci container kartu katalog. Didefinisikan DI SINI karena theme
 # adalah lapis dasar; modul katalog mengimpornya dari sini, bukan sebaliknya,
 # sehingga CSS dan kode tidak mungkin memakai awalan yang berbeda.
-CARD_KEY_PREFIX = "cat_card_"
+ROW_KEY_PREFIX = "cat_row_"
 
 # Transisi sorot: cukup terasa, tidak sampai mengganggu.
 HOVER_MS = 150
@@ -175,10 +205,24 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     line-height: 1.55;
     opacity: .78;                       /* cukup redup untuk sekunder, tetap terbaca */
 }}
-/* Teks isi: ukuran tetap & lebar dibatasi agar nyaman dibaca. */
-[data-testid="stMarkdownContainer"] p {{
-    font-size: {FONT_BODY};
-    max-width: 78ch;
+/* Teks isi: ukuran tetap. Lebar TIDAK dibatasi di sini.
+   ── Kenapa batas lebarnya pindah ────────────────────────────────────────
+   Dulu baris ini juga memuat `max-width: 78ch`, dan itu ATURAN UMUM: ia
+   mengenai SETIAP paragraf di seluruh aplikasi. Akibatnya blok data yang
+   kebetulan ditulis sebagai markdown — daftar berkas, baris label-nilai,
+   keterangan di bawah tabel — ikut berhenti di ~3/4 lebar kolom dan terlihat
+   seperti salah render, bukan seperti keputusan.
+
+   Batas lebar kini HANYA melekat pada prosa, lewat penanda `.ids-prose`
+   (lihat `sections.prose`). Blok data mengikuti lebar penuh kolomnya. */
+[data-testid="stMarkdownContainer"] p {{ font-size: {FONT_BODY}; }}
+
+/* PROSA: kalimat penjelasan & paragraf. Hanya di sinilah lebar dibatasi,
+   supaya mata tidak menempuh baris yang terlalu panjang. Kaitannya kelas
+   `st-key-<key>` pada container berkunci — hook yang sama dengan baris
+   katalog, bukan testid tebakan. */
+[class*="st-key-{PROSE_KEY}"] [data-testid="stMarkdownContainer"] p {{
+    max-width: {PROSE_W};
 }}
 
 /* ── Tabel: teks rata kiri, angka rata kanan ───────────────────────────── */
@@ -298,40 +342,58 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     gap: .45rem;                         /* chip tidak berdempetan */
     row-gap: .5rem;
 }}
-/* ── Kartu katalog ─────────────────────────────────────────────────────
-   Tiap research pipeline berada dalam WADAH BERKOTAK, bukan sekadar dipisah
-   garis. Kaitannya adalah kelas `st-key-<key>` yang ditambahkan Streamlit pada
-   container berkunci (lihat pipeline_catalog.card_key) — bukan testid tebakan.
+/* ── Daftar baris katalog ──────────────────────────────────────────────
+   TIDAK ada wadah berkotak per research pipeline. Yang memisahkan satu baris
+   dari baris berikutnya adalah GARIS TIPIS selebar penuh area konten plus
+   hierarki jarak — bukan kotak.
 
-   Hierarki jaraknya: jarak DI DALAM kartu ({GAP_IN_BLOCK}) jauh lebih kecil
-   daripada jarak ANTAR kartu ({GAP_BETWEEN_BLOCKS}), sehingga satu kartu
-   terbaca sebagai satu kesatuan. */
-[class*="st-key-{CARD_KEY_PREFIX}"] {{
-    border-radius: 12px;
-    background: rgba(127,127,127,.05);   /* sedikit beda dari latar halaman */
-    padding: calc({GAP_IN_BLOCK} * 1.2);
-    /* Jarak ANTAR kartu — lebih besar daripada jarak di dalamnya. */
-    margin-bottom: {GAP_BETWEEN_BLOCKS};
-    /* Teks tetap nyaman dibaca pada layar lebar. */
-    max-width: {CARD_MAX_W};
-    transition: background-color {HOVER_MS}ms ease,
-                border-color {HOVER_MS}ms ease;
+   Kaitannya kelas `st-key-<key>` yang ditambahkan Streamlit pada container
+   berkunci (lihat pipeline_catalog.row_key) — bukan testid tebakan.
+
+   Hierarki jarak inilah yang membuat pengelompokan terbaca tanpa kotak:
+   jarak DI DALAM baris rapat (lihat `.ids-cat-*` di pipeline_catalog),
+   jarak ANTAR baris longgar ({GAP_SECTION} di atas & di bawah garis). */
+[class*="st-key-{ROW_KEY_PREFIX}"] {{
+    /* BARIS KATALOG = blok data: mengikuti lebar penuh kolomnya.
+       Variabelnya tetap ada sebagai satu titik kendali untuk `.ids-cat-*`,
+       tetapi nilainya kini `none`. Sebelumnya {CARD_MAX_W}, yang membuat
+       judul, penjelasan, dan chip berhenti di ~3/4 lebar sementara garis
+       pemisah di bawahnya membentang penuh — ketidakselarasan itulah yang
+       terbaca sebagai kesalahan. Elipsis `.ids-cat-note` tetap bekerja: ia
+       memotong pada lebar NYATA, jadi kolom yang lebih lebar menampilkan
+       lebih banyak teks alih-alih memotong di titik yang sama. */
+    --ids-cat-textw: none;
+    /* Garis pemisah SELEBAR PENUH — sengaja tidak ikut dibatasi max-width,
+       karena yang dibatasi hanyalah blok teksnya. */
+    border-bottom: 1px solid rgba(127,127,127,.22);
+    padding: {GAP_SECTION} .25rem;
+    margin: 0;
+    transition: background-color {HOVER_MS}ms ease;
 }}
-/* Sorot HALUS saat kursor melintas: latar & garis menguat sedikit, tanpa
-   gerakan atau bayangan. */
-[class*="st-key-{CARD_KEY_PREFIX}"]:hover {{
-    background: rgba(127,127,127,.10);
-    border-color: rgba(127,127,127,.45);
+/* Sorot SANGAT tipis saat kursor melintas — menandakan baris dapat dituju,
+   tanpa gerakan, bayangan, maupun garis tambahan. */
+[class*="st-key-{ROW_KEY_PREFIX}"]:hover {{
+    background: rgba(127,127,127,.06);
 }}
-/* Elemen terakhir di dalam kartu tidak perlu jarak bawah tambahan. */
-[class*="st-key-{CARD_KEY_PREFIX}"] [data-testid="stHorizontalBlock"] {{
+/* Baris terakhir tidak perlu garis penutup. */
+[class*="st-key-{ROW_KEY_PREFIX}"]:last-of-type {{ border-bottom: none; }}
+/* Tombol adalah elemen TERAKHIR dalam baris — jarak bawahnya sudah dipegang
+   padding baris itu sendiri. */
+[class*="st-key-{ROW_KEY_PREFIX}"] [data-testid="stHorizontalBlock"] {{
     margin-bottom: 0;
 }}
 
-/* Tombol aksi katalog: lebar & tinggi SERAGAM di semua blok, sejajar. */
+/* Tombol aksi katalog: SERAGAM antar blok, tetapi luwes terhadap lebar.
+   Mengisi lebar kolomnya sampai batas {CATALOG_BTN_W}; pada kolom yang lebih
+   sempit ia menyusut mengikuti kolom alih-alih meluber. Kolomnya sendiri
+   menumpuk menjadi vertikal di bawah {STACK_WIDTH} (aturan stColumn di atas),
+   jadi tombol berdampingan saat lebar cukup dan menumpuk saat sempit. */
 [class*="st-key-cat_run_"] button, [class*="st-key-cat_detail_"] button {{
-    width: {CATALOG_BTN_W};
+    width: 100%;
+    max-width: {CATALOG_BTN_W};
+    min-width: 0;
     min-height: 2.3rem;
+    white-space: normal;                 /* label membungkus, tidak terpotong */
 }}
 /* Aksi sekunder lebih tenang daripada aksi utama. */
 [class*="st-key-cat_detail_"] button {{
@@ -380,6 +442,23 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     margin-top: auto;
 }}
 .ids-mode-anchor {{ display: none; }}
+
+/* Label mode + dropdown-nya adalah SATU kesatuan: baris label menyebut mode
+   yang sedang berlaku, dropdown di bawahnya yang menggantinya. Jaraknya
+   dirapatkan supaya label tidak terbaca mengambang di antara pengalih bahasa
+   dan dropdown. Jarak ke unsur DI ATASNYA justru dilebihkan sedikit, agar
+   pasangan ini terpisah jelas dari pengalih bahasa. */
+.ids-mode-label {{ display: none; }}
+[data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"]
+    > *:has(.ids-mode-label) {{
+    margin-top: .5rem;
+    margin-bottom: 0;
+}}
+[data-testid="stSidebarUserContent"] [data-testid="stVerticalBlock"]
+    > *:has(.ids-mode-label) + * {{
+    margin-top: .1rem;
+    margin-bottom: .1rem;
+}}
 
 /* ── Pemilih mode di sidebar: daftar pilihan yang ringkas ──────────────── */
 /* Popover masih dipakai di halaman lain (mis. pemilih kolom & filter di
@@ -516,7 +595,11 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     border-radius: 10px;
     background: rgba(127,127,127,.05);   /* sedikit beda dari latar halaman */
     overflow: hidden;                    /* sudut membulat ikut memotong sel */
-    max-width: {CARD_MAX_W};
+    /* BLOK DATA: mengikuti lebar penuh kolomnya. Dulu dibatasi {CARD_MAX_W},
+       sehingga kotak angka berhenti di ~3/4 lebar dan tampak seperti cacat
+       render. Sel-selnya sendiri sudah punya lebar minimum, jadi melebar
+       berarti kolomnya bertambah — bukan angkanya jadi renggang. */
+    max-width: none;
 }}
 .ids-count {{
     display: flex;
@@ -583,6 +666,152 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
 /* Tabel perbandingan punya lebar minimum supaya kolomnya tetap terbaca; bila
    tidak muat, wadahnya yang menggulir. */
 .ids-cmp {{ min-width: {CMP_MIN_W}; }}
+
+/* ── Tabel baku (`ids-tbl`) ────────────────────────────────────────────
+   SATU definisi untuk seluruh tabel di bagian Peninjauan Pengajuan, di
+   stylesheet GLOBAL — bukan blok <style> yang disuntikkan per tampilan.
+
+   Itu bedanya dengan `ids-cmp`: aturan `ids-cmp` hidup sebagai <style> di
+   dalam dialog perbandingan pada halaman Progress & Status, jadi tabel yang
+   memakai kelas itu di halaman LAIN tampil tanpa gaya sama sekali — persis
+   yang terjadi pada tabel riwayat versi. Aturan di bawah tidak bisa
+   "tertinggal" karena ia bagian dari stylesheet yang selalu terpasang. */
+.ids-tbl-scroll {{
+    /* Gulir MENDATAR saat kolomnya banyak, VERTIKAL saat barisnya panjang —
+       tidak memampat sampai teks terpotong. */
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: {TABLE_MAX_H};
+    -webkit-overflow-scrolling: touch;
+}}
+.ids-tbl {{
+    width: 100%;                         /* BLOK DATA: lebar penuh kolomnya */
+    min-width: {TABLE_MIN_W};
+    border-collapse: collapse;
+    /* `fixed` membuat lebar kolom ditentukan colgroup, bukan oleh isi sel.
+       Tanpa ini lebar kolom MELOMPAT antar tabel dan antar render begitu ada
+       satu nilai yang panjang. */
+    table-layout: fixed;
+    font-size: {FONT_BODY};
+}}
+/* Tinggi baris & padding SERAGAM untuk th maupun td. */
+.ids-tbl th, .ids-tbl td {{
+    padding: {TABLE_PAD};
+    line-height: 1.45;
+    height: {TABLE_ROW_H};
+    vertical-align: middle;
+    text-align: left;                    /* teks rata kiri, bawaan */
+    /* Nilai panjang DIPENDEKKAN, tidak dibungkus — membungkus membuat tinggi
+       baris tidak rata. Nilai penuhnya ada di atribut `title`. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* SATU gaya garis pemisah: tipis, sama di seluruh tabel. Tidak ada
+       campuran tebal-tipis. */
+    border-bottom: 1px solid rgba(127,127,127,.22);
+}}
+/* Header dibedakan lewat BOBOT + LATAR, dan tetap terlihat saat digulir. */
+.ids-tbl thead th {{
+    font-weight: {WEIGHT_STRONG};
+    background: rgba(127,127,127,.11);
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}}
+/* Angka rata KANAN dengan digit lebar-tetap supaya sejajar antar baris. */
+.ids-tbl th.ids-tbl-num, .ids-tbl td.ids-tbl-num {{
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+}}
+.ids-tbl code {{ font-family: {MONO_STACK}; font-size: inherit; }}
+/* Baris terakhir tidak perlu garis penutup — wadahnya sudah membatasi. */
+.ids-tbl tbody tr:last-child td {{ border-bottom: none; }}
+/* Baris yang ditonjolkan (mis. versi aktif): latar, bukan garis tebal. */
+.ids-tbl tr.ids-tbl-on td {{
+    background: rgba(127,127,127,.13);
+    font-weight: {WEIGHT_STRONG};
+}}
+/* Keadaan kosong & baris hitungan: tenang, dan BOLEH membungkus karena ia
+   kalimat, bukan nilai kolom. */
+.ids-tbl td.ids-tbl-empty {{
+    opacity: .7;
+    white-space: normal;
+    border-bottom: none;
+}}
+
+/* Baris aksi pada blok pipeline kontribusi: tombolnya SEragam.
+   Label seperti "Aktifkan kembali" jauh lebih panjang daripada "Riwayat";
+   tanpa tinggi minimum bersama, yang membungkus jadi lebih tinggi daripada
+   tetangganya dan barisnya terlihat miring. `white-space: normal` membuatnya
+   membungkus alih-alih terpotong. Kaitannya kunci container yang memang sudah
+   ada (lihat `_render_pipeline_block`). */
+[class*="st-key-mp_active_"] .stButton > button {{
+    min-height: 2.3rem;
+    white-space: normal;
+}}
+
+/* ── Diff versi: baris ditambah / dihapus ──────────────────────────────
+   Warna memakai lapisan TEMBUS PANDANG di atas latar halaman, jadi satu palet
+   bekerja di tema terang maupun gelap — tidak ada dua definisi yang bisa
+   berbeda sendiri.
+
+   Warna BUKAN satu-satunya pembeda. Tiap baris membawa kolom penanda `+`/`−`
+   dan garis tebal di tepi kiri, sehingga tetap terbaca pada buta warna, mode
+   kontras tinggi, atau cetak hitam-putih. */
+.ids-diff-scroll {{ overflow-x: auto; overflow-y: hidden; }}
+.ids-diff {{
+    width: 100%;                         /* BLOK DATA: lebar penuh kolomnya */
+    min-width: {DIFF_MIN_W};
+    border-collapse: collapse;
+    font-family: {MONO_STACK};
+    /* Memakai tingkat "keterangan" yang SUDAH ADA, bukan ukuran baru: tabel
+       ini padat, tetapi menambah tingkat teks kelima hanya untuk satu tabel
+       akan merusak sistem empat tingkat yang berlaku di seluruh halaman. */
+    font-size: {FONT_CAPTION};
+    line-height: 1.5;
+}}
+.ids-diff th {{
+    font-family: inherit;
+    font-size: {FONT_CAPTION};
+    font-weight: {WEIGHT_STRONG};
+    opacity: .7;
+    text-align: right;
+    padding: .1rem .45rem;
+    border-bottom: 1px solid rgba(127,127,127,.3);
+}}
+.ids-diff td {{ padding: 0 .45rem; vertical-align: top; }}
+/* Nomor baris kedua sisi: rata kanan, lebar sesempit isinya, tidak dapat
+   diseleksi ikut terbawa saat kode disalin. */
+.ids-diff .ids-diff-n {{
+    width: 1%;
+    white-space: nowrap;
+    text-align: right;
+    opacity: .5;
+    user-select: none;
+    font-variant-numeric: tabular-nums;
+    border-right: 1px solid rgba(127,127,127,.16);
+}}
+/* Kolom penanda tekstual — inilah yang menggantikan warna bila warna hilang.
+   Garis tepinya memakai `border-left`, BUKAN `box-shadow`: bayangan di
+   halaman ini disediakan khusus untuk menandai keadaan AKTIF, dan memakainya
+   di sini akan mengaburkan arti itu. */
+.ids-diff .ids-diff-m {{
+    width: 1%;
+    white-space: pre;
+    text-align: center;
+    font-weight: {WEIGHT_STRONG};
+    user-select: none;
+    padding: 0 .3rem;
+    border-left: .18rem solid transparent;
+}}
+.ids-diff .ids-diff-t {{ white-space: pre; overflow-wrap: normal; }}
+.ids-diff-add {{ background: rgba(46,160,67,.16); }}
+.ids-diff-del {{ background: rgba(248,81,73,.16); }}
+.ids-diff-add .ids-diff-m {{ border-left-color: rgba(46,160,67,.9); }}
+.ids-diff-del .ids-diff-m {{ border-left-color: rgba(248,81,73,.9); }}
+/* Bagian tak berubah: tenang, supaya perubahan yang menonjol. */
+.ids-diff-equal {{ opacity: .72; }}
 
 @media (prefers-reduced-motion: reduce) {{
     .stButton > button, .stDownloadButton > button,

@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 
 import streamlit as st
+from ui.i18n import t
 
 from ui.components.dashboard import (
     elapsed_seconds, format_elapsed, progress_view, select_running,
@@ -54,8 +55,15 @@ TITLE_CHARS = 24
 SUBTITLE_CHARS = 20
 
 # Judul blok — gaya seragam dengan judul blok lain di sidebar.
+# Teks bahasa BAWAAN. Konstanta modul dievaluasi sekali saat impor, jadi ia
+# tidak boleh menjadi hasil `t()` — nilainya akan terkunci pada bahasa yang
+# kebetulan aktif saat modul pertama diimpor. Perenderannya memanggil `t()`;
+# konstanta ini tetap ada sebagai nilai bahasa Indonesia dan sebagai kunci
+# terjemahannya.
 TITLE_TEXT = "Sedang berjalan"
+TITLE_KEY = "sidebar.progress_title"
 EMPTY_TEXT = "Tidak ada eksperimen berjalan"
+EMPTY_KEY = "sidebar.progress_empty"
 UNAVAILABLE_TEXT = "Status tidak tersedia"
 
 
@@ -208,14 +216,14 @@ def render_progress_block() -> None:
     Seluruh baris lewat ``render_line`` supaya sisipan kirinya sama persis
     dengan item navigasi dan blok identitas.
     """
-    render_line(TITLE_TEXT, muted=True, small=True)
+    render_line(t(TITLE_KEY), muted=True, small=True)
     view = load_progress_view()
 
     if view.get("error"):
         render_line(UNAVAILABLE_TEXT, muted=True, small=True)
         return
     if not view["rows"]:
-        render_line(EMPTY_TEXT, muted=True, small=True)
+        render_line(t(EMPTY_KEY), muted=True, small=True)
         return
 
     for row in view["rows"]:

@@ -7,6 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 import streamlit as st
 
+from ui.i18n import t
+from ui.components.validator_messages import (
+    diagnostic_message, diagnostic_title,
+)
+
 logger = logging.getLogger(__name__)
 import pandas as pd
 
@@ -34,7 +39,7 @@ from ui.components.page_flags import wait_before_refresh
 # ulang berhenti (eksperimennya sendiri tidak disentuh).
 PAGE_NAME = 'Run Experiment'
 from ui.components.sections import (
-    render_counts, render_facts, render_section, section_body,
+    prose, render_counts, render_facts, render_section, section_body,
 )
 from streamlit_option_menu import option_menu
 from contracts.dataset_schemas import get_schema
@@ -478,10 +483,7 @@ def _render_file_picker(dtype: str) -> None:
         return
 
     if not files:
-        st.info(
-            f"Belum ada berkas dataset bertype **{dtype}** (`{ext_display}`) di "
-            f"`storage/datasets/`. Tambahkan berkas ke folder tersebut untuk memulai."
-        )
+        st.info(t("re.empty_no_file_of_type", dtype=dtype, ext=ext_display))
         return
 
     # Build labels with size; skip any file whose stat fails so a single bad
@@ -504,14 +506,14 @@ def _render_file_picker(dtype: str) -> None:
         default_idx = options.index(prior)
 
     chosen = st.radio(
-        f"Berkas yang cocok di `storage/datasets/` (filter: `{ext_display}`):",
+        t("re.prompt_matching_files", ext=ext_display),
         options=options,
         format_func=lambda p: labels[p],
         index=default_idx,
         key=radio_key,
     )
 
-    if st.button("Use this dataset", type="primary", use_container_width=False):
+    if st.button(t("re.btn_use_dataset"), type="primary", use_container_width=False):
         st.session_state["dataset_type"] = dtype
         st.session_state["dataset_path"] = chosen
         # Clear downstream state so a stale validation/result does not bleed
@@ -582,7 +584,7 @@ def research_about_groups(research: str, research_label: str, info: dict,
     # 3. Cakupan & metode — kelompok yang paling jarang dibutuhkan.
     anti = info.get("anti_leakage")
     cakupan = [
-        ("Cakupan penelitian sumber", attribution.get("scope")),
+        (t("re.lbl_research_scope"), _attribution_scope(attribution)),
         ("Feature selection", info.get("feature_selection")),
         ("Fokus aplikasi/trafik", info.get("app")),
         ("Anti-leakage",
@@ -685,6 +687,28 @@ _DATASET_REQUIREMENTS: dict[str, dict] = {
 }
 
 
+def _attribution_scope(attribution: dict) -> str:
+    """Cakupan penelitian pada bahasa aktif.
+
+    Ini DESKRIPSI yang ditulis platform, bukan judul karya — judulnya ada di
+    `display_name` dan tetap dalam bahasa aslinya.
+    """
+    key = (attribution or {}).get("scope_key")
+    return t(key) if key else (attribution or {}).get("scope", "")
+
+
+def _requirement_text(dataset_type: str, field: str) -> str:
+    """Satu keterangan persyaratan pada bahasa aktif.
+
+    `_DATASET_REQUIREMENTS` tetap menjadi sumber strukturnya dan TIDAK diubah;
+    pemetaan ke katalog hidup di `ui.components.instructions`, satu tempat
+    untuk kedua halaman yang menampilkannya.
+    """
+    from ui.components.instructions import dataset_requirement_text
+
+    return dataset_requirement_text(dataset_type, field)
+
+
 def _dataset_extensions(dataset_type: str) -> tuple[str, ...]:
     """Ekstensi berkas yang diterima untuk sebuah dataset_type — dibaca dari
     _EXT_MAP, mekanisme yang SAMA dengan file picker, jadi panel persyaratan
@@ -745,14 +769,12 @@ def _render_dataset_requirements(dataset_type: str) -> None:
 
     st.markdown("---")
     st.markdown("**Persyaratan Dataset**")
-    st.caption("Mengikuti research pipeline, bukan algoritmanya.")
+    st.caption(t("re.note_follows_pipeline"))
 
     if not req:
         # Tipe dataset baru/tak dikenal: tetap jujur, tetap diturunkan.
-        st.markdown(
-            f"- **Format berkas:** {ext_text}\n"
-            f"- **Kolom label (target):** `{label_col}`"
-        )
+        st.markdown(t("re.req_unknown_format", exts=ext_text) + "\n"
+                    + t("re.req_unknown_label", column=label_col))
         return
 
     # ── 1-3. Format, kolom label, sifat fitur (tabel ringkas) ─────────────
@@ -760,45 +782,42 @@ def _render_dataset_requirements(dataset_type: str) -> None:
         features, drops, class_names = _hikari_column_facts()
         benign = class_names[0] if len(class_names) > 1 else "benign"
         malicious = class_names[1] if len(class_names) > 1 else "malicious"
-        label_text = f"`{label_col}` — `0` = {benign}, `1` = {malicious}"
-        feature_text = req["feature_nature"]
+        label_text = t("re.req_label_hikari", column=label_col,
+                       benign=benign, malicious=malicious)
+        feature_text = _requirement_text(dataset_type, "feature_nature")
         if features:
-            feature_text += f" Skema mencatat **{len(features)} kolom fitur**."
+            feature_text = t("re.req_features_counted", nature=feature_text,
+                             count=len(features))
     else:
         target_final, class_names = _eve_label_facts()
         benign = class_names[0] if len(class_names) > 1 else "benign"
         attack = class_names[1] if len(class_names) > 1 else "attack"
-        label_text = (
-            f"`{label_col}` — dibentuk **oleh pipeline dari alert Suricata** "
-            f"(`event_type` = `alert` atau alert valid)"
-        )
+        # Disusun BERSARANG, bukan disambung: tiap tahap kalimat adalah
+        # entri utuh, sehingga urutan katanya bebas berbeda antar bahasa.
+        label_text = t("re.req_label_eve", column=label_col)
         if target_final:
-            label_text += f", lalu disempurnakan menjadi `{target_final}`"
-        label_text += (
-            f"; `0` = {benign}, `1` = {attack}. Bukan anotasi *ground-truth* "
-            f"eksternal — berkas mentah tidak perlu kolom label."
-        )
+            label_text = t("re.req_label_eve_refined", base=label_text,
+                           target=target_final)
+        label_text = t("re.req_label_eve_tail", base=label_text,
+                       benign=benign, attack=attack)
         features, drops = [], []
-        feature_text = req["feature_nature"]
+        feature_text = _requirement_text(dataset_type, "feature_nature")
 
+    row_unit = _requirement_text(dataset_type, "row_unit")
     st.markdown(
-        "| Aspek | Persyaratan |\n"
+        f"| {t('re.req_col_aspect')} | {t('re.req_col_requirement')} |\n"
         "| --- | --- |\n"
-        f"| **Format berkas** | {ext_text} — {req['row_unit']} |\n"
-        f"| **Kolom label (target)** | {label_text} |\n"
-        f"| **Fitur yang diharapkan** | {feature_text} |"
+        f"| {t('re.req_row_format')} | {ext_text} — {row_unit} |\n"
+        f"| {t('re.req_row_label')} | {label_text} |\n"
+        f"| {t('re.req_row_features')} | {feature_text} |"
     )
 
     if dataset_type == "HIKARI2021" and drops:
-        st.caption(
-            "Kolom non-fitur berikut dibuang otomatis oleh preprocessing "
-            "(boleh ada, boleh tidak — akan diabaikan): "
-            + ", ".join(f"`{c}`" for c in drops)
-            + ". Kolom non-numerik lain juga otomatis dibuang."
-        )
+        st.caption(t("re.req_dropped_columns",
+                     columns=", ".join(f"`{c}`" for c in drops)))
 
     # ── 4. Contoh struktur (nama kolom/field NYATA, nilai ilustratif) ─────
-    st.markdown("**Contoh struktur**")
+    st.markdown(t("re.req_structure_example"))
     if dataset_type == "HIKARI2021":
         # Hanya kolom yang BENAR-BENAR ada di skema yang ditampilkan; bila tidak
         # satu pun cocok, pakai kolom fitur pertama dari skema apa adanya.
@@ -809,10 +828,7 @@ def _render_dataset_requirements(dataset_type: str) -> None:
             header = "…," + ",".join(c for c, _ in pairs) + f",…,{label_col}"
             values = "…," + ",".join(v for _, v in pairs) + ",…,0"
             st.code(f"{header}\n{values}", language="text")
-            st.caption(
-                "Nama kolom diambil dari `contracts/dataset_schemas.py`; nilainya "
-                "ilustratif. `…` = kolom lain — ini **bukan** daftar kolom lengkap."
-            )
+            st.caption(t("re.req_caption_columns"))
     else:
         keys = list(schema.get("expected_top_level_keys") or [])
         vals = req["sample_values"]
@@ -820,34 +836,23 @@ def _render_dataset_requirements(dataset_type: str) -> None:
         ordered.update({k: v for k, v in vals.items() if k not in ordered})
         if ordered:
             st.code(_json.dumps(ordered, ensure_ascii=False), language="json")
-            st.caption(
-                "Nama field diambil dari `expected_top_level_keys` pada "
-                "`contracts/dataset_schemas.py`; nilainya ilustratif. Contoh "
-                "disederhanakan — event lain (mis. `event_type` = `alert` dengan "
-                "objek `alert`) tetap diperlukan karena dipakai untuk membentuk "
-                "label."
-            )
+            st.caption(t("re.req_caption_fields"))
 
     # ── 5. Checklist kecocokan (diturunkan, read-only) ────────────────────
-    st.markdown("**Dataset Anda cocok jika…**")
-    checks = [
-        f"Format berkasnya {ext_text} — {req['row_unit']}.",
-    ]
+    st.markdown(t("re.req_checklist_heading"))
+    checks = [t("re.req_chk_format", exts=ext_text, row_unit=row_unit)]
     if dataset_type == "HIKARI2021":
         checks += [
-            f"Ada kolom label bernama persis `{label_col}` berisi `0`/`1`.",
-            "Kolom fiturnya **numerik** (kolom non-numerik & non-fitur di atas "
-            "otomatis diabaikan).",
-            f"Berisi **dua kelas**: `0` = {benign} dan `1` = {malicious}.",
+            t("re.req_chk_label_hikari", column=label_col),
+            t("re.req_chk_numeric"),
+            t("re.req_chk_two_classes_hikari", benign=benign,
+              malicious=malicious),
         ]
     else:
         checks += [
-            "Berisi **event TLS** (`app_proto` / `event_type` = `tls`, atau port "
-            "443/8443) — pipeline yang memisahkannya.",
-            f"Tidak perlu kolom label: `{label_col}` dibentuk pipeline dari alert "
-            "Suricata pada berkas yang sama.",
-            f"Berisi **dua kelas** setelah pelabelan — ada event `alert` sehingga "
-            f"kelas {attack} tidak kosong.",
+            t("re.req_chk_tls_events"),
+            t("re.req_chk_no_label", column=label_col),
+            t("re.req_chk_two_classes_eve", attack=attack),
         ]
     st.markdown("\n".join(f"- ✔ {c}" for c in checks))
 
@@ -1172,40 +1177,54 @@ def _render_check_list(result: dict, dataset_type: str = "") -> None:
     # berkas benar) diruntuhkan jadi SATU baris — empat kalimat identik tidak
     # menambah informasi apa pun. Skip yang berdiri sendiri (mis. "tidak berlaku
     # untuk pipeline ini") tetap punya barisnya sendiri.
+    # Dikelompokkan menurut KUNCI pesan, bukan kalimatnya: kalimat berubah
+    # mengikuti bahasa, kunci tidak. Mengelompokkan berdasarkan teks akan
+    # berhenti meruntuhkan begitu bahasanya berganti.
     skip_groups: dict[str, list[str]] = {}
     for c in checks:
         if c["status"] == "skip":
-            skip_groups.setdefault(c["message"], []).append(c["title"])
+            group_id = c.get("msg_key") or c["message"]
+            skip_groups.setdefault(group_id, []).append(diagnostic_title(c))
     collapsed_shown: set[str] = set()
 
     for c in checks:
         icon = _STATUS_ICON.get(c["status"], "·")
+        title = diagnostic_title(c)
+        message = diagnostic_message(c)
         if c["status"] == "skip":
-            group = skip_groups.get(c["message"], [])
+            group_id = c.get("msg_key") or c["message"]
+            group = skip_groups.get(group_id, [])
             if len(group) > 1:
-                if c["message"] in collapsed_shown:
+                if group_id in collapsed_shown:
                     continue
-                collapsed_shown.add(c["message"])
+                collapsed_shown.add(group_id)
                 names = ", ".join(group)
                 st.markdown(
-                    f"- {icon} _Pemeriksaan lain ({names}) dilewati: "
-                    f"{sanitize_display_value(c['message'])}_"
+                    f"- {icon} _"
+                    + t("dx.skipped_others", names=names,
+                        reason=sanitize_display_value(message)) + "_"
                 )
             else:
-                st.markdown(f"- {icon} **{c['title']}** — "
-                            f"_dilewati: {sanitize_display_value(c['message'])}_")
+                st.markdown(f"- {icon} **{title}** — _"
+                            + t("dx.skipped_one",
+                                reason=sanitize_display_value(message)) + "_")
             continue
 
         # Kolom/kunci yang hilang memakai penyaji BERSAMA (jumlah + contoh
         # terbatas), gaya yang sama dengan ringkasan validasi dataset.
         if c["key"] == "features" and c["status"] == "fail" and c.get("count"):
-            unit = "kunci JSON" if c["message"].find("kunci JSON") >= 0 else "kolom"
-            st.markdown(f"- {icon} **{c['title']}** — "
+            # Satuannya ditentukan dari KUNCI pesan, bukan dari isi kalimat:
+            # mencari "kunci JSON" di dalam teks akan gagal diam-diam begitu
+            # kalimatnya berbahasa Inggris.
+            unit = (t("dx.unit_json_key")
+                    if c.get("msg_key") == "dx.eve_keys_missing"
+                    else t("dx.unit_column"))
+            st.markdown(f"- {icon} **{title}** — "
                         + _missing_items_summary(c["count"], c.get("examples") or [],
                                                  dataset_type, unit=unit))
             continue
 
-        st.markdown(f"- {icon} **{c['title']}** — {c['message']}")
+        st.markdown(f"- {icon} **{title}** — {message}")
 
 
 def _render_validation_failure(v: dict, dataset_type: str) -> None:
@@ -1233,12 +1252,11 @@ def _render_validation_failure(v: dict, dataset_type: str) -> None:
 
     if missing:
         st.error(_missing_items_summary(len(missing), missing, dataset_type, unit=unit))
-        st.markdown(
-            f"Sepertinya berkas ini **bukan** dataset `{dataset_type}`. Jalankan "
-            f"**Uji kecocokan** pada kotak di bawah untuk melihat research "
-            f"pipeline yang sesuai beserta langkah perbaikannya."
-        )
-        with st.expander(f"Lihat semua {len(missing)} {unit} yang diminta skema",
+        prose(
+            t("re.msg_probably_wrong_type", dtype=dataset_type),
+            key="dataset_mismatch")
+        with st.expander(t("re.exp_see_all_missing", count=len(missing),
+                                 unit=unit),
                          expanded=False):
             st.code("\n".join(str(c) for c in missing), language=None)
     for e in other:
@@ -1312,7 +1330,7 @@ def _compat_dialog_body(diag: dict, dataset_type: str, *, collapsible: bool = Tr
             st.markdown(action)
 
         if collapsible:
-            with st.expander("Rincian pemeriksaan", expanded=False):
+            with st.expander(t("re.dlg_check_detail"), expanded=False):
                 _render_check_list(result, dataset_type)
         else:
             st.markdown("**Rincian pemeriksaan**")
@@ -1342,10 +1360,10 @@ _HAS_ST_DIALOG = hasattr(st, "dialog")
 
 if _HAS_ST_DIALOG:
     _compat_dialog = dlg.dialog_decorator(
-        "Uji Kecocokan Dataset", dlg.COMPAT_KEY, width="large")(_compat_dialog_body)
+        t("re.dlg_compat_test"), dlg.COMPAT_KEY, width="large")(_compat_dialog_body)
 else:  # pragma: no cover - hanya untuk Streamlit < 1.37
     def _compat_dialog(diag: dict, dataset_type: str) -> None:
-        with st.expander("Uji Kecocokan Dataset", expanded=True):
+        with st.expander(t("re.dlg_compat_test"), expanded=True):
             _compat_dialog_body(diag, dataset_type, collapsible=False)
 
 
@@ -1393,10 +1411,7 @@ def _render_compat_boxes(diag: dict) -> None:
         st.warning(diag.get("error") or "Diagnosa kecocokan tidak tersedia.")
         return
 
-    st.warning(
-        "Dataset belum otomatis cocok dengan pipeline mana pun. "
-        "Pilih salah satu untuk menjalankan uji kecocokan."
-    )
+    st.warning(t("re.msg_no_auto_match"))
     ordered = _sorted_results(diag)          # yang paling dekat cocok lebih dulu
     cols = st.columns(len(ordered))
     for col, (dtype, _result) in zip(cols, ordered):
@@ -1485,7 +1500,7 @@ def _pipeline_facts(pipeline_id: str, info: dict) -> list[tuple[str, str]]:
     info = info or {}
     mode = rmc.selected_mode()
     facts: list[tuple[str, str]] = [
-        ("Algoritma", info.get("algorithm") or ""),
+        (t("re.lbl_algorithm"), info.get("algorithm") or ""),
         ("Mode eksekusi", rm.run_mode_badge(mode)),
     ]
     for key, value in list((info.get("fixed_params") or {}).items())[:3]:
@@ -1554,7 +1569,7 @@ def _render_execution_status_panel(compact: bool = False) -> dict:
     with st.container(border=True):
         top = st.columns([2, 1])
         top[0].markdown("**Status Eksekusi**")
-        if top[1].button("Periksa ulang", key="recheck_health", use_container_width=True):
+        if top[1].button(t("re.btn_recheck"), key="recheck_health", use_container_width=True):
             st.session_state["_health_nonce"] = nonce + 1
             st.rerun()
 
@@ -1565,21 +1580,20 @@ def _render_execution_status_panel(compact: bool = False) -> dict:
         if health.get("mode") == "sync":
             cols = st.columns(2)
             cols[0].metric("Mode", "Sinkron",
-                           help="Broker/worker tidak diperlukan pada mode "
-                                "sinkron.")
+                           help=t("re.help_sync_mode"))
             cols[1].success("Local worker (in-process)")
             return health
 
         cols = st.columns(4)
         cols[0].metric("Mode", "Asinkron")
         if health.get("broker_ok"):
-            cols[1].success("Broker: tersambung")
+            cols[1].success(t("re.broker_connected"))
         else:
-            cols[1].error("Broker: terputus")
+            cols[1].error(t("re.broker_down"))
         if health.get("worker_ok"):
             cols[2].success(f"Worker: {health.get('worker_count', 0)} aktif")
         else:
-            cols[2].error("Worker: tidak terdeteksi")
+            cols[2].error(t("re.worker_none"))
         qd = health.get("queue_depth")
         cols[3].metric("Antrian", qd if qd is not None else "—")
     return health
@@ -1706,7 +1720,7 @@ def _render_execute_header() -> None:
     """Tombol kembali + penanda pipeline terpilih, di atas alur eksekusi."""
     cols = st.columns([2, 6])
     running = is_polling()
-    if cols[0].button("← Katalog", key="_run_back", use_container_width=True,
+    if cols[0].button(t("re.btn_catalog"), key="_run_back", use_container_width=True,
                       disabled=running,
                       help=("Eksperimen sedang berjalan — tampilan ini dikunci "
                             "agar pantauannya tidak hilang. Selesaikan atau "
@@ -1718,9 +1732,7 @@ def _render_execute_header() -> None:
         st.markdown(f"Pipeline: **{_selected_pipeline_label()}**")
     missed = st.session_state.get(_PENDING_MISS_KEY)
     if missed:
-        st.info(f"`{missed}` tidak kompatibel dengan dataset yang dipilih, "
-                f"jadi pilihan dari katalog tidak dipasang. Pilih dataset yang "
-                f"sesuai, atau pilih pipeline lain di bawah.")
+        st.info(t("re.msg_catalog_pick_dropped", pipeline=missed))
 
 
 # ─── Modal detail katalog ──────────────────────────────────────────────────
@@ -1754,11 +1766,11 @@ def _catalog_detail_body(group: dict) -> None:
     cols = st.columns([3, 2])
     with cols[0]:
         choice = st.selectbox(
-            "Algoritma", [a["algorithm"] for a in algorithms],
+            t("re.lbl_algorithm"), [a["algorithm"] for a in algorithms],
             index=0 if algorithms else None, key="_catalog_run_algo",
             label_visibility="collapsed",
-            placeholder="Pilih algoritma…") if algorithms else None
-    run_clicked = cols[1].button("Jalankan pipeline ini", type="primary",
+            placeholder=t("re.ph_pick_algorithm")) if algorithms else None
+    run_clicked = cols[1].button(t("re.btn_run_pipeline"), type="primary",
                                  key="_catalog_run", use_container_width=True,
                                  disabled=not algorithms)
     if run_clicked and choice:
@@ -1775,11 +1787,11 @@ def _catalog_detail_body(group: dict) -> None:
 
 if hasattr(st, "dialog"):
     _catalog_detail_dialog = dlg.dialog_decorator(
-        "Detail Research Pipeline", CATALOG_DETAIL_KEY,
+        t("re.dlg_pipeline_detail"), CATALOG_DETAIL_KEY,
         width="large")(_catalog_detail_body)
 else:                                       # pragma: no cover - Streamlit lama
     def _catalog_detail_dialog(group):
-        with st.expander("Detail Research Pipeline", expanded=True):
+        with st.expander(t("re.dlg_pipeline_detail"), expanded=True):
             _catalog_detail_body(group)
 
 
@@ -1881,8 +1893,7 @@ def _catalog_run_body(dataset_type: str, matches: list[dict]) -> None:
     st.markdown(f"**{get_research_short_label(dataset_type)}**")
 
     if matches:
-        st.caption(f"{len(matches)} dataset di server cocok untuk research "
-                   f"pipeline ini. Pilih satu untuk melanjutkan.")
+        st.caption(t("re.msg_n_datasets_match", count=len(matches)))
         for item in matches:
             cols = st.columns([5, 2])
             cols[0].markdown(f"`{item['name']}`")
@@ -1892,8 +1903,7 @@ def _catalog_run_body(dataset_type: str, matches: list[dict]) -> None:
                 _use_dataset(dataset_type, item["path"])
                 st.rerun()
     else:
-        st.warning("Belum ada dataset di server yang cocok untuk research "
-                   "pipeline ini.")
+        st.warning(t("re.empty_no_dataset_for_pipeline"))
         st.markdown("**Syarat utamanya**")
         for label, value in run_requirements(dataset_type):
             st.markdown(f"- **{label}** — {value}")
@@ -1909,10 +1919,10 @@ def _catalog_run_body(dataset_type: str, matches: list[dict]) -> None:
 
 if hasattr(st, "dialog"):
     _catalog_run_dialog = dlg.dialog_decorator(
-        "Jalankan Research Pipeline", CATALOG_RUN_KEY)(_catalog_run_body)
+        t("re.dlg_run_pipeline"), CATALOG_RUN_KEY)(_catalog_run_body)
 else:                                       # pragma: no cover - Streamlit lama
     def _catalog_run_dialog(dataset_type, matches):
-        with st.expander("Jalankan Research Pipeline", expanded=True):
+        with st.expander(t("re.dlg_run_pipeline"), expanded=True):
             _catalog_run_body(dataset_type, matches)
 
 
@@ -1943,9 +1953,9 @@ def _render_catalog_view() -> None:
     # Nama tombolnya sudah menjelaskan dirinya — keterangan di sampingnya
     # dibuang, petunjuknya pindah ke help=.
     cols = st.columns([1, 1, 3])
-    if cols[0].button("Run Experiment", type="primary", key="_run_go",
+    if cols[0].button(t("re.btn_run"), type="primary", key="_run_go",
                       use_container_width=True,
-                      help="Pilih dataset lebih dulu, lalu pipeline & algoritma."):
+                      help=t("re.help_order")):
         go_to_execute()
         st.rerun()
 
@@ -1960,7 +1970,7 @@ def _render_catalog_view() -> None:
 
 
 def render():
-    st.title("Run Experiment")
+    st.title(t("page.run_experiment"))
 
     if current_view() == VIEW_CATALOG:
         _render_catalog_view()
@@ -2019,9 +2029,7 @@ def _render_execute():
     # Ketiga bagian di halaman ini dibuka lewat helper yang SAMA
     # (ui/components/sections.py), jadi ukuran judul, perataan, dan jaraknya
     # tidak mungkin berbeda satu sama lain.
-    render_section("Dataset Selection",
-                   help="Berkas di `storage/datasets/`. Pilihannya menentukan "
-                        "research pipeline mana yang tersedia di bawah.")
+    render_section(t("re.sec_dataset"), help=t("re.help_dataset"))
 
     # Single dropdown over every dataset file in storage/datasets/. Each option
     # carries its dataset_type (derived exactly as the former type tabs did), so
@@ -2029,8 +2037,7 @@ def _render_execute():
     _ds_options = _all_dataset_options()
     if not _ds_options:
         st.info(
-            "Belum ada berkas dataset di `storage/datasets/`. Tambahkan berkas CSV "
-            "(HIKARI2021) atau NDJSON (EVE Suricata) untuk memulai."
+            t("re.empty_no_dataset_files")
         )
         return
 
@@ -2046,11 +2053,10 @@ def _render_execute():
 
     # Kontrol mengisi LEBAR PENUH kolomnya; ringkasannya menyusul di bawah.
     dataset_path = st.selectbox(
-        "Pilih dataset", _paths, index=None,
-        placeholder="Pilih berkas dataset…",
+        t("re.lbl_pick_dataset"), _paths, index=None,
+        placeholder=t("re.ph_pick_dataset"),
         format_func=_ds_label, key="dataset_select",
-        help="Pilih satu berkas untuk melihat preview, hasil validasi, dan "
-             "pipeline yang kompatibel.",
+        help=t("re.help_pick_dataset"),
     )
 
     if not dataset_path:
@@ -2079,14 +2085,14 @@ def _render_execute():
     v = st.session_state.get("validation") or {}
 
     # Detail dataset — memory-safe preview (first rows only) + existing validation info.
-    with st.expander("Detail dataset (preview & validasi)", expanded=True):
+    with st.expander(t("re.dlg_dataset_detail"), expanded=True):
         st.markdown("**Preview (beberapa baris pertama):**")
         try:
             _preview = _dataset_preview(dataset_path, dataset_type, n=5)
             if _preview is not None and not _preview.empty:
                 st.dataframe(_preview, use_container_width=True)
             else:
-                st.caption("Preview tidak tersedia untuk berkas ini.")
+                st.caption(t("re.msg_preview_unavailable"))
         except Exception as _e:
             st.caption(f"Preview tidak tersedia: {_e}")
 
@@ -2095,10 +2101,9 @@ def _render_execute():
             # Ringkasannya dirender DI LUAR expander ini (lihat di bawah), karena
             # daftar lengkap kolom butuh expander sendiri dan Streamlit melarang
             # expander bersarang.
-            st.error("Dataset tidak lolos validasi skema — ringkasannya ada di "
-                     "bawah panel ini.")
+            st.error(t("re.msg_dataset_invalid"))
         else:
-            st.success("Dataset is valid!")
+            st.success(t("re.msg_dataset_valid"))
             c1, c2, c3, c4 = st.columns(4)
             c1.metric("Type", dataset_type)
             c2.metric("Rows", f"{v['row_count']:,}" if isinstance(v.get("row_count"), int) else "-")
@@ -2146,12 +2151,10 @@ def _render_execute():
         return
 
     # ── Pipeline Selection ─────────────────────────────────────────────
-    render_section("Pipeline Selection",
-                   help="Research pipeline yang kompatibel dengan dataset "
-                        "terpilih.")
+    render_section(t("re.sec_pipeline"), help=t("re.help_pipeline"))
     pipelines = v.get("compatible_pipelines", {})
     if not pipelines:
-        st.warning("Tidak ada pipeline yang kompatibel untuk dataset ini.")
+        st.warning(t("re.empty_no_compatible"))
         return
 
     # Two-level selection (DISPLAY/grouping only): research pipeline → algorithm.
@@ -2179,9 +2182,9 @@ def _render_execute():
 
     research_keys = list(research_groups.keys())
     research = st.selectbox(
-        "Pilih research pipeline", research_keys,
+        t("re.lbl_pick_pipeline"), research_keys,
         index=0 if len(research_keys) == 1 else None,
-        placeholder="Pilih research pipeline…",
+        placeholder=t("re.ph_pick_pipeline"),
         format_func=lambda k: research_display.get(k, k),
         key="research_select",
     )
@@ -2253,9 +2256,7 @@ def _render_execute():
         # BAGIAN penuh, bukan sekadar label widget — inilah yang dulu membuat
         # "Pilih algoritma" tampil berbeda dari bagian di atasnya. Label widget
         # disembunyikan supaya judulnya tidak muncul dua kali.
-        render_section("Pilih Algoritma",
-                       help="Preprocessing & hyperparameter yang ditampilkan "
-                            "mengikuti algoritma yang dipilih di sini.")
+        render_section(t("re.sec_algorithm"), help=t("re.help_algorithm"))
 
         # Algorithm selector within the chosen research (algorithm names only —
         # the research name is already clear from the level above). Horizontal
@@ -2327,9 +2328,7 @@ def _render_execute():
         return
 
     if selected:
-        render_section("Execute",
-                       help="Menjalankan pipeline terpilih pada dataset "
-                            "terpilih.")
+        render_section(t("re.sec_execute"), help=t("re.help_execute"))
         # Status infrastruktur di ATAS (ringkas, label-nilai berkolom), lalu
         # kontrol mode & tombol aksi di bawahnya — bukan bersebelahan.
         health = _render_execution_status_panel(compact=True)
@@ -2342,7 +2341,7 @@ def _render_execute():
         # lain tetap bebas, sehingga pengguna bisa berpindah ke pipeline yang cocok.
             if not _research_compatible:
                 can_run = False
-                st.error("**Dataset belum cocok untuk pipeline ini.**")
+                st.error(t("re.msg_not_compatible"))
                 # Tombol ini berada SESUDAH titik pemanggilan dialog di alur
                 # utama, jadi flag baru terbaca pada run berikutnya — rerun dari
                 # sini sah karena berada di alur utama render().
@@ -2364,7 +2363,7 @@ def _render_execute():
 
         # Aksi UTAMA bagian ini — satu-satunya tombol primary di sini, berdiri
         # sendiri di bawah wadah elemen pendukung.
-        if st.button("Run Experiment", type="primary", disabled=not can_run,
+        if st.button(t("re.btn_run"), type="primary", disabled=not can_run,
                      use_container_width=True):
             _run_with_status(dataset_type, dataset_path, selected,
                              run_mode=run_choice["run_mode"],
@@ -2420,7 +2419,7 @@ def _run_with_status(dataset_type: str, dataset_path: str, pipeline_id: str,
             st.write("")
         else:
             st.write("Pipeline dijalankan; metrik dan artefak muncul setelah selesai.")
-        st.info("Full process log will appear in results after completion.")
+        st.info(t("re.msg_log_later"))
 
         # Owner = username bila ada yang masuk, None bila mode pengunjung.
         # Murni metadata pencatatan: tidak diteruskan ke worker/pipeline dan
@@ -2463,7 +2462,7 @@ def _poll_experiment(experiment_id: str):
     logger.info("[DIAG] poll tick status_data=%r", status_data)
 
     if status_data is None:
-        st.error("Experiment not found.")
+        st.error(t("re.msg_exp_not_found"))
         st.session_state.pop("polling_experiment_id", None)
         return
 
@@ -2520,11 +2519,11 @@ def _poll_experiment(experiment_id: str):
                     st.write("Pipeline is executing. This may take several minutes...")
             _iv = _get_poll_interval(status_data.get("pipeline_id", ""))
             st.write(f"This page auto-refreshes about every {_iv} seconds.")
-        if st.button("Cancel Experiment", key=f"cancel_poll_{experiment_id}"):
+        if st.button(t("re.btn_cancel_exp"), key=f"cancel_poll_{experiment_id}"):
             r = cancel_experiment(experiment_id)
             if r["success"]:
                 st.session_state.pop("polling_experiment_id", None)
-                st.warning("Experiment cancelled.")
+                st.warning(t("re.msg_exp_cancelled"))
             else:
                 st.error(r["message"])
             st.rerun()
@@ -2560,7 +2559,7 @@ def _poll_experiment(experiment_id: str):
         st.session_state.pop("polling_experiment_id", None)
         error_msg = status_data.get("error_message", "Unknown error")
         if error_msg == "Cancelled by user":
-            st.warning("Experiment was cancelled.")
+            st.warning(t("re.msg_exp_was_cancelled"))
         else:
             st.error(f"Experiment failed: {error_msg}")
 
@@ -2617,7 +2616,7 @@ def _render_diag_block(experiment_id: str, status_data: dict) -> None:
             raw_info = f"<AsyncResult error: {e}>"
 
     st.markdown("---")
-    with st.expander("Detail diagnostik", expanded=False):
+    with st.expander(t("re.dlg_diag_detail"), expanded=False):
         st.write(f"**os.environ.get('USE_ASYNC')** (Streamlit process env): `{env_use_async!r}`")
         st.write(f"**config.celery_config.USE_ASYNC** (frozen at import): `{cfg_use_async!r}`")
         st.write(f"**Dispatched branch** (from orchestrator stash): `{branch!r}`")
@@ -2657,7 +2656,7 @@ def _render_result_mode_banner(experiment_id: str) -> None:
 
 def _display_results(result: dict):
     """Render all metrics and charts via the shared interactive result view."""
-    st.header("Results")
+    st.header(t("re.sec_results"))
     eid = result["experiment_id"]
 
     # Penanda mode di tempat hasil PERTAMA kali terlihat. Dibaca dari record
@@ -2682,7 +2681,7 @@ def _display_results(result: dict):
 
     # PDF Download
     st.markdown("---")
-    st.subheader("Download Report")
+    st.subheader(t("re.sec_download"))
     try:
         from utils.report_generator import generate_report
         pipe_info = get_pipeline_info(st.session_state.get("selected_pipeline", "")) or {}
@@ -2701,7 +2700,7 @@ def _display_results(result: dict):
             feature_names=result.get("feature_names"),
         )
         st.download_button(
-            label="Download PDF Report",
+            label=t("re.btn_pdf"),
             data=pdf_bytes,
             file_name=f"experiment_report_{eid[:8]}.pdf",
             mime="application/pdf",

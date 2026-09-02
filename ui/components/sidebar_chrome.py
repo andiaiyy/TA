@@ -28,6 +28,7 @@ from __future__ import annotations
 from html import escape
 
 import streamlit as st
+from ui.i18n import t
 
 # Sisipan kiri seluruh isi sidebar. Item navigasi mencapainya lewat
 # border-left 3px + padding; baris teks lewat padding-left.
@@ -47,13 +48,33 @@ FONT_SMALL = "0.78rem"
 
 # ── Jejak lokasi ──────────────────────────────────────────────────────────
 
-def breadcrumb_text(page: str, root: str = BREADCRUMB_ROOT) -> str:
-    """"Menu › Run Experiment". Murni — dipakai juga oleh test."""
-    page = (page or "").strip()
-    return f"{root} {BREADCRUMB_SEP} {page}" if page else root
+#: Pengenal halaman → kunci labelnya. Jejak lokasi menerima PENGENAL (itu yang
+#: dipakai routing) lalu menampilkan labelnya pada bahasa aktif.
+PAGE_LABEL_KEYS = {
+    "Progress & Status": "nav.progress",
+    "Run Experiment": "nav.run_experiment",
+    "Add Pipeline & Dataset": "nav.contribute",
+}
 
 
-def render_breadcrumb(page: str, root: str = BREADCRUMB_ROOT) -> None:
+def page_label(page: str) -> str:
+    """Label halaman pada bahasa aktif; pengenal tak dikenal dipakai apa adanya."""
+    key = PAGE_LABEL_KEYS.get((page or "").strip())
+    return t(key) if key else (page or "").strip()
+
+
+def breadcrumb_text(page: str, root: str | None = None) -> str:
+    """"Beranda › Jalankan Eksperimen". Murni — dipakai juga oleh test.
+
+    ``page`` adalah PENGENAL halaman, bukan teks tampilan; labelnya dicari di
+    sini supaya pemanggil tidak perlu tahu soal bahasa.
+    """
+    root = t("crumb.root") if root is None else root
+    label = page_label(page)
+    return f"{root} {t('crumb.separator')} {label}" if label else root
+
+
+def render_breadcrumb(page: str, root: str | None = None) -> None:
     """Baris jejak lokasi di paling atas sidebar. Kecil, redup, tidak tebal."""
     render_line(breadcrumb_text(page, root), muted=True, small=True)
 

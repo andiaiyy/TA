@@ -95,6 +95,14 @@ class DiagnosticCheck:
     message: str
     count: int = 0
     examples: list[str] = field(default_factory=list)
+    # Bentuk yang dapat diterjemahkan. DITAMBAHKAN, bukan mengganti: `key`,
+    # `status`, `count`, dan `examples` adalah KEPUTUSAN dan pembandingnya —
+    # ketiganya tidak boleh berubah. `msg_key` menunjuk kalimat di kamus, dan
+    # `values` membawa nilai sisipannya (nama kolom, jumlah) apa adanya.
+    # Lapisan tampilan yang menyusun kalimatnya: lihat
+    # ui/components/validator_messages.diagnostic_message.
+    msg_key: str = ""
+    values: dict = field(default_factory=dict)
 
     @property
     def passed(self) -> bool:
@@ -374,14 +382,22 @@ def diagnose_dataset(dataset_path: str, dataset_type: str,
     if schema is None:
         return {**base, "compatible": False, "checks": [
             asdict(DiagnosticCheck(CHECK_FORMAT, _CHECK_TITLES[CHECK_FORMAT], FAIL,
-                                   f"Tipe dataset `{dataset_type}` tidak dikenal."))
+                                   f"Tipe dataset `{dataset_type}` tidak dikenal.",
+                                   msg_key="dx.unknown_type",
+                                   values={"dataset_type": dataset_type}))
         ]}
 
     if sample.error:
         # Unreadable/corrupt file: report it once, do not guess the rest.
-        checks = [DiagnosticCheck(CHECK_FORMAT, _CHECK_TITLES[CHECK_FORMAT], FAIL, sample.error)]
+        # `sample.error` adalah pesan KESALAHAN pembacaan berkas — lingkup
+        # Tahap 3B, bukan 3A. Ia diteruskan apa adanya sebagai nilai sisipan;
+        # yang berbahasa di sini hanya kalimat "dilewati" di bawahnya.
+        checks = [DiagnosticCheck(CHECK_FORMAT, _CHECK_TITLES[CHECK_FORMAT], FAIL,
+                                  sample.error, msg_key="dx.file_unreadable",
+                                  values={"error": sample.error})]
         checks += [DiagnosticCheck(k, _CHECK_TITLES[k], SKIP,
-                                   "Tidak dapat diperiksa karena berkas gagal dibaca.")
+                                   "Tidak dapat diperiksa karena berkas gagal dibaca.",
+                                   msg_key="dx.skipped_unreadable")
                    for k in (CHECK_LABEL, CHECK_FEATURES, CHECK_DTYPE, CHECK_CLASSES)]
         return {**base, "compatible": False, "checks": [asdict(c) for c in checks]}
 
@@ -406,16 +422,28 @@ def _format_check(dataset_type: str, sample: DatasetSample) -> DiagnosticCheck:
     if got == want:
         unit = "satu baris per flow" if want == "csv" else "satu objek JSON per baris"
         return DiagnosticCheck(CHECK_FORMAT, _CHECK_TITLES[CHECK_FORMAT], PASS,
-                               f"Terdeteksi {names[want]} ({unit}).")
+                               f"Terdeteksi {names[want]} ({unit}).",
+                               msg_key=("dx.format_ok_csv" if want == "csv"
+                                        else "dx.format_ok_ndjson"),
+                               values={"format": names[want]})
     return DiagnosticCheck(
         CHECK_FORMAT, _CHECK_TITLES[CHECK_FORMAT], FAIL,
         f"Format terdeteksi **{names.get(got, got)}**, tetapi pipeline ini "
         f"membutuhkan **{names[want]}**.",
+        msg_key="dx.format_wrong",
+        values={"detected": names.get(got, got), "needed": names[want]},
     )
 
 
-def _skip_rest(reason: str, keys) -> list[DiagnosticCheck]:
-    return [DiagnosticCheck(k, _CHECK_TITLES[k], SKIP, reason) for k in keys]
+def _skip_rest(reason: str, keys, msg_key: str = "") -> list[DiagnosticCheck]:
+    """Pemeriksaan yang DILEWATI — bukan gagal.
+
+    Bedanya penting bagi pembaca: `skip` berarti "belum sempat diperiksa karena
+    syarat sebelumnya belum terpenuhi", sedangkan `fail` berarti "diperiksa dan
+    tidak memenuhi". Kalimatnya harus menyatakan itu di kedua bahasa.
+    """
+    return [DiagnosticCheck(k, _CHECK_TITLES[k], SKIP, reason, msg_key=msg_key)
+            for k in keys]
 
 
 def _diagnose_csv_type(dataset_type: str, schema: dict,
@@ -426,7 +454,8 @@ def _diagnose_csv_type(dataset_type: str, schema: dict,
     if fmt.status == FAIL or sample.frame is None:
         return [fmt] + _skip_rest(
             "Tidak diperiksa karena format berkas belum sesuai.",
-            (CHECK_LABEL, CHECK_FEATURES, CHECK_DTYPE, CHECK_CLASSES))
+            (CHECK_LABEL, CHECK_FEATURES, CHECK_DTYPE, CHECK_CLASSES),
+            msg_key="dx.skipped_format")
 
     df = sample.frame
     label_col = schema.get("label_column") or "label"
@@ -442,11 +471,14 @@ def _diagnose_csv_type(dataset_type: str, schema: dict,
     # 2. Label column.
     if label_col in cols:
         checks.append(DiagnosticCheck(CHECK_LABEL, _CHECK_TITLES[CHECK_LABEL], PASS,
-                                      f"Kolom label `{label_col}` ditemukan."))
+                                      f"Kolom label `{label_col}` ditemukan.",
+                                      msg_key="dx.label_found",
+                                      values={"column": label_col}))
     else:
         checks.append(DiagnosticCheck(
             CHECK_LABEL, _CHECK_TITLES[CHECK_LABEL], FAIL,
-            f"Dataset Anda kurang kolom label `{label_col}`."))
+            f"Dataset Anda kurang kolom label `{label_col}`.",
+            msg_key="dx.label_missing", values={"column": label_col}))
 
     # 3. Feature columns (present at all + schema completeness).
     feature_cols = [c for c in cols if c != label_col]
@@ -454,19 +486,24 @@ def _diagnose_csv_type(dataset_type: str, schema: dict,
     if not feature_cols:
         checks.append(DiagnosticCheck(
             CHECK_FEATURES, _CHECK_TITLES[CHECK_FEATURES], FAIL,
-            "Tidak ada kolom fitur — berkas hanya berisi kolom label."))
+            "Tidak ada kolom fitur — berkas hanya berisi kolom label.",
+            msg_key="dx.features_none"))
     elif missing_features:
         checks.append(DiagnosticCheck(
             CHECK_FEATURES, _CHECK_TITLES[CHECK_FEATURES], FAIL,
             f"Dataset Anda kurang {len(missing_features)} kolom yang diminta "
             f"skema: {_fmt_list(missing_features)}.",
             count=len(missing_features),
-            examples=[sanitize_display_value(c) for c in missing_features[:_MAX_LISTED]]))
+            examples=[sanitize_display_value(c) for c in missing_features[:_MAX_LISTED]],
+            msg_key="dx.features_missing",
+            values={"count": len(missing_features),
+                    "columns": _fmt_list(missing_features)}))
     else:
         checks.append(DiagnosticCheck(
             CHECK_FEATURES, _CHECK_TITLES[CHECK_FEATURES], PASS,
             f"{len(feature_cols)} kolom selain label ditemukan; seluruh kolom "
-            f"yang diminta skema lengkap."))
+            f"yang diminta skema lengkap.",
+            msg_key="dx.features_ok", values={"count": len(feature_cols)}))
 
     # 4. Feature dtypes — non-numeric columns the pipeline does NOT drop.
     drops = set(_hikari_drop_cols())
@@ -474,7 +511,8 @@ def _diagnose_csv_type(dataset_type: str, schema: dict,
                    if c != label_col and c not in drops]
     if not feature_cols:
         checks.append(DiagnosticCheck(CHECK_DTYPE, _CHECK_TITLES[CHECK_DTYPE], SKIP,
-                                      "Tidak ada kolom fitur untuk diperiksa."))
+                                      "Tidak ada kolom fitur untuk diperiksa.",
+                                      msg_key="dx.skipped_no_features"))
     elif non_numeric:
         # The pipeline drops leftover non-numeric columns as a safety net, so the
         # run still works — but those features are silently lost. Warn, specific.
@@ -483,17 +521,22 @@ def _diagnose_csv_type(dataset_type: str, schema: dict,
             f"{len(non_numeric)} kolom fitur bukan numerik dan akan diabaikan "
             f"pipeline: {_fmt_list(non_numeric)}.",
             count=len(non_numeric),
-            examples=[sanitize_display_value(c) for c in non_numeric[:_MAX_LISTED]]))
+            examples=[sanitize_display_value(c) for c in non_numeric[:_MAX_LISTED]],
+            msg_key="dx.dtype_non_numeric",
+            values={"count": len(non_numeric),
+                    "columns": _fmt_list(non_numeric)}))
     else:
         checks.append(DiagnosticCheck(
             CHECK_DTYPE, _CHECK_TITLES[CHECK_DTYPE], PASS,
-            "Seluruh kolom fitur bertipe numerik."))
+            "Seluruh kolom fitur bertipe numerik.",
+            msg_key="dx.dtype_ok"))
 
     # 5. Class distribution.
     if label_col not in cols:
         checks.append(DiagnosticCheck(
             CHECK_CLASSES, _CHECK_TITLES[CHECK_CLASSES], SKIP,
-            f"Tidak dapat diperiksa tanpa kolom `{label_col}`."))
+            f"Tidak dapat diperiksa tanpa kolom `{label_col}`.",
+            msg_key="dx.skipped_no_label", values={"column": label_col}))
     else:
         raw_values = sorted(df[label_col].dropna().unique().tolist(), key=lambda x: str(x))
         values = raw_values
@@ -516,13 +559,18 @@ def _diagnose_csv_type(dataset_type: str, schema: dict,
             checks.append(DiagnosticCheck(
                 CHECK_CLASSES, _CHECK_TITLES[CHECK_CLASSES], PASS,
                 f"{len(values)} kelas terdeteksi pada kolom `{label_col}`: {shown}.",
-                count=len(values), examples=names))
+                count=len(values), examples=names,
+                msg_key="dx.classes_ok",
+                values={"count": len(values), "column": label_col,
+                        "classes": shown}))
         else:
             checks.append(DiagnosticCheck(
                 CHECK_CLASSES, _CHECK_TITLES[CHECK_CLASSES], FAIL,
                 f"Hanya satu kelas terdeteksi pada kolom `{label_col}` "
                 f"({shown}); pipeline butuh dua kelas (benign & attack).",
-                count=len(values), examples=names))
+                count=len(values), examples=names,
+                msg_key="dx.classes_single",
+                values={"column": label_col, "classes": shown}))
 
     return checks
 
@@ -539,7 +587,8 @@ def _diagnose_ndjson_type(dataset_type: str, schema: dict,
     if fmt.status == FAIL:
         return [fmt] + _skip_rest(
             "Tidak diperiksa karena format berkas belum sesuai.",
-            (CHECK_LABEL, CHECK_FEATURES, CHECK_DTYPE, CHECK_CLASSES))
+            (CHECK_LABEL, CHECK_FEATURES, CHECK_DTYPE, CHECK_CLASSES),
+            msg_key="dx.skipped_format")
 
     label_col = schema.get("label_column") or "label"
     expected_keys = list(schema.get("expected_top_level_keys") or [])
@@ -554,13 +603,16 @@ def _diagnose_ndjson_type(dataset_type: str, schema: dict,
             CHECK_LABEL, _CHECK_TITLES[CHECK_LABEL], PASS,
             f"Kolom `{label_col}` tidak perlu ada — pipeline menurunkannya dari "
             f"**alert Suricata**; {sample.alert_rows:,} event dengan bukti alert "
-            f"ditemukan pada sampel."))
+            f"ditemukan pada sampel.",
+            msg_key="dx.eve_label_derived",
+            values={"column": label_col, "events": f"{sample.alert_rows:,}"}))
     else:
         checks.append(DiagnosticCheck(
             CHECK_LABEL, _CHECK_TITLES[CHECK_LABEL], FAIL,
             f"Tidak ada bukti alert Suricata pada sampel, padahal `{label_col}` "
             f"diturunkan dari alert (`event_type` = `alert`, atau objek `alert` "
-            f"yang memiliki `severity`). Label tidak dapat dibentuk."))
+            f"yang memiliki `severity`). Label tidak dapat dibentuk.",
+            msg_key="dx.eve_label_no_alert", values={"column": label_col}))
 
     # 3. Keys the schema expects + TLS events the pipeline analyses.
     if missing_keys:
@@ -569,40 +621,52 @@ def _diagnose_ndjson_type(dataset_type: str, schema: dict,
             f"Dataset Anda kurang {len(missing_keys)} kunci JSON yang diminta "
             f"skema: {_fmt_list(missing_keys)}.",
             count=len(missing_keys),
-            examples=[sanitize_display_value(k) for k in missing_keys[:_MAX_LISTED]]))
+            examples=[sanitize_display_value(k) for k in missing_keys[:_MAX_LISTED]],
+            msg_key="dx.eve_keys_missing",
+            values={"count": len(missing_keys),
+                    "keys": _fmt_list(missing_keys)}))
     elif sample.tls_rows == 0:
         checks.append(DiagnosticCheck(
             CHECK_FEATURES, _CHECK_TITLES[CHECK_FEATURES], FAIL,
             "Tidak ditemukan event TLS pada sampel (`app_proto`/`event_type` = "
-            "`tls`, atau port TLS); pipeline ini hanya menganalisis trafik TLS."))
+            "`tls`, atau port TLS); pipeline ini hanya menganalisis trafik TLS.",
+            msg_key="dx.eve_no_tls"))
     else:
         checks.append(DiagnosticCheck(
             CHECK_FEATURES, _CHECK_TITLES[CHECK_FEATURES], PASS,
             f"Seluruh kunci skema ada; {sample.tls_rows:,} event TLS ditemukan "
-            f"pada sampel."))
+            f"pada sampel.",
+            msg_key="dx.eve_keys_ok",
+            values={"events": f"{sample.tls_rows:,}"}))
 
     # 4. Dtypes are not applicable — the pipeline engineers its own features.
     checks.append(DiagnosticCheck(
         CHECK_DTYPE, _CHECK_TITLES[CHECK_DTYPE], SKIP,
         "Tidak berlaku — pipeline merekayasa & menyeleksi fiturnya sendiri "
-        "(MI/RFE/PCA) dari field EVE mentah."))
+        "(MI/RFE/PCA) dari field EVE mentah.",
+        msg_key="dx.eve_dtype_na"))
 
     # 5. Both classes must be reachable: TLS events (benign side) + alerts.
     if sample.tls_rows and sample.alert_rows:
         checks.append(DiagnosticCheck(
             CHECK_CLASSES, _CHECK_TITLES[CHECK_CLASSES], PASS,
             f"Dua kelas dapat terbentuk pada sampel: {sample.tls_rows:,} event "
-            f"TLS dan {sample.alert_rows:,} event beralert."))
+            f"TLS dan {sample.alert_rows:,} event beralert.",
+            msg_key="dx.eve_classes_ok",
+            values={"tls": f"{sample.tls_rows:,}",
+                    "alerts": f"{sample.alert_rows:,}"}))
     elif not sample.alert_rows:
         checks.append(DiagnosticCheck(
             CHECK_CLASSES, _CHECK_TITLES[CHECK_CLASSES], FAIL,
             "Hanya satu kelas yang dapat terbentuk: tidak ada event `alert` pada "
-            "sampel, sehingga kelas attack akan kosong."))
+            "sampel, sehingga kelas attack akan kosong.",
+            msg_key="dx.eve_classes_no_alert"))
     else:
         checks.append(DiagnosticCheck(
             CHECK_CLASSES, _CHECK_TITLES[CHECK_CLASSES], FAIL,
             "Hanya satu kelas yang dapat terbentuk: tidak ada event TLS pada "
-            "sampel, sehingga kelas benign TLS akan kosong."))
+            "sampel, sehingga kelas benign TLS akan kosong.",
+            msg_key="dx.eve_classes_no_tls"))
 
     return checks
 

@@ -305,10 +305,11 @@ def test_the_section_pattern_is_defined_in_one_place():
         theme.GAP_IN_BLOCK.rstrip("rem"))
 
 
-@pytest.mark.parametrize("title", ["Dataset Selection", "Pipeline Selection",
-                                   "Pilih Algoritma", "Execute"])
-def test_every_section_uses_the_shared_helper(title):
-    assert f'render_section("{title}"' in RUN_SRC
+@pytest.mark.parametrize("key", ["re.sec_dataset", "re.sec_pipeline",
+                                 "re.sec_algorithm", "re.sec_execute"])
+def test_every_section_uses_the_shared_helper(key):
+    """Judul bagian kini datang dari kamus; helper-nya tetap yang sama."""
+    assert f'render_section(t("{key}")' in RUN_SRC
 
 
 def test_no_section_sets_its_own_heading_style():
@@ -320,7 +321,7 @@ def test_no_section_sets_its_own_heading_style():
 
 def test_the_algorithm_picker_is_a_real_section_now():
     """Dulu ia hanya label widget, karena itu tampil berbeda."""
-    assert 'render_section("Pilih Algoritma"' in RUN_SRC
+    assert 'render_section(t("re.sec_algorithm")' in RUN_SRC
     # Label widgetnya disembunyikan supaya judulnya tidak muncul dua kali.
     picker = RUN_SRC.split("_algo_names = list(algo_to_pid.keys())")[1]
     picker = picker.split("selected = algo_to_pid.get")[0]
@@ -328,21 +329,23 @@ def test_the_algorithm_picker_is_a_real_section_now():
 
 
 def test_the_execute_section_groups_its_supporting_elements():
-    body = RUN_SRC.split('render_section("Execute"')[1].split("\n    # Results")[0]
+    body = RUN_SRC.split('render_section(t("re.sec_execute")')[1].split(
+        "\n    # Results")[0]
     # Wadah pengelompokan kini digabung dengan kolom kirinya dalam SATU
     # pernyataan `with` (`with _ex_left, section_body():`) — bentuknya berubah,
     # jaminannya tidak: elemen pendukung tetap terkelompok.
     assert "section_body():" in body
     # Tepat SATU tombol aksi utama pada bagian ini.
     assert body.count('type="primary"') == 1
-    assert 'st.button("Run Experiment", type="primary"' in body
+    assert 'st.button(t("re.btn_run"), type="primary"' in body
 
 
 def test_the_run_button_stands_outside_the_supporting_group():
     """Aksi utama tidak boleh terkubur di antara elemen pendukung."""
-    body = RUN_SRC.split('render_section("Execute"')[1].split("\n    # Results")[0]
+    body = RUN_SRC.split('render_section(t("re.sec_execute")')[1].split(
+        "\n    # Results")[0]
     group_at = body.index("section_body():")
-    button_at = body.index('st.button("Run Experiment"')
+    button_at = body.index('st.button(t("re.btn_run")')
     assert group_at < button_at
 
     # Tombolnya berada di LUAR wadah pengelompokan: indentasinya sama dengan

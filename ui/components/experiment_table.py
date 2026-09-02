@@ -63,6 +63,22 @@ FAMILY_LABELS = {
     FAMILY_EVE: "EVE/Suricata",
 }
 
+#: Keluarga → kunci semantik. `METRIC_SEMANTICS` di atas TIDAK diubah: ia
+#: satu-satunya tempat semantik dirumuskan dan dipakai pembanding di tempat
+#: lain. Yang ditambahkan hanya jalur terjemahannya.
+METRIC_SEMANTICS_KEYS = {
+    FAMILY_HIKARI: "ps.semantics_hikari",
+    FAMILY_EVE: "ps.semantics_eve",
+}
+
+
+def semantics_of(family: str) -> str:
+    """Semantik metrik satu keluarga, pada bahasa aktif."""
+    from ui.i18n import t
+
+    key = METRIC_SEMANTICS_KEYS.get(family)
+    return t(key) if key else METRIC_SEMANTICS.get(family, "")
+
 CROSS_FAMILY_WARNING = (
     "Eksperimen yang dipilih berasal dari keluarga pipeline berbeda. "
     "Precision/recall/F1 keduanya TIDAK sebanding langsung: "
@@ -112,8 +128,11 @@ def semantics_note(rows) -> str:
     fams = families_in(rows)
     if not fams:
         return ""
-    return "Semantik metrik — " + "; ".join(
-        f"{FAMILY_LABELS[f]}: {METRIC_SEMANTICS[f]}" for f in fams) + "."
+    from ui.i18n import t
+
+    # Nama keluarga (HIKARI2021, EVE/Suricata) TIDAK diterjemahkan.
+    return t("ps.semantics_note", parts="; ".join(
+        f"{FAMILY_LABELS[f]}: {semantics_of(f)}" for f in fams))
 
 
 def is_cross_family(rows) -> bool:
@@ -122,10 +141,25 @@ def is_cross_family(rows) -> bool:
 
 # ── Definisi kolom ────────────────────────────────────────────────────────
 
+# PENGENAL kelompok — dipakai untuk mengurutkan & mengelompokkan kolom, jadi
+# nilainya tidak berbahasa. Labelnya dipetakan di `GROUP_LABEL_KEYS`.
 GROUP_IDENTITY = "Identitas"
 GROUP_PARAM = "Parameter"
 GROUP_METRIC = "Metrik"
 GROUP_ORDER = (GROUP_IDENTITY, GROUP_PARAM, GROUP_METRIC)
+GROUP_LABEL_KEYS = {
+    GROUP_IDENTITY: "ps.group_identity",
+    GROUP_PARAM: "ps.group_param",
+    GROUP_METRIC: "ps.group_metric",
+}
+
+
+def group_label(group: str) -> str:
+    """Nama kelompok kolom pada bahasa aktif."""
+    from ui.i18n import t
+
+    key = GROUP_LABEL_KEYS.get(group)
+    return t(key) if key else group
 
 KIND_TEXT = "text"
 KIND_METRIC = "metric"
@@ -145,6 +179,32 @@ _IDENTITY_COLUMNS = [
     ("pipeline_version", "Versi pipeline", KIND_TEXT),
     ("mode", "Mode", KIND_TEXT),
 ]
+
+#: Kunci kolom → kunci judul. Kunci kolomnya sendiri ("waktu", "durasi", …)
+#: adalah PENGENAL: ia dipakai memilih kolom, menyusun CSV, dan menyimpan
+#: pilihan pengguna — jadi ia tidak pernah berbahasa. Nama metrik
+#: (Accuracy/Precision/Recall/F1-score/ROC-AUC) juga tidak diterjemahkan.
+COLUMN_LABEL_KEYS = {
+    "id": "ps.col_id",
+    "waktu": "ps.col_time",
+    "durasi": "ps.col_duration",
+    "pipeline": "ps.col_pipeline",
+    "dataset": "ps.col_dataset",
+    "berkas": "ps.col_file",
+    "pemilik": "ps.col_owner",
+    "status": "ps.col_status",
+    "dataset_hash": "ps.col_dataset_hash",
+    "pipeline_version": "ps.col_pipeline_version",
+    "mode": "ps.col_mode_header",
+}
+
+
+def column_label(key: str, fallback: str = "") -> str:
+    """Judul satu kolom pada bahasa aktif; tanpa kunci → judul aslinya."""
+    from ui.i18n import t
+
+    label_key = COLUMN_LABEL_KEYS.get(key)
+    return t(label_key) if label_key else fallback
 _METRIC_COLUMNS = [
     ("accuracy", "Accuracy", KIND_METRIC),
     ("precision", "Precision", KIND_METRIC),
@@ -179,7 +239,10 @@ def parameter_keys(params_reader) -> list[str]:
 
 def build_columns(param_keys=()) -> list[dict]:
     """Spesifikasi kolom lengkap, bergrup Identitas | Parameter | Metrik."""
-    cols = [{"key": k, "label": lbl, "group": GROUP_IDENTITY, "kind": kind}
+    # Judul identitas mengikuti bahasa; nama parameter dan nama metrik
+    # TIDAK diterjemahkan — keduanya pengenal yang dibaca apa adanya.
+    cols = [{"key": k, "label": column_label(k, lbl),
+             "group": GROUP_IDENTITY, "kind": kind}
             for k, lbl, kind in _IDENTITY_COLUMNS]
     cols += [{"key": f"param_{k}", "label": k, "group": GROUP_PARAM,
               "kind": KIND_TEXT} for k in param_keys]
@@ -352,6 +415,28 @@ def mark_best_within_family(rows) -> list[dict]:
 
 BEST_MARK_NOTE = ("Nilai tertinggi disorot per kolom DI DALAM keluarga "
                   "pipeline masing-masing — bukan peringkat lintas keluarga.")
+#: Kunci katalog untuk keterangan yang sama; konstanta di atas tetap acuan.
+BEST_MARK_NOTE_KEY = "ps.best_mark_note"
+CROSS_FAMILY_WARNING_KEY = "ps.cross_family_warning"
+DATASET_MISMATCH_WARNING_KEY = "ps.dataset_mismatch_warning"
+PARAM_PROVENANCE_KEY = "ps.param_provenance"
+MODE_COLUMN_NOTE_KEY = "ps.mode_column_note"
+MODE_FILTER_DEFAULT_NOTE_KEY = "ps.mode_filter_default_note"
+ONLY_DIFF_LABEL_KEY = "ps.only_diff_label"
+ALL_SAME_NOTE_KEY = "ps.all_same_note"
+
+
+def cross_family_warning() -> str:
+    """Peringatan lintas keluarga pada bahasa aktif — rumusan WAJIB.
+
+    Nama keluarga tidak diterjemahkan; semantiknya diambil dari katalog,
+    sehingga peringatan ini tidak dapat memuat dua bahasa sekaligus.
+    """
+    from ui.i18n import t
+
+    return t("ps.cross_family_warning", parts="; ".join(
+        f"{FAMILY_LABELS[f]} = {semantics_of(f)}"
+        for f in (FAMILY_HIKARI, FAMILY_EVE)))
 
 
 # ── Filter ────────────────────────────────────────────────────────────────
@@ -404,7 +489,9 @@ def apply_filters(rows, *, pipelines=None, datasets=None, statuses=None,
 
 
 def result_summary(shown: int, total: int) -> str:
-    return f"{shown} dari {total} eksperimen"
+    from ui.i18n import t
+
+    return t("ps.result_summary", shown=shown, total=total)
 
 
 # ── Pencarian ekspresi (parser terbatas, TANPA eval/exec) ─────────────────
@@ -425,17 +512,26 @@ EXPR_HELP = ("Contoh: `f1 > 0.8`, `accuracy >= 0.9 and auc > 0.85`. "
              "Nama yang dikenal: " + ", ".join(sorted(_EXPR_FIELDS)) + ".")
 
 
+def expr_help() -> str:
+    """Bantuan ekspresi pada bahasa aktif; nama metriknya tetap apa adanya."""
+    from ui.i18n import t
+
+    return t("ps.expr_help", names=", ".join(sorted(_EXPR_FIELDS)))
+
+
 class ExpressionError(ValueError):
     """Ekspresi tidak dapat dipahami. Pesannya untuk ditampilkan apa adanya."""
 
 
-def parse_expression(text):
+def parse_expression(text):  # noqa: C901 — parser kecil, alurnya lurus
     """Ubah ekspresi menjadi daftar (field, op, angka). TIDAK memakai eval/exec.
 
     Hanya pola `nama operator angka` yang digabung dengan ``and`` yang diterima;
     apa pun di luar itu memunculkan :class:`ExpressionError` dengan pesan jelas.
     Mengembalikan [] untuk teks kosong (artinya: tanpa penyaringan).
     """
+    from ui.i18n import t
+
     raw = (text or "").strip()
     if not raw:
         return []
@@ -446,16 +542,16 @@ def parse_expression(text):
             continue
         match = _TERM_RE.match(chunk)
         if not match:
-            raise ExpressionError(
-                f"Bagian `{chunk.strip()}` tidak dikenali. {EXPR_HELP}")
+            raise ExpressionError(t("ps.expr_unknown_part",
+                                    part=chunk.strip(), help=expr_help()))
         name, op, number = match.group(1).lower(), match.group(2), match.group(3)
         field = _EXPR_FIELDS.get(name) or _EXPR_ALIASES.get(name)
         if field is None:
-            raise ExpressionError(
-                f"`{match.group(1)}` bukan nama metrik. {EXPR_HELP}")
+            raise ExpressionError(t("ps.expr_not_metric",
+                                    name=match.group(1), help=expr_help()))
         terms.append((field, op, float(number)))
     if not terms:
-        raise ExpressionError(f"Ekspresi kosong. {EXPR_HELP}")
+        raise ExpressionError(t("ps.expr_empty", help=expr_help()))
     return terms
 
 
@@ -498,19 +594,26 @@ def is_mixed_mode(rows) -> bool:
     return len(modes_in(rows)) > 1
 
 
+#: Konstanta peringatan di `orchestrator.run_mode` TIDAK diubah — ia tercatat
+#: pada data lama. Kalimat yang TAMPIL dipetakan di sini.
+MIXED_MODE_WARNING_KEY = "ps.mixed_mode_warning"
+
+
 def comparison_warnings(rows) -> list[str]:
     """Peringatan WAJIB sebelum menyandingkan angka."""
+    from ui.i18n import t
+
     warnings = []
     # Mode lebih dulu: perbedaan parameter membuat angka tidak sebanding
     # sebelum semantik metrik sempat menjadi soal.
     if is_mixed_mode(rows):
-        warnings.append(MIXED_MODE_WARNING)
+        warnings.append(t(MIXED_MODE_WARNING_KEY))
     if is_cross_family(rows):
-        warnings.append(CROSS_FAMILY_WARNING)
+        warnings.append(cross_family_warning())
     hashes = {r.get("_dataset_hash_full") for r in rows or []
               if r.get("_dataset_hash_full")}
     if len(hashes) > 1:
-        warnings.append(DATASET_MISMATCH_WARNING)
+        warnings.append(t("ps.dataset_mismatch_warning"))
     return warnings
 
 
@@ -565,7 +668,8 @@ def build_comparison(rows, param_keys=(), *, only_differences=False) -> dict:
                 continue
             fields.append({"label": col["label"], "values": values,
                            "differs": differs, "align": _align_for(col, values)})
-        return {"group": group, "fields": fields}
+        return {"group": group, "group_label": group_label(group),
+                "fields": fields}
 
     sections = [
         section(GROUP_IDENTITY, _COMPARE_IDENTITY),
@@ -618,21 +722,58 @@ def drop_from_comparison(rows, experiment_id):
 
 
 def compare_selection_error(selected_ids) -> str:
-    """Pesan bila pilihan tidak layak dibandingkan; "" bila layak."""
+    """Pesan bila pilihan tidak layak dibandingkan; "" bila layak.
+
+    BATASNYA tidak berubah — hanya kalimatnya yang mengikuti bahasa.
+    """
+    from ui.i18n import t
+
     n = len(selected_ids or [])
     if n < 2:
-        return "Pilih minimal dua eksperimen untuk dibandingkan."
+        return t("ps.compare_need_two")
     if n > MAX_COMPARE:
-        return (f"Maksimal {MAX_COMPARE} eksperimen dapat dibandingkan "
-                f"sekaligus (dipilih {n}).")
+        return t("ps.compare_too_many", max=MAX_COMPARE, selected=n)
     return ""
 
 
 # ── Ekspor CSV ────────────────────────────────────────────────────────────
 
+# Judul kolom KETERANGAN dalam bahasa bawaan. Dipertahankan sebagai konstanta
+# karena ia nilai yang diimpor & diuji test lama; perenderannya memakai fungsi
+# di bawah, yang mengikuti bahasa aktif saat ekspor dibuat.
 CSV_SEMANTICS_COLUMN = "Semantik metrik"
 CSV_MODE_COLUMN = "Mode eksekusi"
 CSV_PARAMS_COLUMN = "Parameter dipakai"
+
+#: Kunci kamus untuk ketiga judul kolom keterangan.
+CSV_SEMANTICS_KEY = "csv.col_semantics"
+CSV_MODE_KEY = "csv.col_mode"
+CSV_PARAMS_KEY = "csv.col_params"
+
+#: Padanan Inggris semantik metrik. `METRIC_SEMANTICS` sendiri TIDAK diubah —
+#: ia satu-satunya tempat semantik dirumuskan dan dipakai pembanding di tempat
+#: lain; yang ditambahkan hanya terjemahannya.
+METRIC_SEMANTICS_EN = {
+    FAMILY_HIKARI: "weighted average across all classes",
+    FAMILY_EVE: "attack class on the natural holdout",
+}
+
+
+def csv_semantics_text(family) -> str:
+    """Catatan semantik metrik pada bahasa aktif.
+
+    WAJIB ikut ke berkas: CSV sering dibaca terpisah dari aplikasi, dan tanpa
+    baris ini angka HIKARI (rata-rata berbobot) dan angka EVE (kelas serangan)
+    terbaca seolah setara.
+    """
+    from ui.i18n import current_lang, t
+
+    if not family:
+        return t("csv.family_unknown")
+    semantics = (METRIC_SEMANTICS[family] if current_lang() == "id"
+                 else METRIC_SEMANTICS_EN.get(family, METRIC_SEMANTICS[family]))
+    # Nama keluarga TIDAK diterjemahkan — ia nama dataset.
+    return f"{FAMILY_LABELS[family]}: {semantics}"
 
 
 def row_params_text(row) -> str:
@@ -655,17 +796,24 @@ def to_csv(rows, columns) -> str:
     terpisah dari aplikasi — tanpa ketiganya, sebuah run eksplorasi akan
     terbaca persis seperti run resmi, dan itulah yang tidak boleh terjadi.
     """
+    from ui.i18n import t
+    from ui.components.validator_messages import run_mode_badge_text
+
     buffer = io.StringIO()
+    # Nama kolom DATA (metrik, identitas eksperimen, nama pipeline) SENGAJA
+    # tidak diterjemahkan: berkas ini diolah lintas bahasa — skrip analisis
+    # yang mencari kolom "accuracy" harus tetap menemukannya berapa pun bahasa
+    # antarmuka saat berkas dibuat. Yang mengikuti bahasa hanya tiga kolom
+    # KETERANGAN di bawah, yang memang dibaca manusia.
     header = ([c["label"] for c in columns]
-              + [CSV_SEMANTICS_COLUMN, CSV_MODE_COLUMN, CSV_PARAMS_COLUMN])
+              + [t(CSV_SEMANTICS_KEY), t(CSV_MODE_KEY), t(CSV_PARAMS_KEY)])
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(header)
     for row in rows or []:
         fam = family_of(row.get("dataset"))
-        note = (f"{FAMILY_LABELS[fam]}: {METRIC_SEMANTICS[fam]}" if fam
-                else "keluarga pipeline tidak dikenal")
+        note = csv_semantics_text(fam)
         writer.writerow([cell_text(row, c) for c in columns]
-                        + [note, run_mode_badge(row.get("_mode")),
+                        + [note, run_mode_badge_text(row.get("_mode")),
                            row_params_text(row)])
     return buffer.getvalue()
 

@@ -77,7 +77,7 @@ def test_only_identity_fields_are_written_to_the_session():
 
 def test_failure_message_does_not_leak_which_field_was_wrong():
     src = Path(login.__file__).read_text(encoding="utf-8")
-    assert "Username atau password salah." in src
+    assert 't("auth.bad_credentials")' in src
     for leaky in ("tidak ditemukan", "user tidak ada", "username tidak dikenal"):
         assert leaky not in src.lower()
 
@@ -122,8 +122,13 @@ def test_mode_switch_sits_under_a_divider_in_the_sidebar():
     body = src.split("def render_mode_switch()")[1].split("\ndef ")[0]
     assert "with st.sidebar:" in body
     assert "st.divider()" in body
-    assert "Mode pengunjung" in body
-    assert "Keluar" in body
+    # Teksnya kini datang dari kamus; yang diperiksa adalah kuncinya dipakai,
+    # dan kunci itu benar-benar menghasilkan kalimat yang dimaksud.
+    from ui.i18n.core import lookup
+
+    assert 'mode.visitor_line' in body
+    assert lookup("mode.visitor_line", "id") == "Mode pengunjung"
+    assert lookup("mode.visitor_line", "en") == "Visitor mode"
 
 
 def test_the_sidebar_panel_has_no_credential_inputs():
@@ -412,20 +417,42 @@ def test_login_prompts_elsewhere_open_the_same_modal():
     assert "auth_login_form" not in contrib_src      # tidak ada form auth kedua
 
 
-def test_self_registration_can_only_produce_a_pending_contributor():
-    """Registrasi mandiri kini ADA, tetapi tetap bukan jalan memperoleh peran:
-    halaman login hanya boleh memanggil `register_account`, yang selalu
-    menghasilkan Kontributor berstatus menunggu persetujuan."""
+def test_self_registration_can_only_produce_a_contributor():
+    """Registrasi mandiri kini ADA dan akunnya langsung AKTIF, tetapi tetap
+    bukan jalan memperoleh peran: halaman login hanya boleh memanggil
+    `register_account`, yang selalu menghasilkan Kontributor."""
+    import ast
+
     login_src = Path(login.__file__).read_text(encoding="utf-8")
 
     assert "register_account" in login_src
     # Tidak boleh ada jalur pembuatan akun lain di lapis login…
     assert "create_user(" not in login_src
     assert "create_user_as" not in login_src
-    # …dan peran tidak pernah disebut/dikirim dari formulir pendaftaran.
-    signup = login_src.split("def _render_signup_tab()")[1].split("\ndef ")[0]
-    for token in ("role", "research_admin", "ROLE_"):
-        assert token not in signup, token
+
+    # …dan peran tidak pernah dikirim dari formulir pendaftaran.
+    #
+    # Diperiksa lewat AST, bukan pencarian substring: "role" muncul di dalam
+    # kata Indonesia biasa ("mempe-role-h"), sehingga pencarian teks menuduh
+    # docstring yang justru MENEGASKAN aturan ini.
+    func = next(n for n in ast.walk(ast.parse(login_src))
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "_render_signup_tab")
+    for node in ast.walk(func):
+        if isinstance(node, ast.Name):
+            assert "role" not in node.id.lower(), node.id
+        if isinstance(node, ast.Attribute):
+            assert "role" not in node.attr.lower(), node.attr
+        if isinstance(node, ast.keyword):
+            assert "role" not in (node.arg or "").lower(), node.arg
+
+    # Yang dipanggil memang register_account, dan tanpa argumen peran.
+    calls = [n for n in ast.walk(func) if isinstance(n, ast.Call)]
+    registrations = [c for c in calls
+                     if isinstance(c.func, ast.Name)
+                     and c.func.id == "register_account"]
+    assert len(registrations) == 1
+    assert all(k.arg != "role" for k in registrations[0].keywords)
 
 
 # ── no ownership filtering anywhere ───────────────────────────────────────

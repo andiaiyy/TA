@@ -196,7 +196,10 @@ def test_the_catalog_colours_are_theme_safe():
     css = src.split("_CSS = ")[1].split('"""')[1]
     assert not re.search(r"#[0-9a-fA-F]{3,8}\b", css), css
     # SATU warna aksen — boleh dipakai di beberapa tempat, asal tokennya sama.
-    accents = set(re.findall(r"var\(--[a-z-]+", css)) - {"var(--text-color"}
+    # Variabel yang BUKAN warna (mis. lebar blok teks) tidak ikut dihitung:
+    # yang dijaga test ini adalah keamanan warna lintas tema.
+    non_colour = {"var(--text-color", "var(--ids-cat-textw"}
+    accents = set(re.findall(r"var\(--[a-z-]+", css)) - non_colour
     assert accents == {"var(--primary-color"}, accents
     assert "var(--primary-color, currentColor)" in css
     # Warna netral lainnya harus transparan supaya aman di kedua tema.
@@ -326,7 +329,7 @@ def test_the_execute_flow_keeps_all_of_its_early_returns():
     src = (REPO_ROOT / "ui" / "views" / "run_experiment.py").read_text(encoding="utf-8")
     body = src.split("def _render_execute():")[1].split("\n# ─── ")[0]
 
-    for guard in ("Belum ada berkas dataset di", "if not dataset_path:",
+    for guard in ('t("re.empty_no_dataset_files")', "if not dataset_path:",
                   "if not v.get(\"success\"):", "if not pipelines:",
                   'if "polling_experiment_id" in st.session_state:'):
         assert guard in body, guard
@@ -352,7 +355,7 @@ def test_the_execute_flow_is_not_duplicated():
 
     assert names.count("_render_execute") == 1
     assert names.count("render") == 1
-    assert src.count('st.button("Run Experiment", type="primary"') == 1
+    assert src.count('st.button(t("re.btn_run"), type="primary"') == 1
 
 
 def test_the_catalog_view_does_not_reimplement_the_flow():
@@ -413,7 +416,9 @@ def test_the_catalog_opens_by_default_with_every_algorithm(tmp_path):
     from config.pipeline_registry import PIPELINE_REGISTRY
 
     at = _run_page(tmp_path)
-    assert "Run Experiment" in _button_labels(at)
+    from ui.i18n.core import lookup
+
+    assert lookup("re.btn_run", "id") in _button_labels(at)
 
     chips = " ".join(m.value for m in at.markdown if "ids-cat-chips" in m.value)
     for entry in PIPELINE_REGISTRY.values():
@@ -421,15 +426,26 @@ def test_the_catalog_opens_by_default_with_every_algorithm(tmp_path):
 
 
 def test_each_block_has_only_name_description_and_algorithms(tmp_path):
-    """Blok ringkas: keterangan panjang tidak boleh bocor ke katalog."""
+    """Baris ringkas: keterangan TEKNIS panjang tidak boleh bocor ke katalog.
+
+    Kredit paper adalah perkecualian yang DISENGAJA sejak katalog menjadi
+    daftar baris: ia tingkat teks ketiga, dipotong CSS menjadi satu baris
+    dengan teks penuhnya tetap ada di atribut `title` dan di pop-up Detail.
+    Yang tetap dilarang bocor adalah rincian teknis pipeline.
+    """
     at = _run_page(tmp_path)
     block_text = " ".join(m.value for m in at.markdown
                           if "ids-cat-" in m.value and "<style>" not in m.value)
 
     for moved in ("preprocessing", "fixed_params", "anti_leakage",
                   "Hyperparameter", "Kolom label", "Format berkas",
-                  "random_state", "Reproduksi"):
+                  "random_state"):
         assert moved not in block_text, moved
+
+    # Kredit paper hadir sebagai tingkat ketiga — dan dipotong, bukan diurai.
+    if "ids-cat-note" in block_text:
+        note = block_text.split('class="ids-cat-note"')[1]
+        assert note.startswith(" title=")     # teks penuh tersedia di tooltip
 
     # Satu tombol Detail per research pipeline.
     assert _button_labels(at).count("Detail") == len(pc.build_catalog())
@@ -482,7 +498,10 @@ def test_the_execute_view_renders_without_exception(tmp_path):
 
 def test_pressing_run_experiment_moves_to_the_execute_view(tmp_path):
     at = _run_page(tmp_path)
-    next(b for b in at.button if b.label == "Run Experiment").click().run()
+    from ui.i18n.core import lookup
+
+    label = lookup("re.btn_run", "id")
+    next(b for b in at.button if b.label == label).click().run()
 
     assert at.exception is None or not at.exception
     assert at.session_state.filtered_state.get(rx._VIEW_KEY) == rx.VIEW_EXECUTE
@@ -507,11 +526,15 @@ def test_a_running_experiment_is_never_hidden_behind_the_catalog(tmp_path):
     assert at.exception is None or not at.exception
 
     labels = _button_labels(at)
-    assert "← Katalog" in labels
-    assert "Run Experiment" not in labels        # katalog TIDAK dirender
+    from ui.i18n.core import lookup
+
+    assert lookup("re.btn_catalog", "id") in labels
+    # katalog TIDAK dirender
+    assert lookup("re.btn_run", "id") not in labels
 
     # Stage view tetap tercapai walau alur eksekusi berhenti di early-return.
-    assert any("Experiment not found" in e.value for e in at.error)
+    assert any(lookup("re.msg_exp_not_found", "id") in e.value
+               for e in at.error)
 
 
 def test_the_back_button_is_locked_while_an_experiment_runs(tmp_path):

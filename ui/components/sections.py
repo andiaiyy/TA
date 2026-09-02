@@ -50,6 +50,29 @@ def render_section(title: str, *, help: str | None = None) -> None:
     st.header(title, anchor=False, help=help, text_alignment=SECTION_ALIGN)
 
 
+#: Awalan kunci container penanda prosa — sama dengan `theme.PROSE_KEY`.
+PROSE_KEY = theme.PROSE_KEY
+
+
+def prose(text: str, *, key: str) -> None:
+    """PROSA: kalimat penjelasan yang lebar bacanya dibatasi.
+
+    Dipakai HANYA untuk kalimat & paragraf. Blok data — tabel, blok kode,
+    tampilan perbandingan, daftar berkas, pasangan label-nilai, baris katalog,
+    formulir — tidak boleh melewati fungsi ini: semuanya mengikuti lebar penuh
+    kolomnya.
+
+    Batasnya dipasang lewat kelas `st-key-<key>` yang ditambahkan Streamlit pada
+    container berkunci, bukan lewat aturan umum yang mengenai setiap paragraf.
+    Itu pembedanya: aturan umum tidak bisa membedakan prosa dari blok data, dan
+    dulu justru itulah yang membuat tabel & kotak angka berhenti di ~3/4 lebar.
+
+    ``key`` wajib dan harus unik per pemanggilan dalam satu render.
+    """
+    with st.container(key=f"{PROSE_KEY}{key}"):
+        st.markdown(text)
+
+
 def section_body(*, border: bool = True):
     """Pembungkus isi sebuah bagian.
 

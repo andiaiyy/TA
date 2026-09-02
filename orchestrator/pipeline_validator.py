@@ -126,11 +126,30 @@ _WRITE_MODES = ("w", "a", "x", "+")
 
 @dataclass
 class ValidationCheck:
-    """Satu pemeriksaan. ``line`` diisi bila temuan punya lokasi di source."""
+    """Satu pemeriksaan. ``line`` diisi bila temuan punya lokasi di source.
+
+    **Keputusan dan kalimat dipisah.** ``name``, ``status``, dan ``line`` adalah
+    KEPUTUSAN — dipakai untuk menentukan lolos/gagal, mengurutkan temuan, dan
+    menunjuk baris. Ketiganya tidak pernah berbahasa dan tidak boleh berubah.
+
+    ``message`` adalah kalimat bahasa Indonesia — tetap ada apa adanya supaya
+    pemanggil lama, artefak lama, dan test lama tidak berubah maknanya.
+
+    ``key`` + ``values`` adalah bentuk yang dapat diterjemahkan: penanda jenis
+    pesan beserta nilai-nilai yang disisipkan (nama modul, nomor baris, nama
+    berkas). Lapisan TAMPILAN yang menyusun kalimatnya sesuai bahasa aktif lewat
+    ``ui.components.validator_messages.check_message``. Nilai di ``values``
+    TIDAK pernah diterjemahkan — ia nama dan angka apa adanya.
+
+    Penambahan ini SENGAJA aditif: tidak satu pun field lama berubah, sehingga
+    aturan validator tidak tersentuh sama sekali.
+    """
     name: str
     status: str            # PASS | WARN | FAIL
     message: str
     line: int | None = None
+    key: str = ""
+    values: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -218,20 +237,26 @@ def _check_structure(tree: ast.Module) -> list[ValidationCheck]:
             "kelas pipeline", FAIL,
             f"Tidak ditemukan kelas turunan `{BASE_CLASS_NAME}`. Pipeline harus "
             f"berupa kelas yang mewarisi `{BASE_CLASS_NAME}` "
-            f"(lihat `pipelines/base.py`)."))
+            f"(lihat `pipelines/base.py`).",
+            key="vc.no_base_class", values={"base": BASE_CLASS_NAME}))
         return checks
 
     if direct:
         checks.append(ValidationCheck(
             "kelas pipeline", PASS,
-            f"Kelas `{cls.name}` mewarisi `{BASE_CLASS_NAME}`.", cls.lineno))
+            f"Kelas `{cls.name}` mewarisi `{BASE_CLASS_NAME}`.", cls.lineno,
+            key="vc.base_class_ok",
+            values={"cls": cls.name, "base": BASE_CLASS_NAME}))
     else:
         base_names = ", ".join(f"`{b}`" for b in _class_bases(cls))
         checks.append(ValidationCheck(
             "kelas pipeline", WARN,
             f"Kelas `{cls.name}` tidak mewarisi `{BASE_CLASS_NAME}` secara "
             f"langsung, melainkan {base_names}. Pastikan kelas induk itu "
-            f"turunan `{BASE_CLASS_NAME}`.", cls.lineno))
+            f"turunan `{BASE_CLASS_NAME}`.", cls.lineno,
+            key="vc.base_class_indirect",
+            values={"cls": cls.name, "base": BASE_CLASS_NAME,
+                    "bases": base_names}))
 
     methods = _methods(cls)
     # Bila pewarisan tidak langsung, method wajib boleh diwarisi dari induk →
@@ -242,7 +267,8 @@ def _check_structure(tree: ast.Module) -> list[ValidationCheck]:
             checks.append(ValidationCheck(
                 f"method `{name}`", PASS,
                 f"`{name}()` diimplementasi pada `{cls.name}`.",
-                methods[name].lineno))
+                methods[name].lineno,
+                key="vc.method_ok", values={"method": name, "cls": cls.name}))
         else:
             detail = ("" if direct else
                       " (mungkin diwarisi dari kelas induk — tidak dapat "
@@ -250,7 +276,10 @@ def _check_structure(tree: ast.Module) -> list[ValidationCheck]:
             checks.append(ValidationCheck(
                 f"method `{name}`", missing_status,
                 f"Method `{name}()` belum diimplementasi pada `{cls.name}`"
-                f"{detail}.", cls.lineno))
+                f"{detail}.", cls.lineno,
+                key=("vc.method_missing" if direct
+                     else "vc.method_missing_inherited"),
+                values={"method": name, "cls": cls.name}))
 
     if "run" in methods:
         checks.append(_check_run_signature(methods["run"]))
@@ -273,20 +302,30 @@ def _check_run_signature(fn: ast.AST) -> ValidationCheck:
             fn.lineno)
 
     problems: list[str] = []
+    # Tiap masalah dicatat DUA kali: kalimat lama (untuk catatan & test lama)
+    # dan bentuk kunci+nilai yang dapat diterjemahkan. Keputusannya sama.
+    problem_keys: list[dict] = []
     if positional[0] != RUN_FIRST_PARAM:
         problems.append(f"parameter pertama `{positional[0]}` "
                         f"(kontrak: `{RUN_FIRST_PARAM}`)")
+        problem_keys.append({"key": "err.chk_run_signature_first",
+                             "values": {"found": positional[0],
+                                        "expected": RUN_FIRST_PARAM}})
     if RUN_PROGRESS_PARAM not in args and not fn.args.kwonlyargs:
         problems.append(f"tidak ada parameter opsional `{RUN_PROGRESS_PARAM}`")
+        problem_keys.append({"key": "err.chk_run_signature_progress",
+                             "values": {"param": RUN_PROGRESS_PARAM}})
     if problems:
         return ValidationCheck(
             "signature run()", WARN,
             "Signature berbeda dari kontrak: " + "; ".join(problems) + ".",
-            fn.lineno)
+            fn.lineno, key="err.chk_run_signature",
+            values={"problems": problem_keys})
     return ValidationCheck(
         "signature run()", PASS,
         f"`run(self, {RUN_FIRST_PARAM}, {RUN_PROGRESS_PARAM}=None)` sesuai kontrak.",
-        fn.lineno)
+        fn.lineno, key="err.chk_run_signature_ok",
+        values={"first": RUN_FIRST_PARAM, "progress": RUN_PROGRESS_PARAM})
 
 
 def _check_get_info(fn: ast.AST) -> ValidationCheck:
@@ -325,11 +364,14 @@ def _check_get_info(fn: ast.AST) -> ValidationCheck:
             "get_info() mengembalikan dict", WARN,
             "`get_info()` mengembalikan dict, tetapi kunci berikut belum ada: "
             + ", ".join(f"`{k}`" for k in missing)
-            + " (disarankan oleh `pipelines/base.py`).", literal.lineno)
+            + " (disarankan oleh `pipelines/base.py`).", literal.lineno,
+            key="err.chk_get_info_missing",
+            values={"missing": ", ".join(f"`{k}`" for k in missing),
+                    "source": "pipelines/base.py"})
     return ValidationCheck(
         "get_info() mengembalikan dict", PASS,
         "`get_info()` mengembalikan dict dengan seluruh kunci metadata yang "
-        "disarankan.", literal.lineno)
+        "disarankan.", literal.lineno, key="err.chk_get_info_complete")
 
 
 # ── Pemeriksaan KEAMANAN ──────────────────────────────────────────────────
@@ -349,7 +391,10 @@ def _check_imports(tree: ast.Module) -> tuple[list[ValidationCheck], set[str]]:
             checks.append(ValidationCheck(
                 "import terlarang", FAIL,
                 f"Penggunaan modul `{root}` tidak diizinkan pada pipeline yang "
-                f"diunggah ({FORBIDDEN_MODULES[root]}).", line))
+                f"diunggah ({FORBIDDEN_MODULES[root]}).", line,
+                key="vc.import_forbidden",
+                values={"module": root, "reason": FORBIDDEN_MODULES[root],
+                        "line": line}))
         elif root not in ALLOWED_MODULES:
             neutral.append((root, line))
 
@@ -369,7 +414,8 @@ def _check_imports(tree: ast.Module) -> tuple[list[ValidationCheck], set[str]]:
         checks.append(ValidationCheck(
             "import di luar daftar", WARN,
             f"Modul `{root}` bukan pustaka ML yang biasa dipakai platform ini. "
-            f"Periksa manual sebelum diaktifkan.", line))
+            f"Periksa manual sebelum diaktifkan.", line,
+            key="vc.module_unknown", values={"module": root, "line": line}))
     return checks, module_bindings
 
 
@@ -401,7 +447,10 @@ def _check_calls(tree: ast.Module, module_bindings: set[str]) -> list[Validation
             checks.append(ValidationCheck(
                 "pemanggilan terlarang", FAIL,
                 f"Pemanggilan `{name}()` tidak diizinkan "
-                f"({FORBIDDEN_CALLS[name]}).", node.lineno))
+                f"({FORBIDDEN_CALLS[name]}).", node.lineno,
+                key="vc.call_forbidden",
+                values={"call": name, "reason": FORBIDDEN_CALLS[name],
+                        "line": node.lineno}))
             continue
 
         # 2. Pemanggilan pada modul terlarang (mis. os.system, subprocess.run).
@@ -409,7 +458,10 @@ def _check_calls(tree: ast.Module, module_bindings: set[str]) -> list[Validation
             checks.append(ValidationCheck(
                 "pemanggilan terlarang", FAIL,
                 f"Pemanggilan `{name}()` tidak diizinkan "
-                f"({FORBIDDEN_MODULES[root]}).", node.lineno))
+                f"({FORBIDDEN_MODULES[root]}).", node.lineno,
+                key="vc.call_forbidden",
+                values={"call": name, "reason": FORBIDDEN_MODULES[root],
+                        "line": node.lineno}))
             continue
 
         # 3. getattr/setattr PADA OBJEK MODUL — jalan pintas menuju API
@@ -421,12 +473,17 @@ def _check_calls(tree: ast.Module, module_bindings: set[str]) -> list[Validation
                 checks.append(ValidationCheck(
                     "pemanggilan terlarang", FAIL,
                     f"`{leaf}()` pada objek modul `{target_name}` tidak "
-                    f"diizinkan (menghindari pemeriksaan import).", node.lineno))
+                    f"diizinkan (menghindari pemeriksaan import).", node.lineno,
+                    key="vc.reflection_on_module",
+                    values={"call": leaf, "target": target_name,
+                            "line": node.lineno}))
             else:
                 checks.append(ValidationCheck(
                     "refleksi atribut", WARN,
                     f"`{leaf}()` dipakai — pastikan targetnya bukan modul.",
-                    node.lineno))
+                    node.lineno,
+                    key="vc.reflection_warn",
+                    values={"call": leaf, "line": node.lineno}))
             continue
 
         # 4. open() untuk menulis. Membaca berkas dataset tetap diperbolehkan.
@@ -435,7 +492,8 @@ def _check_calls(tree: ast.Module, module_bindings: set[str]) -> list[Validation
                 "penulisan berkas", FAIL,
                 "`open()` dengan mode tulis/timpa tidak diizinkan; pipeline "
                 "hanya boleh membaca dataset dan mengembalikan PipelineResult.",
-                node.lineno))
+                node.lineno,
+                key="vc.file_write", values={"line": node.lineno}))
     return checks
 
 
@@ -485,7 +543,8 @@ def validate_pipeline_source(source_code: str, filename: str = "") -> Validation
         return report
 
     report.checks.append(ValidationCheck(
-        "sintaks Python", PASS, "Berkas adalah Python yang valid."))
+        "sintaks Python", PASS, "Berkas adalah Python yang valid.",
+        key="err.chk_python_valid"))
 
     import_checks, module_bindings = _check_imports(tree)
     report.checks.extend(import_checks)

@@ -355,7 +355,7 @@ def test_the_visitor_line_matches_real_behaviour():
     # "memeriksa kecocokan dataset" bukan kemampuan yang dikarang.
     src = (REPO_ROOT / "ui" / "views" / "contribute.py").read_text(encoding="utf-8")
     tab = src.split("def _render_dataset_server_tab(")[1].split(chr(10) + "def ")[0]
-    assert "Periksa kecocokan dataset" in tab
+    assert 't("ap.btn_check_compat")' in tab
     assert "can_upload" not in tab and "require_upload" not in tab
 
 

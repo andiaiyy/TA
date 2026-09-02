@@ -38,13 +38,14 @@ from pathlib import Path
 from database.db import _retry_on_locked, get_connection
 from database.models import UPLOADED_PREFIX
 from utils.timestamps import now_iso
+from orchestrator.user_errors import UserFacingMixin
 
 logger = logging.getLogger(__name__)
 
 _HASH_CHUNK = 1024 * 1024
 
 
-class DynamicRegistryError(RuntimeError):
+class DynamicRegistryError(UserFacingMixin, RuntimeError):
     """Pipeline terunggah tidak dapat dimuat (hash, berkas, atau kontrak)."""
 
 
@@ -56,7 +57,8 @@ def safe_pipeline_name(raw: str) -> str:
                       for ch in (raw or "").strip().lower())
     cleaned = cleaned.strip("_-")
     if not cleaned:
-        raise DynamicRegistryError("Nama pipeline tidak sah.")
+        raise DynamicRegistryError("Nama pipeline tidak sah.",
+                                   key="err.bad_pipeline_name")
     return cleaned[:60]
 
 
@@ -116,17 +118,25 @@ def file_sha256(path: str | Path) -> str:
 def register_pipeline(*, name: str, dataset_type: str, entry_class: str,
                       entry_file: str | Path, registered_by: str,
                       submission_id: int | None = None, algorithm: str | None = None,
-                      paper: str | None = None, db_path: str | None = None) -> dict:
+                      paper: str | None = None, edited_by: str | None = None,
+                      edited_at: str | None = None, change_note: str | None = None,
+                      db_path: str | None = None) -> dict:
     """Daftarkan satu VERSI BARU pipeline terunggah.
 
     Tidak pernah menimpa: versi dihitung dari maksimum yang sudah ada + 1, dan
     (name, version) unik di level skema. Hash berkas dihitung SAAT INI dan
     disimpan sebagai patokan verifikasi saat dimuat nanti.
+
+    ``edited_by``/``edited_at``/``change_note`` hanya terisi bila versi ini
+    lahir dari PENYUNTINGAN Research Admin. Versi 1 lahir dari persetujuan,
+    jadi ketiganya kosong di sana — itu fakta, bukan data yang hilang.
     """
     safe_name = safe_pipeline_name(name)
     entry_path = Path(entry_file)
     if not entry_path.is_file():
-        raise DynamicRegistryError(f"Berkas entry point tidak ditemukan: {entry_path}")
+        raise DynamicRegistryError(
+            f"Berkas entry point tidak ditemukan: {entry_path}",
+            key="err.entry_file_missing", values={"path": str(entry_path)})
 
     version = next_version(safe_name, db_path)
     pipeline_id = build_pipeline_id(safe_name, version)
@@ -138,11 +148,12 @@ def register_pipeline(*, name: str, dataset_type: str, entry_class: str,
             """INSERT INTO registered_pipelines
                (pipeline_id, name, version, submission_id, dataset_type,
                 entry_class, entry_file, file_hash, algorithm, paper,
-                registered_by, registered_at, active)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+                registered_by, registered_at, active,
+                edited_by, edited_at, change_note)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)""",
             (pipeline_id, safe_name, version, submission_id, dataset_type,
              entry_class, str(entry_path), digest, algorithm, paper,
-             registered_by, now_iso()),
+             registered_by, now_iso(), edited_by, edited_at, change_note),
         )
         conn.commit()
     finally:
@@ -165,7 +176,10 @@ def set_pipeline_active(pipeline_id: str, active: bool, *, actor: dict | None,
     require_approve(actor, db_path)
     item = get_registered(pipeline_id, db_path)
     if item is None:
-        raise DynamicRegistryError(f"Pipeline terdaftar tidak ditemukan: {pipeline_id}")
+        raise DynamicRegistryError(
+            f"Pipeline terdaftar tidak ditemukan: {pipeline_id}",
+            key="err.pipeline_not_registered",
+            values={"pipeline": pipeline_id})
 
     conn = get_connection(db_path)
     try:
@@ -197,21 +211,28 @@ def load_pipeline_class(entry_file: str | Path, entry_class: str,
 
     path = Path(entry_file)
     if not path.is_file():
-        raise DynamicRegistryError(f"Berkas pipeline tidak ditemukan: {path}")
+        raise DynamicRegistryError(
+            f"Berkas pipeline tidak ditemukan: {path}",
+            key="err.pipeline_file_missing", values={"path": str(path)})
 
     actual = file_sha256(path)
     if actual != expected_hash:
         raise DynamicRegistryError(
             f"Hash berkas tidak cocok untuk {path.name}: tercatat "
             f"{expected_hash[:12]}…, ditemukan {actual[:12]}…. Berkas berubah "
-            f"atau rusak — pemuatan ditolak.")
+            f"atau rusak — pemuatan ditolak.",
+            key="err.hash_mismatch",
+            values={"file": path.name, "recorded": expected_hash[:12],
+                    "found": actual[:12]})
 
     # Nama modul unik & bernamespace: tidak menimpa modul platform mana pun,
     # dan folder unggahan TIDAK ditambahkan ke sys.path.
     module_name = f"_uploaded_pipeline_{actual[:16]}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
-        raise DynamicRegistryError(f"Tidak dapat menyiapkan pemuatan untuk {path.name}")
+        raise DynamicRegistryError(
+            f"Tidak dapat menyiapkan pemuatan untuk {path.name}",
+            key="err.cannot_prepare_load", values={"path": path.name})
 
     module = importlib.util.module_from_spec(spec)
     try:
@@ -220,18 +241,27 @@ def load_pipeline_class(entry_file: str | Path, entry_class: str,
     except Exception as e:
         sys.modules.pop(module_name, None)
         raise DynamicRegistryError(
-            f"Gagal memuat {path.name}: {type(e).__name__}: {e}") from e
+            f"Gagal memuat {path.name}: {type(e).__name__}: {e}",
+            key="err.pipeline_load_failed",
+            values={"filename": path.name, "kind": type(e).__name__,
+                    "detail": str(e)}) from e
 
     cls = getattr(module, entry_class, None)
     if cls is None:
-        raise DynamicRegistryError(f"Kelas {entry_class} tidak ada di {path.name}")
+        raise DynamicRegistryError(
+            f"Kelas {entry_class} tidak ada di {path.name}",
+            key="err.class_not_in_file",
+            values={"cls": entry_class, "filename": path.name})
     if not (isinstance(cls, type) and issubclass(cls, BasePipeline)):
         raise DynamicRegistryError(
-            f"{entry_class} bukan turunan BasePipeline — ditolak.")
+            f"{entry_class} bukan turunan BasePipeline — ditolak.",
+            key="err.not_a_base_pipeline", values={"cls": entry_class})
     for method in ("run", "get_info"):
         if not callable(getattr(cls, method, None)):
             raise DynamicRegistryError(
-                f"{entry_class} tidak mengimplementasi {method}() — ditolak.")
+                f"{entry_class} tidak mengimplementasi {method}() — ditolak.",
+                key="err.missing_contract_method",
+                values={"cls": entry_class, "method": method})
     return cls
 
 

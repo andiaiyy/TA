@@ -45,6 +45,28 @@ _LAST_PAGE_KEY = "_page_flags_last_page"
 # daftar kedua yang bisa ketinggalan.
 PAGE_SCOPED_KEYS: tuple[str, ...] = DIALOG_KEYS
 
+# Awalan penanda SUB-TAMPILAN milik view: "sedang membuka apa" di dalam sebuah
+# halaman (mode kontribusi, bagian yang aktif, pipeline yang sedang disunting).
+#
+# Disapu lewat AWALAN, bukan daftar nama. Daftar kedua yang berisi nama-nama
+# kunci pasti akan tertinggal begitu sebuah view menambah penanda baru — dan
+# kegagalannya senyap: keadaan lama bertahan setelah keluar tanpa ada yang
+# error. Awalan ini sudah menjadi kebiasaan penamaan di kedua view.
+VIEW_STATE_PREFIXES: tuple[str, ...] = ("_contrib", "_mp_")
+
+
+def clear_view_state() -> None:
+    """Buang seluruh penanda sub-tampilan view.
+
+    Dipanggil saat KELUAR: identitas berganti, jadi "sedang membuka apa" milik
+    identitas lama tidak boleh ikut terbawa. Kunci widget tidak tersentuh —
+    seluruh penanda di atas berawalan garis bawah, sedangkan kunci widget tidak.
+    """
+    stale = [key for key in list(st.session_state.keys())
+             if isinstance(key, str) and key.startswith(VIEW_STATE_PREFIXES)]
+    for key in stale:
+        st.session_state.pop(key, None)
+
 
 def drop_stale_page_flags(current_page: str | None = None) -> bool:
     """Buang flag modal berhalaman bila halaman aktif BERGANTI sejak run lalu.
