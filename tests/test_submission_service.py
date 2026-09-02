@@ -27,6 +27,7 @@ from orchestrator.submission_service import (
     SubmissionError, approve_submission, get_submission, list_submissions,
     read_submission_sources, reject_submission, submit_dataset, submit_pipeline,
 )
+from tests._trial_helpers import pass_trial
 
 VISITOR = None
 CONTRIBUTOR = {"username": "rina", "role": "contributor"}
@@ -204,6 +205,7 @@ def test_approving_a_pipeline_moves_it_without_touching_the_static_registry(env)
                            user=CONTRIBUTOR, db_path=env["db"],
                            metadata={"name": "my_pipeline",
                                      "entry_class": "MyPipeline"})
+    pass_trial(item["id"], env["db"])     # persetujuan bergerbang uji coba
     done = approve_submission(item["id"], actor=ADMIN, dataset_type="HIKARI2021",
                               db_path=env["db"])
 
@@ -227,6 +229,7 @@ def test_approving_a_pipeline_without_a_dataset_type_is_refused(env):
     item = submit_pipeline([("p.py", PIPELINE_SOURCE)], "p.py",
                            user=CONTRIBUTOR, db_path=env["db"],
                            metadata={"entry_class": "MyPipeline"})
+    pass_trial(item["id"], env["db"])
     with pytest.raises(SubmissionError, match="dataset_type"):
         approve_submission(item["id"], actor=ADMIN, db_path=env["db"])
 
@@ -241,12 +244,14 @@ def test_approving_the_same_pipeline_name_twice_creates_two_versions(env):
     meta = {"name": "rf_baru", "entry_class": "MyPipeline"}
     first = submit_pipeline([("p.py", PIPELINE_SOURCE)], "p.py", user=CONTRIBUTOR,
                             db_path=env["db"], metadata=meta)
+    pass_trial(first["id"], env["db"])
     approve_submission(first["id"], actor=ADMIN, dataset_type="HIKARI2021",
                        db_path=env["db"])
 
     second_source = PIPELINE_SOURCE + "\n# revisi\n"
     second = submit_pipeline([("p.py", second_source)], "p.py", user=CONTRIBUTOR,
                              db_path=env["db"], metadata=meta)
+    pass_trial(second["id"], env["db"])
     approve_submission(second["id"], actor=ADMIN, dataset_type="HIKARI2021",
                        db_path=env["db"])
 

@@ -15,9 +15,12 @@ Three things are easy to break silently and are pinned here:
 """
 import ast
 import re
+from html import escape
 from pathlib import Path
 
 import pytest
+
+from ui.i18n.core import lookup
 
 from ui.components import theme
 from ui.components import upload_cards as uc
@@ -279,12 +282,19 @@ def test_a_disabled_card_always_explains_itself(monkeypatch):
     monkeypatch.setattr(uc.st, "markdown", lambda html, **k: notes.append(str(html)))
     monkeypatch.setattr(uc.st, "columns", lambda n, **k: [_Col() for _ in range(n)])
     monkeypatch.setattr(uc.st, "button", lambda label, **kw: False)
-    uc.render_upload_cards(may_upload=False)
+    uc.render_upload_cards(may_upload=False, signed_in=False)
 
     joined = " ".join(n for n in notes if "ids-card-note" in n)
-    for card in uc.CARDS:
-        assert card["denied"] in joined, card["mode"]
-    assert uc.SIGN_IN_HINT in joined
+    # Hanya kartu yang BENAR-BENAR dirender yang perlu menjelaskan diri; kartu
+    # admin tidak lagi ditampilkan kepada pengunjung.
+    shown = uc.visible_cards(may_approve=False, may_manage_users=False,
+                             signed_in=False)
+    assert shown, "harus ada kartu yang dirender"
+    for card in shown:
+        assert lookup(card["denied"], "id") in joined, card["mode"]
+    assert lookup("ap.card_denied_hint", "id") in joined
+    # Jalur yang disembunyikan tetap disebut keberadaannya (ter-escape).
+    assert escape(lookup(uc.VISITOR_ADMIN_NOTE, "id")) in joined
 
 
 def test_the_cards_still_decide_nothing_about_permission():
@@ -390,7 +400,8 @@ def test_the_picker_labels_are_short_phrases():
     src = Path(login.__file__).read_text(encoding="utf-8")
     body = src.split("def render_mode_switch()")[1].split(chr(10) + "def ")[0]
 
-    assert login._MODE_VISITOR == "Pengunjung"
+    # Sebutan mode kini datang dari kamus bahasa, bukan konstanta beku.
+    assert login.visitor_label() == "Pengunjung"       # bahasa bawaan
     assert "Masuk sebagai" not in body              # label lama yang panjang
 
     # Pilihannya nama mode saja — pendek, satu frasa, tanpa tanda baca kalimat.
@@ -519,12 +530,15 @@ def test_the_upload_limit_note_survives():
     assert "MAX_DATASET_UPLOAD_BYTES" in src
 
 
-def test_the_static_check_note_survives():
-    from ui.components import instructions
-
-    src = Path(instructions.__file__).read_text(encoding="utf-8")
-    assert "tidak dijalankan" in src
-    assert "bukan</b> berarti" in src or "bukan" in src
+@pytest.mark.parametrize("lang, ideas", [
+    ("id", ["tidak dijalankan", "bukan</b> berarti"]),
+    ("en", ["<b>not executed</b>", "<b>not</b> mean"]),
+])
+def test_the_static_check_note_survives(lang, ideas):
+    """Kalimatnya pindah ke katalog; ketegasannya diperiksa di KEDUA bahasa."""
+    note = " ".join(lookup("ins.static_check_note", lang).split())
+    for idea in ideas:
+        assert " ".join(idea.split()) in note, (lang, idea)
 
 
 def test_no_mandatory_note_was_shrunk_below_the_caption_size():
@@ -545,26 +559,26 @@ def _words(text: str) -> int:
     return len([w for w in t.split() if any(c.isalpha() for c in w)])
 
 
-def test_the_mandatory_notes_survived_the_cut():
+@pytest.mark.parametrize("lang, static_ideas, sample_idea", [
+    ("id", ["statis", "tidak dijalankan", "bukan</b> berarti aktif"],
+     "cuplikan"),
+    ("en", ["static", "<b>not executed</b>", "<b>not</b> mean active"],
+     "sample"),
+])
+def test_the_mandatory_notes_survived_the_cut(lang, static_ideas, sample_idea):
     """Diringkas sependek mungkin, tetapi informasinya tetap tersampaikan."""
-    from ui.components import instructions as ins
-
-    src = Path(ins.__file__).read_text(encoding="utf-8")
-    # "pemeriksaan statis — berkas tidak dijalankan" + "lolos != aktif"
-    assert "statis" in src and "tidak dijalankan" in src
-    assert "bukan</b> berarti aktif" in src
-    # "berdasarkan cuplikan"
-    assert "cuplikan" in src
+    static = " ".join(lookup("ins.static_check_note", lang).split())
+    for idea in static_ideas:
+        assert " ".join(idea.split()) in static, (lang, idea)
+    sample = lookup("ins.dataset_sample_note", lang).lower()
+    assert sample_idea in sample, lang
 
 
-def test_the_shortened_notes_are_actually_short():
-    from ui.components import instructions as ins
-
-    src = Path(ins.__file__).read_text(encoding="utf-8")
-    static = src.split("🔒 Pemeriksaan")[1].split('"""')[0].split(")")[0]
-    sample = src.split("🔍 Angka berasal")[1].split(")")[0]
-    assert _words(static) <= 20, static
-    assert _words(sample) <= 20, sample
+@pytest.mark.parametrize("lang", ["id", "en"])
+def test_the_shortened_notes_are_actually_short(lang):
+    """Pendek pada KEDUA bahasa — panjangnya menentukan tinggi bloknya."""
+    for key in ("ins.static_check_note", "ins.dataset_sample_note"):
+        assert _words(lookup(key, lang)) <= 22, (key, lang)
 
 
 def test_the_capability_line_is_a_phrase_not_a_sentence():
@@ -603,8 +617,11 @@ def test_detail_moved_to_help_not_deleted():
     from ui.components import instructions as ins
 
     src = Path(ins.__file__).read_text(encoding="utf-8")
-    assert "__subclasses__" in src            # rincian sandbox-escape
     assert "help=" in src
+    # Rinciannya pindah ke katalog, tetap sebagai isi tooltip — pada kedua
+    # bahasa, karena nama atributnya memang tidak diterjemahkan.
+    for lang in ("id", "en"):
+        assert "__subclasses__" in lookup("ins.outside_list_help", lang), lang
 
     run_src = (REPO_ROOT / "ui" / "views" / "run_experiment.py").read_text(
         encoding="utf-8")

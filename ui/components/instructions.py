@@ -160,7 +160,9 @@ def chips_html(items: list[str], tone: str, *, preview: int = CHIP_PREVIEW) -> s
     chips = "".join(
         f'<span class="ids-chip {tone}">{escape(str(item))}</span>' for item in shown)
     if rest > 0:
-        chips += f'<span class="ids-chip more">+{rest} lainnya</span>'
+        from ui.i18n import t
+        chips += (f'<span class="ids-chip more">'
+                  f'{escape(t("ins.chip_more", count=rest))}</span>')
     return f'<div class="ids-chips">{chips}</div>'
 
 
@@ -192,62 +194,55 @@ def render_pipeline_instructions() -> None:
         FORBIDDEN_MODULES, REQUIRED_METHODS, RUN_FIRST_PARAM, RUN_PROGRESS_PARAM,
     )
 
+    from ui.i18n import t
+
     inject_css()
-    render_flow(PIPELINE_FLOW, alt=PIPELINE_FLOW_ALT)
+    render_flow(pipeline_flow_display(), alt=t("ins.flow_pipeline_alt"))
 
     methods = " · ".join(f"`{m}()`" for m in REQUIRED_METHODS)
     info_keys = ", ".join(f"`{k}`" for k in EXPECTED_INFO_KEYS)
     st.markdown(
-        "| Aspek | Ketentuan |\n"
+        f"| {t('ins.col_aspect')} | {t('ins.col_rule')} |\n"
         "| --- | --- |\n"
-        f"| Kelas induk | `{BASE_CLASS_NAME}` |\n"
-        f"| Metode wajib | {methods} |\n"
-        f"| Tanda tangan `run` | `({RUN_FIRST_PARAM}, {RUN_PROGRESS_PARAM}=None)` "
+        f"| {t('ins.row_base_class')} | `{BASE_CLASS_NAME}` |\n"
+        f"| {t('ins.row_required_methods')} | {methods} |\n"
+        f"| {t('ins.row_run_signature')} | "
+        f"`({RUN_FIRST_PARAM}, {RUN_PROGRESS_PARAM}=None)` "
         f"→ `PipelineResult` |\n"
-        f"| Titik masuk | tepat **satu** berkas memuat kelas turunan itu; "
-        f"berkas lain pendukung |\n"
-        f"| Anti-kebocoran | scaler/PCA/penyeimbang di-*fit* hanya pada data "
-        f"latih (setelah split) |\n"
-        f"| Kunci `get_info()` | {info_keys} |"
+        f"| {t('ins.row_entry_point')} | {t('ins.rule_entry_point')} |\n"
+        f"| {t('ins.row_anti_leak')} | {t('ins.rule_anti_leak')} |\n"
+        f"| {t('ins.row_info_keys')} | {info_keys} |"
     )
 
     cols = st.columns(2)
     with cols[0]:
-        st.markdown(f"**Modul diizinkan ({len(ALLOWED_MODULES)})**")
+        st.markdown(t("ins.modules_allowed", count=len(ALLOWED_MODULES)))
         render_chips(sorted(ALLOWED_MODULES), "ok")
     with cols[1]:
-        st.markdown(f"**Modul ditolak ({len(FORBIDDEN_MODULES)})**")
+        st.markdown(t("ins.modules_rejected", count=len(FORBIDDEN_MODULES)))
         render_chips(sorted(FORBIDDEN_MODULES), "no")
 
-    render_note(
-        "🔒 Pemeriksaan <b>statis</b> — berkas dibaca, <b>tidak dijalankan</b>. "
-        "Lolos <b>bukan</b> berarti aktif: menunggu tinjauan Research Admin."
-    )
+    render_note(t("ins.static_check_note"))
 
-    st.markdown("**Bentuk yang diharapkan**")
+    st.markdown(t("ins.expected_shape"))
     st.code(pipeline_skeleton(), language="python")
 
     render_contract_docs()
 
     render_mistakes(common_pipeline_mistakes(),
-                    title="Paling sering membuat paket ditolak")
+                    title=t("ins.mistakes_pipeline_title"))
 
-    with st.expander("Persyaratan lengkap — modul & pemanggilan", expanded=False):
-        st.markdown("**Modul yang wajar dipakai**")
+    with st.expander(t("ins.exp_full_requirements"), expanded=False):
+        st.markdown(t("ins.modules_reasonable"))
         st.markdown(", ".join(f"`{m}`" for m in sorted(ALLOWED_MODULES)))
-        st.markdown("**Modul yang dilarang**")
+        st.markdown(t("ins.modules_forbidden"))
         st.markdown(", ".join(f"`{m}`" for m in sorted(FORBIDDEN_MODULES)))
-        st.markdown("**Pemanggilan yang dilarang**")
+        st.markdown(t("ins.calls_forbidden"))
         st.markdown(", ".join(f"`{c}()`" for c in sorted(FORBIDDEN_CALLS)))
         # SATU baris penutup menggantikan tiga keterangan kecil yang sebelumnya
         # tersebar di antara ketiga daftar di atas.
-        st.caption(
-            "Di luar daftar → ditandai, tidak menggagalkan. Sumber: konstanta "
-            "validator.",
-            help="Pemanggilan terlarang mencakup `os.system()`, `open()` mode "
-                 "tulis, dan atribut sandbox-escape (`__subclasses__`, "
-                 "`__globals__`, `__builtins__`).",
-        )
+        st.caption(t("ins.outside_list_caption"),
+                   help=t("ins.outside_list_help"))
 
 
 # ── Contoh kerangka pipeline (dari konstanta kontrak) ─────────────────────
@@ -315,33 +310,39 @@ def _contract_modules() -> tuple[str, str]:
 # Arti tiap field. Kunci HARUS cocok dengan nama field nyata; bila sebuah field
 # tidak punya penjelasan di sini, tabelnya tetap menampilkan field itu (dengan
 # arti kosong) alih-alih menyembunyikannya.
+# Nilainya kini KUNCI katalog, bukan kalimat: konstanta modul dievaluasi
+# sekali saat impor, jadi kalimatnya akan membeku pada satu bahasa.
 _INPUT_MEANING = {
-    "df": "DataFrame dataset yang sudah diparsing platform.",
-    "label_column": "Nama kolom label pada `df`.",
-    "dataset_type": "Research pipeline yang dituju (mis. HIKARI2021).",
-    "test_size": "Proporsi data uji.",
-    "random_state": "Benih acak — kunci hasil dapat diulang.",
-    "dataset_path": "Path berkas mentah, untuk pipeline yang membaca berkas sendiri.",
-    "param_overrides": ("Penyesuaian hyperparameter untuk run eksplorasi; "
-                        "KOSONG pada run resmi. Isinya hanya kunci yang ada di "
-                        "`fixed_params` dan sudah divalidasi orchestrator."),
+    "df": "ins.fld_df",
+    "label_column": "ins.fld_label_column",
+    "dataset_type": "ins.fld_dataset_type",
+    "test_size": "ins.fld_test_size",
+    "random_state": "ins.fld_random_state",
+    "dataset_path": "ins.fld_dataset_path",
+    "param_overrides": "ins.fld_param_overrides",
 }
 _RESULT_MEANING = {
-    "accuracy": "Akurasi keseluruhan.",
-    "precision": "Presisi.",
-    "recall": "Recall.",
-    "f1_score": "F1-score.",
-    "confusion_matrix": "Matriks kebingungan sebagai list of list.",
-    "model": "Objek model terlatih.",
-    "feature_names": "Nama fitur yang benar-benar dipakai.",
-    "label_mapping": "Peta nama kelas → nilai label.",
-    "extra_info": "Tambahan bebas (ROC, learning curve, dll).",
+    "accuracy": "ins.fld_accuracy",
+    "precision": "ins.fld_precision",
+    "recall": "ins.fld_recall",
+    "f1_score": "ins.fld_f1_score",
+    "confusion_matrix": "ins.fld_confusion_matrix",
+    "model": "ins.fld_model",
+    "feature_names": "ins.fld_feature_names",
+    "label_mapping": "ins.fld_label_mapping",
+    "extra_info": "ins.fld_extra_info",
 }
 
 
 def contract_fields(cls, meanings) -> list[dict]:
-    """(nama, tipe, wajib/opsional, arti) dari definisi dataclass NYATA."""
+    """(nama, tipe, wajib/opsional, arti) dari definisi dataclass NYATA.
+
+    ``meanings`` memetakan nama field → kunci katalog. Field tanpa kunci tetap
+    muncul dengan arti kosong, bukan disembunyikan.
+    """
     import dataclasses
+
+    from ui.i18n import t
 
     out = []
     for f in dataclasses.fields(cls):
@@ -352,7 +353,7 @@ def contract_fields(cls, meanings) -> list[dict]:
             "name": f.name,
             "type": type_name.replace("typing.", ""),
             "required": not optional,
-            "meaning": meanings.get(f.name, ""),
+            "meaning": t(meanings[f.name]) if f.name in meanings else "",
         })
     return out
 
@@ -476,10 +477,14 @@ def contract_skeleton() -> str:
 
 def render_contract_docs() -> None:
     """Bagian kontrak: dua tabel field, tahapan, get_info, larangan, kerangka."""
-    st.markdown("**Kontrak pipeline** — nama field dibaca langsung dari "
-                "`contracts/pipeline_contracts.py`.")
+    from ui.i18n import t
 
-    tabs = st.tabs(["Masukan", "Kembalian", "Tahapan", "get_info()", "Larangan"])
+    st.markdown(t("ins.contract_intro"))
+
+    # "get_info()" adalah nama metode — label tabnya tidak diterjemahkan.
+    tabs = st.tabs([t("ins.tab_input"), t("ins.tab_return"),
+                    t("ins.tab_stages"), "get_info()",
+                    t("ins.tab_forbidden")])
 
     with tabs[0]:
         _render_field_table(pipeline_input_fields(), "pipeline_input")
@@ -492,40 +497,56 @@ def render_contract_docs() -> None:
     with tabs[4]:
         _render_forbidden()
 
-    with st.expander("Kerangka kelas minimal", expanded=False):
+    with st.expander(t("ins.exp_minimal_skeleton"), expanded=False):
         st.code(contract_skeleton(), language="python")
 
 
 def _render_field_table(fields, title: str) -> None:
+    from ui.i18n import t
+
+    required, optional = t("ins.required"), t("ins.optional")
     rows = "\n".join(
         f"| `{f['name']}` | `{f['type']}` | "
-        f"{'wajib' if f['required'] else 'opsional'} | {f['meaning']} |"
+        f"{required if f['required'] else optional} | {f['meaning']} |"
         for f in fields)
-    st.markdown(f"| Field | Tipe | | Arti |\n| --- | --- | --- | --- |\n{rows}")
+    st.markdown(f"| Field | {t('ins.col_type')} | | {t('ins.col_meaning')} |\n"
+                f"| --- | --- | --- | --- |\n{rows}")
 
 
 def _render_stage_table() -> None:
+    from ui.i18n import t
+
     rows = []
-    for number, name, owner, note in EXECUTION_STAGES:
+    # Tahapan dari penyaji dua bahasa; nomor & pemiliknya tetap pengenal.
+    for number, name, owner, note in execution_stages_display():
         mark = " ⚠" if number in ANTI_LEAK_STAGES else ""
         rows.append(f"| {number}{mark} | {name} | {owner} | {note} |")
-    st.markdown("| # | Tahap | Dikerjakan | Catatan |\n| --- | --- | --- | --- |\n"
+    st.markdown(f"| # | {t('ins.col_stage')} | {t('ins.col_owner')} | "
+                f"{t('ins.col_note')} |\n| --- | --- | --- | --- |\n"
                 + "\n".join(rows))
-    st.markdown(f"⚠ {ANTI_LEAK_NOTE}")
+    st.markdown(f"⚠ {t('ins.anti_leak_note')}")
 
 
 def _render_info_keys() -> None:
-    st.markdown("**Wajib**")
+    from ui.i18n import t
+
+    st.markdown(t("ins.required_heading"))
     st.markdown("\n".join(f"- `{k}`" for k in required_info_keys()))
-    st.markdown(f"**Disarankan** — {SUGGESTED_INFO_NOTE} Kunci wajib yang "
-                f"hilang menghasilkan {missing_info_severity()}, bukan "
-                f"kegagalan.")
+    # `missing_info_severity()` tetap mengembalikan PENGENAL "peringatan";
+    # kalimatnya yang berbahasa, dipetakan di sini.
+    severity = (t("ins.severity_warning")
+                if missing_info_severity() == "peringatan"
+                else missing_info_severity())
+    st.markdown(t("ins.suggested_line", note=t("ins.suggested_note"),
+                  severity=severity))
     st.markdown("\n".join(f"- `{k}`" for k in SUGGESTED_INFO_KEYS))
 
 
 def _render_forbidden() -> None:
-    st.markdown(FORBIDDEN_FRAME)
-    st.markdown("\n".join(f"- {item}" for item in FORBIDDEN_ACTIONS))
+    from ui.i18n import t
+
+    st.markdown(t("ins.forbidden_frame"))
+    st.markdown("\n".join(f"- {item}" for item in forbidden_actions_display()))
 
 
 # ── Kesalahan yang paling sering (dari daftar pemeriksaan NYATA) ──────────
@@ -563,24 +584,26 @@ def _pipeline_mistake_text(name: str) -> str:
     example_call = sorted(FORBIDDEN_CALLS)[0] if FORBIDDEN_CALLS else "—"
     run_method, info_method = REQUIRED_METHODS[0], REQUIRED_METHODS[1]
 
+    from ui.i18n import t
+
+    # Nama check (kunci dict) adalah PENGENAL yang dicocokkan dengan
+    # `_CAUSE_PRIORITY`; ia tidak berbahasa. Yang berbahasa nilainya.
     return {
-        ENTRY_POINT_RULE: (
-            f"Titik masuk tidak tepat satu — tidak ada berkas dengan kelas "
-            f"turunan `{BASE_CLASS_NAME}`, atau justru lebih dari satu."),
-        "kelas pipeline": (
-            f"Kelas pipeline tidak mewarisi `{BASE_CLASS_NAME}`."),
-        "method `run`": f"Metode wajib `{run_method}()` belum ada.",
-        "method `get_info`": f"Metode wajib `{info_method}()` belum ada.",
-        "import terlarang": (
-            f"Mengimpor modul terlarang — mis. `{example_module}`."),
-        "pemanggilan terlarang": (
-            f"Memakai pemanggilan terlarang — mis. `{example_call}()`."),
-        "sintaks Python": "Berkas gagal diurai — bukan Python yang valid.",
-        "atribut dunder terlarang": (
-            "Menyentuh atribut pelolos sandbox (`__globals__`, `__subclasses__`)."),
-        "penulisan berkas": "Membuka berkas dalam mode tulis.",
-        "get_info() mengembalikan dict": (
-            f"`{info_method}()` tidak mengembalikan dict."),
+        ENTRY_POINT_RULE: t("ins.mis_entry_point",
+                            base_class=BASE_CLASS_NAME),
+        "kelas pipeline": t("ins.mis_pipeline_class",
+                            base_class=BASE_CLASS_NAME),
+        "method `run`": t("ins.mis_method_run", method=run_method),
+        "method `get_info`": t("ins.mis_method_get_info", method=info_method),
+        "import terlarang": t("ins.mis_forbidden_import",
+                              module=example_module),
+        "pemanggilan terlarang": t("ins.mis_forbidden_call",
+                                   call=example_call),
+        "sintaks Python": t("ins.mis_syntax"),
+        "atribut dunder terlarang": t("ins.mis_dunder"),
+        "penulisan berkas": t("ins.mis_file_write"),
+        "get_info() mengembalikan dict": t("ins.mis_get_info_dict",
+                                           method=info_method),
     }.get(name, name)
 
 
@@ -604,16 +627,21 @@ def common_dataset_mistakes(limit: int = 5) -> list[str]:
         CHECK_CLASSES, CHECK_DTYPE, CHECK_FEATURES, CHECK_FORMAT, CHECK_LABEL,
         _CHECK_TITLES,
     )
+    from ui.components.validator_messages import diagnostic_title
+    from ui.i18n import t
 
     hints = {
-        CHECK_FORMAT: "ekstensi/bentuk berkas tidak sesuai, atau isinya gagal diparse",
-        CHECK_LABEL: "kolom label yang diminta research pipeline tidak ditemukan",
-        CHECK_FEATURES: "kolom fitur yang diharapkan skema banyak yang hilang",
-        CHECK_DTYPE: "kolom fitur tidak numerik sehingga tidak dapat dilatih",
-        CHECK_CLASSES: "hanya satu kelas yang muncul — tidak ada contoh attack",
+        CHECK_FORMAT: "ins.dsmis_format",
+        CHECK_LABEL: "ins.dsmis_label",
+        CHECK_FEATURES: "ins.dsmis_features",
+        CHECK_DTYPE: "ins.dsmis_dtype",
+        CHECK_CLASSES: "ins.dsmis_classes",
     }
-    return [f"**{_CHECK_TITLES[key]}** — {hint}"
-            for key, hint in hints.items() if key in _CHECK_TITLES][:limit]
+    # Judulnya lewat lapisan tampilan diagnosa, supaya satu pemeriksaan
+    # bernama sama di panduan dan di hasil diagnosa.
+    return [f"**{diagnostic_title({'key': key, 'title': _CHECK_TITLES[key]})}**"
+            f" — {t(hint_key)}"
+            for key, hint_key in hints.items() if key in _CHECK_TITLES][:limit]
 
 
 def render_mistakes(items: list[str], *, title: str) -> None:
@@ -648,17 +676,20 @@ def dataset_contract_rows(dataset_type: str) -> list[tuple[str, str]]:
     exts = " / ".join(f"`{e}`" for e in _dataset_extensions(dataset_type))
     label_col = schema.get("label_column", "?")
 
+    from ui.i18n import t
+
     if schema.get("expected_top_level_keys"):
-        label_meaning = (f"`{label_col}` — dibentuk pipeline dari **alert "
-                         f"Suricata**, tidak perlu ada di berkas")
+        label_meaning = t("ins.dslabel_from_suricata", column=label_col)
     else:
-        label_meaning = f"`{label_col}` — `0` = benign, `1` = malicious"
+        label_meaning = t("ins.dslabel_binary", column=label_col)
 
     return [
-        ("Format berkas", f"{exts} — {req.get('row_unit', '—')}"),
-        ("Kolom label", label_meaning),
-        ("Sifat fitur", req.get("summary_line", "—")),
-        ("Jumlah kelas", "dua kelas (benign & attack)"),
+        (t("ins.dsrow_format"),
+         f"{exts} — {dataset_requirement_text(dataset_type, 'row_unit')}"),
+        (t("ins.dsrow_label_column"), label_meaning),
+        (t("ins.dsrow_feature_nature"),
+         dataset_requirement_text(dataset_type, "summary_line")),
+        (t("ins.dsrow_class_count"), t("ins.dsval_two_classes")),
     ]
 
 
@@ -672,15 +703,18 @@ def render_dataset_instructions() -> None:
     from config.research_attribution import get_research_short_label
     from ui.views.run_experiment import _render_dataset_requirements
 
+    from ui.i18n import t
+
     inject_css()
-    render_flow(DATASET_FLOW, alt=DATASET_FLOW_ALT)
+    render_flow(dataset_flow_display(), alt=t("ins.flow_dataset_alt"))
 
     tabs = st.tabs([get_research_short_label(dt) for dt in supported_datasets()])
     for tab, dtype in zip(tabs, supported_datasets()):
         with tab:
             rows = dataset_contract_rows(dtype)
             st.markdown(
-                "| Aspek | Ketentuan |\n| --- | --- |\n"
+                f"| {t('ins.col_aspect')} | {t('ins.col_rule')} |\n"
+                "| --- | --- |\n"
                 + "\n".join(f"| {aspect} | {rule} |" for aspect, rule in rows)
             )
             sample = dataset_sample_snippet(dtype)
@@ -689,16 +723,12 @@ def render_dataset_instructions() -> None:
             st.markdown("\n".join(f"- ✔ {item}"
                                   for item in dataset_checklist(dtype)))
 
-    render_note(
-        "🔍 Angka berasal dari <b>cuplikan</b> berkas, bukan seluruh isinya. "
-        "Dataset <b>tersimpan langsung</b> — tinjauan hanya untuk pipeline, "
-        "yang berisi kode."
-    )
+    render_note(t("ins.dataset_sample_note"))
 
     render_mistakes(common_dataset_mistakes(),
-                    title="Paling sering membuat dataset dinyatakan belum cocok")
+                    title=t("ins.mistakes_dataset_title"))
 
-    with st.expander("Persyaratan dataset lengkap", expanded=False):
+    with st.expander(t("ins.exp_dataset_requirements"), expanded=False):
         for dtype in supported_datasets():
             st.markdown(f"**{get_research_short_label(dtype)}**")
             _render_dataset_requirements(dtype)
@@ -742,16 +772,132 @@ def dataset_checklist(dataset_type: str) -> list[str]:
     exts = " / ".join(f"`{e}`" for e in _dataset_extensions(dataset_type))
     label_col = schema.get("label_column", "?")
 
+    from ui.i18n import t
+
     if schema.get("expected_top_level_keys"):
         return [
-            f"Format {exts}, satu objek JSON per baris.",
-            "Memuat event TLS (`app_proto`/`event_type` = `tls`).",
-            f"Tidak perlu kolom `{label_col}` — dibentuk dari alert Suricata.",
-            "Ada event `alert`, sehingga kelas attack tidak kosong.",
+            t("ins.dschk_json_format", exts=exts),
+            t("ins.dschk_tls_events"),
+            t("ins.dschk_no_label_column", column=label_col),
+            t("ins.dschk_alert_events"),
         ]
     return [
-        f"Format {exts}, satu baris per flow.",
-        f"Ada kolom label `{label_col}` berisi `0`/`1`.",
-        "Kolom fitur numerik (non-numerik diabaikan otomatis).",
-        "Berisi dua kelas: benign dan malicious.",
+        t("ins.dschk_csv_format", exts=exts),
+        t("ins.dschk_label_column", column=label_col),
+        t("ins.dschk_numeric_features"),
+        t("ins.dschk_two_classes"),
     ]
+
+
+# ── Panduan kontrak dalam DUA BAHASA ─────────────────────────────────────
+#
+# Konstanta di atas TIDAK diubah: ia diimpor & diuji test lama, dan nama tahap
+# dipakai sebagai KUNCI pencarian di sana (`owners["Validasi masukan"]`).
+# Terjemahannya hidup di samping, dipetakan lewat nomor tahap / indeks — nilai
+# yang stabil dan tidak berbahasa.
+#
+# Yang TIDAK diterjemahkan di seluruh bagian ini: nama field kontrak
+# (`fixed_params`, `PipelineResult`, `get_info`), potongan kode, nama kelas, dan
+# nama metode. Yang berbahasa hanya penjelasan di sekitarnya.
+
+#: Nomor tahap → (kunci nama, kunci catatan). Nomor dipakai sebagai pengenal
+#: karena ia tidak pernah berubah bahasa.
+EXECUTION_STAGE_KEYS = {
+    1: ("ins.stage1_name", "ins.stage1_note"),
+    2: ("ins.stage2_name", "ins.stage2_note"),
+    3: ("ins.stage3_name", "ins.stage3_note"),
+    4: ("ins.stage4_name", "ins.stage4_note"),
+    5: ("ins.stage5_name", "ins.stage5_note"),
+    6: ("ins.stage6_name", ""),
+    7: ("ins.stage7_name", ""),
+    8: ("ins.stage8_name", "ins.stage8_note"),
+    9: ("ins.stage9_name", ""),
+}
+
+#: Indeks larangan → kunci. Urutannya sama dengan `FORBIDDEN_ACTIONS`.
+FORBIDDEN_ACTION_KEYS = (
+    "ins.forbid_dataset", "ins.forbid_params", "ins.forbid_fit_test",
+    "ins.forbid_algorithm", "ins.forbid_features",
+)
+
+
+def execution_stages_display():
+    """Tahapan eksekusi pada bahasa aktif — struktur & pemiliknya TIDAK berubah.
+
+    Pembagian tugas tetap terbaca: tahap 1 & 8 milik PLATFORM (orchestrator),
+    sisanya milik PIPELINE. Itulah yang membedakan "apa yang dikerjakan platform
+    sebelum pipeline dipanggil" dari "apa yang menjadi tanggung jawab pipeline",
+    dan ia tidak boleh kabur pada bahasa mana pun.
+    """
+    from ui.i18n import t
+
+    out = []
+    for number, name, owner, note in EXECUTION_STAGES:
+        name_key, note_key = EXECUTION_STAGE_KEYS.get(number, ("", ""))
+        out.append((
+            number,
+            t(name_key) if name_key else name,
+            owner,                       # PENGENAL pemilik — tidak berbahasa
+            t(note_key) if note_key else "",
+        ))
+    return out
+
+
+def forbidden_actions_display():
+    """Daftar larangan pada bahasa aktif — tetap TEGAS, tidak diperhalus."""
+    from ui.i18n import t
+
+    return [t(key) for key in FORBIDDEN_ACTION_KEYS]
+
+
+#: Indeks langkah → kunci label. Ikon & urutannya tetap di konstanta.
+PIPELINE_FLOW_KEYS = ("ins.flow_upload", "ins.flow_auto_check",
+                      "ins.flow_admin_review", "ins.flow_active")
+DATASET_FLOW_KEYS = ("ins.flow_upload", "ins.flow_match_check",
+                     "ins.flow_available")
+
+#: (dataset_type, field persyaratan) → kunci. Konstanta `_DATASET_REQUIREMENTS`
+#: pada `run_experiment` TIDAK diubah; ia tetap sumber strukturnya.
+DATASET_REQUIREMENT_KEYS = {
+    ("HIKARI2021", "row_unit"): "ins.req_hikari_row_unit",
+    ("HIKARI2021", "feature_nature"): "ins.req_hikari_feature_nature",
+    ("HIKARI2021", "summary_line"): "ins.req_hikari_summary",
+    ("EVE_SURICATA", "row_unit"): "ins.req_eve_row_unit",
+    ("EVE_SURICATA", "feature_nature"): "ins.req_eve_feature_nature",
+    ("EVE_SURICATA", "summary_line"): "ins.req_eve_summary",
+    ("EVE_SURICATA", "class_hint"): "ins.req_eve_class_hint",
+}
+
+
+def _flow_display(steps, keys):
+    """Ikon dari konstanta, label dari katalog — jumlah langkah tetap sama."""
+    from ui.i18n import t
+
+    return [(icon, t(key) if key else label)
+            for (icon, label), key in zip(steps, keys)]
+
+
+def pipeline_flow_display():
+    """Langkah alur pipeline pada bahasa aktif."""
+    return _flow_display(PIPELINE_FLOW, PIPELINE_FLOW_KEYS)
+
+
+def dataset_flow_display():
+    """Langkah alur dataset pada bahasa aktif."""
+    return _flow_display(DATASET_FLOW, DATASET_FLOW_KEYS)
+
+
+def dataset_requirement_text(dataset_type: str, field: str) -> str:
+    """Satu keterangan persyaratan dataset pada bahasa aktif.
+
+    Bila pasangan (dataset, field) belum punya kunci — misalnya dataset baru
+    yang diunggah — nilai aslinya dikembalikan apa adanya, bukan teks kosong.
+    """
+    from ui.i18n import t
+    from ui.views.run_experiment import _DATASET_REQUIREMENTS
+
+    original = (_DATASET_REQUIREMENTS.get(dataset_type, {}) or {}).get(field)
+    key = DATASET_REQUIREMENT_KEYS.get((dataset_type, field))
+    if key:
+        return t(key)
+    return original if original else "—"

@@ -20,16 +20,35 @@ CATALOG_SRC = (REPO_ROOT / "ui" / "components" / "pipeline_catalog.py").read_tex
     encoding="utf-8")
 
 
-# ── Kartu katalog ─────────────────────────────────────────────────────────
+# ── Daftar baris katalog ──────────────────────────────────────────────────
 
-def test_the_catalog_renders_boxed_cards_not_hairline_separators():
-    """Tiap research pipeline berada dalam wadah BERBATAS, bukan dipisah garis."""
+def test_the_catalog_renders_rows_not_boxed_cards():
+    """Kebalikan dari permintaan sebelumnya: TIDAK ada wadah berbatas per item.
+
+    Yang memisahkan satu research pipeline dari berikutnya adalah garis tipis
+    selebar penuh + hierarki jarak, bukan kotak.
+    """
     from ui.components import pipeline_catalog as pc
 
     body = CATALOG_SRC.split("def render_catalog(")[1].split("\ndef ")[0]
-    assert "st.container(border=True, key=card_key(" in body
-    assert "ids-cat-sep" not in body              # pemisah garis lama hilang
-    assert pc.card_key("HIKARI2021") == "cat_card_HIKARI2021"
+    assert "st.container(border=False, key=row_key(" in body
+    assert "border=True" not in body              # tidak ada sisa gaya kartu
+    assert pc.row_key("HIKARI2021") == "cat_row_HIKARI2021"
+
+
+def test_no_card_styling_survives_anywhere():
+    """Sisa gaya kartu per item tidak boleh tertinggal di CSS mana pun."""
+    from ui.components import theme
+
+    css = theme.stylesheet()
+    hook = '[class*="st-key-' + theme.ROW_KEY_PREFIX + '"] {'
+    block = css.split(hook)[1].split("}")[0]
+    # Kotak = sudut membulat + latar sendiri. Keduanya harus hilang dari baris.
+    assert "border-radius" not in block
+    assert "background:" not in block
+    # Dan tidak ada lagi kunci/awalan kartu yang tersisa di seluruh basis kode.
+    assert "cat_card_" not in css
+    assert not hasattr(theme, "CARD_KEY_PREFIX")
 
 
 def test_the_card_css_hook_matches_the_installed_frontend():
@@ -44,39 +63,56 @@ def test_the_card_css_hook_matches_the_installed_frontend():
     assert bundles, bundle_dir
     assert any("st-key-" in b.read_text(encoding="utf-8", errors="ignore")
                for b in bundles)
-    assert '[class*="st-key-' + theme.CARD_KEY_PREFIX + '"]' in theme.stylesheet()
+    assert '[class*="st-key-' + theme.ROW_KEY_PREFIX + '"]' in theme.stylesheet()
 
 
-def test_the_card_prefix_has_exactly_one_owner():
+def test_the_row_prefix_has_exactly_one_owner():
     """Gaya dan kode memakai konstanta yang SAMA."""
     from ui.components import pipeline_catalog as pc
     from ui.components import theme
 
-    assert pc.CARD_KEY_PREFIX is theme.CARD_KEY_PREFIX
-    assert 'CARD_KEY_PREFIX = "cat_card_"' in (
+    assert pc.ROW_KEY_PREFIX is theme.ROW_KEY_PREFIX
+    assert 'ROW_KEY_PREFIX = "cat_row_"' in (
         REPO_ROOT / "ui" / "components" / "theme.py").read_text(encoding="utf-8")
 
 
-def test_card_spacing_is_tighter_inside_than_between():
+def test_row_spacing_is_tighter_inside_than_between():
+    """Hierarki jarak inilah yang membuat pengelompokan terbaca TANPA kotak."""
+    from ui.components import pipeline_catalog as pc
     from ui.components import theme
 
-    hook = '[class*="st-key-' + theme.CARD_KEY_PREFIX + '"]'
+    hook = '[class*="st-key-' + theme.ROW_KEY_PREFIX + '"]'
     block = theme.stylesheet().split(hook + " {")[1].split("}")[0]
-    assert "margin-bottom: " + theme.GAP_BETWEEN_BLOCKS in block   # antar kartu
-    assert theme.GAP_IN_BLOCK in block                             # dalam kartu
-    assert float(theme.GAP_IN_BLOCK.rstrip("rem")) < float(
-        theme.GAP_BETWEEN_BLOCKS.rstrip("rem"))
+    # Jarak ANTAR baris: padding besar di atas & di bawah garis pemisah.
+    assert "padding: " + theme.GAP_SECTION in block
+    between = float(theme.GAP_SECTION.rstrip("rem"))
+
+    # Jarak DI DALAM baris: margin antar tingkat teks, jauh lebih rapat.
+    import re
+    inside = [float(m) for m in
+              re.findall(r"margin: 0 0 ([0-9.]+)rem", pc._CSS)]
+    assert inside, pc._CSS
+    assert max(inside) < between, (max(inside), between)
 
 
-def test_cards_have_a_max_width_and_a_gentle_hover():
+def test_rows_are_separated_by_a_full_width_hairline_with_a_gentle_hover():
     from ui.components import theme
 
     css = theme.stylesheet()
-    hook = '[class*="st-key-' + theme.CARD_KEY_PREFIX + '"]'
+    hook = '[class*="st-key-' + theme.ROW_KEY_PREFIX + '"]'
     block = css.split(hook + " {")[1].split("}")[0]
-    assert "max-width: " + theme.CARD_MAX_W in block
-    assert "border-radius" in block
-    assert "background" in block                 # latar beda dari halaman
+
+    # Garis tipis pemisah, dan TIDAK dibatasi lebar — selebar area konten.
+    # Yang diperiksa DEKLARASI-nya, bukan teks komentar yang kebetulan
+    # menyebut kata yang sama.
+    import re
+    declarations = re.sub(r"/\*.*?\*/", "", block, flags=re.S)
+    assert "border-bottom: 1px solid" in declarations
+    assert "max-width:" not in declarations
+    # BARIS KATALOG = BLOK DATA: mengikuti lebar penuh kolomnya. Variabelnya
+    # tetap satu titik kendali untuk `.ids-cat-*`, tetapi tidak lagi memotong
+    # teksnya di ~3/4 lebar sementara garis pemisahnya membentang penuh.
+    assert "--ids-cat-textw: none" in declarations
 
     hover = css.split(hook + ":hover {")[1].split("}")[0]
     assert "background" in hover
@@ -91,17 +127,34 @@ def test_the_two_card_buttons_stay_uniform():
     css = theme.stylesheet()
     shared = css.split('[class*="st-key-cat_run_"] button, '
                        '[class*="st-key-cat_detail_"] button {')[1].split("}")[0]
-    assert "width: " + theme.CATALOG_BTN_W in shared
+    # Lebarnya LUWES: mengisi kolom sampai batas atas, bukan lebar tetap.
+    # Diperiksa eksplisit karena "max-width: 9.5rem" memuat substring
+    # "width: 9.5rem" — assertion lama lolos tanpa memeriksa apa pun.
+    assert "width: 100%" in shared
+    assert "max-width: " + theme.CATALOG_BTN_W in shared
     assert "min-height" in shared
 
 
-def test_the_card_content_did_not_grow():
-    """Isi kartu TETAP: nama, penjelasan singkat, chip, dua tombol."""
+def test_the_row_content_did_not_grow():
+    """Isi baris TETAP: nama, keterangan, penjelasan, chip, dua tombol.
+
+    Tidak ada teks BARU yang ditambahkan untuk mengisi ruang — ketiga tingkat
+    teksnya berasal dari bidang yang memang sudah ada di katalog.
+    """
+    from ui.components import pipeline_catalog as pc
+
     body = CATALOG_SRC.split("def render_catalog(")[1].split("\ndef ")[0]
     assert body.count(".button(") == 2
-    for piece in ("ids-cat-title", "ids-cat-short", "chips_html("):
+    for piece in ("row_head_html(", "chips_html("):
         assert piece in body
     assert "st.caption(" not in body
+
+    head = pc.row_head_html({
+        "title": "T", "short": "S", "paper": "P",
+        "dataset_type": "DT", "algorithms": [{"algorithm": "A"}],
+    })
+    for level in ("ids-cat-name", "ids-cat-lead", "ids-cat-note"):
+        assert level in head, level
 
 
 def test_the_summary_row_above_the_cards_survives():

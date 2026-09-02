@@ -114,8 +114,16 @@ def test_page_title_matches_the_navigation_entry():
 
     assert '"Add Pipeline & Dataset"' in app_text          # _PAGES + dispatch
     assert app_text.count("Add Pipeline & Dataset") >= 2
-    assert 'st.title("Add Pipeline & Dataset")' in page_src
-    # Tidak ada sisa nama lama di navigasi maupun halaman.
+    # Judul halaman & entri navigasi kini sama-sama datang dari kamus bahasa,
+    # jadi yang diperiksa adalah keduanya menunjuk teks yang SAMA — bukan
+    # literal yang identik di dua tempat (yang justru bisa menyimpang).
+    from ui.i18n import t
+    from ui.i18n.core import lookup
+
+    assert 'st.title(t("page.contribute"))' in page_src
+    for lang in ("id", "en"):
+        assert lookup("page.contribute", lang) == lookup("nav.contribute", lang)
+    # Pengenal halaman TIDAK diterjemahkan — routing bergantung padanya.
     assert "Tambah Pipeline & Dataset" not in app_text
     assert ast.parse(page_src) is not None
 
@@ -338,12 +346,18 @@ def test_big_blocks_are_separated_by_dividers():
 def test_factual_notes_are_not_dropped_by_the_typography_pass():
     """Info faktual wajib tetap ada setelah dirapikan."""
     src = _page_source()
-    assert "belum aktif" in src                    # valid ≠ aktif
+    from ui.i18n.core import lookup
+
+    # valid ≠ aktif — kalimatnya pindah ke kamus, maknanya tidak.
+    assert 't("ap.msg_valid_not_active")' in src
+    assert "belum aktif" in lookup("ap.msg_valid_not_active", "id")
     assert "berkas tidak dimuat" in src            # catatan sampel
     assert "Batas unggah" in src                   # batas ukuran
     assert "_action_sentence" in src               # tindakan "Agar cocok…"
     assert "_cause_sentence" in src                # penyebab utama
-    assert "tidak menimpa dataset" in src          # tolak timpa
+    # tolak timpa — kalimatnya pindah ke kamus, jaminannya tidak.
+    assert 't("ap.err_file_exists"' in src
+    assert "tidak menimpa dataset" in lookup("ap.err_file_exists", "id")
 
 
 def test_choice_boxes_have_no_leading_blurb():

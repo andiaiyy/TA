@@ -662,7 +662,11 @@ def test_the_ui_seeds_no_mode_and_therefore_defaults_to_official():
 def test_the_ui_has_a_reset_to_defaults_control():
     source = (REPO_ROOT / "ui" / "components" / "run_mode_controls.py").read_text(
         encoding="utf-8")
-    assert "Kembalikan ke bawaan" in source
+    from ui.i18n.core import lookup
+
+    assert 't("re.btn_reset_defaults")' in source
+    assert lookup("re.btn_reset_defaults", "id") == "Kembalikan ke bawaan"
+    assert lookup("re.btn_reset_defaults", "en") == "Reset to defaults"
     assert "def reset_overrides(" in source
 
 
@@ -704,7 +708,8 @@ def test_every_result_surface_carries_the_mode():
                                               "CSV_MODE_COLUMN", "CSV_PARAMS_COLUMN"],
         # detail hasil + baris terpilih + filter mode
         "ui/views/view_results.py": ["rm.run_mode_badge(exp.get('run_mode'))",
-                                     "_render_mode_details", "Mode eksekusi"],
+                                     "_render_mode_details",
+                                     't("ps.f_run_mode")'],
         # panel hasil tepat setelah run
         "ui/views/run_experiment.py": ["_render_result_mode_banner"],
         # laporan PDF

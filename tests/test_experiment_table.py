@@ -589,7 +589,7 @@ def test_the_old_row_actions_are_still_wired(tmp_path):
     src = (REPO_ROOT / "ui" / "views" / "view_results.py").read_text(encoding="utf-8")
 
     for kept in ("_detail_dialog", "rerun_experiment", "cancel_experiment",
-                 "_pdf_download_button", "Download PDF Report",
+                 "_pdf_download_button", 't("ps.btn_pdf")',
                  "_render_selected_actions", "_render_running_section",
                  "render_results", "normalize_result_payload"):
         assert kept in src, kept

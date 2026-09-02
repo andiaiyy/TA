@@ -49,6 +49,10 @@ RESEARCH_ATTRIBUTION: dict[str, dict] = {
             "attribution": "Ferriyan (2022)",
             "note": "Sumber DATASET — dibedakan dari sumber pipeline di atas.",
         },
+        # DESKRIPSI yang ditulis platform — bukan judul karya, jadi ia
+        # diterjemahkan. `scope_key` menunjuk kalimatnya di katalog; nilai di
+        # bawah tetap ada sebagai cadangan dan acuan test lama.
+        "scope_key": "re.scope_hikari",
         "scope": (
             "Perbandingan KNN, Random Forest, Decision Tree, Naive Bayes, "
             "SVC, dan Logistic Regression untuk deteksi trafik malicious pada "
@@ -82,6 +86,7 @@ RESEARCH_ATTRIBUTION: dict[str, dict] = {
             # Publication year confirmed by the authors: 2026.
             "year": "2026",
         },
+        "scope_key": "re.scope_eve",
         "scope": (
             "Rekayasa fitur pada Suricata EVE log dengan seleksi fitur Mutual "
             "Information (MI), Recursive Feature Elimination (RFE), dan "

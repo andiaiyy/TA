@@ -125,11 +125,31 @@ def test_the_decorator_survives_an_older_streamlit(monkeypatch):
 ])
 def test_dialogs_are_decorated_through_the_shared_util(src, title):
     tree = ast.parse(src.read_text(encoding="utf-8"))
+    from ui.i18n.core import lookup
+
+    def _title_of(call):
+        """Judul dialog yang TAMPIL.
+
+        Judulnya kini datang dari kamus, jadi argumennya sebuah panggilan
+        ``t("kunci")``. Kuncinya diterjemahkan kembali ke teks bahasa bawaan di
+        sini supaya daftar di ``parametrize`` tetap terbaca sebagai judul yang
+        sungguh dilihat pengguna, bukan sebagai kunci.
+        """
+        if not call.args:
+            return None
+        first = call.args[0]
+        if isinstance(first, ast.Constant):
+            return first.value
+        if (isinstance(first, ast.Call)
+                and getattr(first.func, "id", "") == "t"
+                and first.args
+                and isinstance(first.args[0], ast.Constant)):
+            return lookup(first.args[0].value, "id")
+        return None
+
     shared, raw = [], []
     for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and node.args
-                and isinstance(node.args[0], ast.Constant)
-                and node.args[0].value == title):
+        if not (isinstance(node, ast.Call) and _title_of(node) == title):
             continue
         attr = getattr(node.func, "attr", None)
         if attr == "dialog_decorator":

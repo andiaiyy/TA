@@ -18,6 +18,7 @@ from ui.components.instructions import (
     ENTRY_POINT_RULE, common_dataset_mistakes, common_pipeline_mistakes,
     pipeline_skeleton,
 )
+from ui.i18n.core import lookup
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -202,8 +203,9 @@ def test_after_upload_flow_separates_data_from_code():
     # "Periksa otomatis" dulu tidak menjelaskan apa yang diperiksa.
     assert "Periksa berkas" in labels
     assert labels.index("Periksa berkas") < labels.index("Dataset tersimpan")
-    assert "tersimpan" in AFTER_UPLOAD_FLOW_ALT
-    assert "kode yang dieksekusi" in AFTER_UPLOAD_FLOW_ALT
+    # Teks alternatif kini kunci katalog; yang diuji kalimatnya.
+    assert "tersimpan" in lookup(AFTER_UPLOAD_FLOW_ALT, "id")
+    assert "kode yang dieksekusi" in lookup(AFTER_UPLOAD_FLOW_ALT, "id")
 
 
 # ── the worked example is built from the contract constants ───────────────
@@ -375,9 +377,17 @@ def test_the_visitor_landing_view_invites_sign_in(tmp_path):
 
 
 def test_the_landing_view_links_to_run_experiment(tmp_path):
-    """Kaitan ke halaman lain tampil tanpa perlu membuka expander."""
+    """Kaitan ke halaman lain tampil tanpa perlu membuka expander.
+
+    Nama halaman disebut sebagaimana ia tampil di navigasi pada bahasa yang
+    sedang aktif — menyebut "Run Experiment" pada mode Indonesia justru
+    menunjuk ke label yang tidak ada di sidebar.
+    """
     text = _page_text(_run_page(tmp_path, None, CONTRIBUTOR))
-    assert "Run Experiment" in text
+    assert lookup("page.run_experiment", "id") in text
+    # Aturan yang berbeda tetap dibedakan: dataset langsung, pipeline menunggu.
+    assert "langsung" in text.lower()
+    assert "disetujui" in text.lower()
 
 
 # ── honest notes survive the enrichment (regression) ──────────────────────

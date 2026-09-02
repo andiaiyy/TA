@@ -169,8 +169,14 @@ def test_the_review_queue_shows_pipelines_only():
 def test_the_ui_explains_why_the_two_differ():
     """Alasannya harus tercermin: pipeline KODE, dataset DATA."""
     src = (REPO_ROOT / "ui" / "views" / "contribute.py").read_text(encoding="utf-8")
-    assert "kode yang dieksekusi" in src
-    assert "Tersimpan langsung" in src
+    # Kalimatnya kini datang dari kamus; yang diperiksa adalah kuncinya
+    # dipakai DAN teksnya benar-benar menyatakan pembedaan itu.
+    from ui.i18n.core import lookup
+
+    assert 't("ap.help_only_pipelines_reviewed")' in src
+    assert 't("ap.help_dataset_direct")' in src
+    assert "kode yang dieksekusi" in lookup("ap.help_only_pipelines_reviewed", "id")
+    assert "Tersimpan langsung" in lookup("ap.help_dataset_direct", "id")
 
 
 # ── BAGIAN 2: dokumentasi kontrak tidak boleh basi ────────────────────────

@@ -170,18 +170,36 @@ def test_no_main_element_uses_a_fixed_pixel_width():
     """Lebar tetap dalam piksel tidak ikut skala huruf maupun lebar konten."""
     css = theme.stylesheet()
     for hook in (".ids-counts {", ".ids-count {", ".ids-facts {",
-                 f'[class*="st-key-{theme.CARD_KEY_PREFIX}"] {{'.replace("{{", "{")):
+                 f'[class*="st-key-{theme.ROW_KEY_PREFIX}"] {{'.replace("{{", "{")):
         block = css.split(hook)[1].split("}")[0]
         widths = [line for line in block.splitlines()
                   if "width" in line and "px" in line]
         assert not widths, (hook, widths)
 
 
-def test_the_card_keeps_a_readable_maximum_width():
+def test_only_prose_keeps_a_readable_maximum_width():
+    """Batas lebar baca melekat pada PROSA saja.
+
+    Kotak angka dan baris katalog adalah BLOK DATA: keduanya mengikuti lebar
+    penuh kolomnya. Sebelumnya keduanya dipatok {CARD_MAX_W}, sehingga isinya
+    berhenti di ~3/4 lebar sementara garis pemisah di bawahnya membentang penuh
+    — dan ketidakselarasan itu terbaca sebagai kesalahan render.
+    """
     css = theme.stylesheet()
-    for hook in (".ids-counts {",
-                 f'[class*="st-key-{theme.CARD_KEY_PREFIX}"] {{'.replace("{{", "{")):
-        assert f"max-width: {theme.CARD_MAX_W}" in css.split(hook)[1].split("}")[0]
+
+    counts = css.split(".ids-counts {")[1].split("}")[0]
+    assert f"max-width: {theme.CARD_MAX_W}" not in counts
+    assert "max-width: none" in counts
+
+    row_hook = f'[class*="st-key-{theme.ROW_KEY_PREFIX}"] {{'.replace("{{", "{")
+    row = css.split(row_hook)[1].split("}")[0]
+    assert f"--ids-cat-textw: {theme.CARD_MAX_W}" not in row
+    assert "--ids-cat-textw: none" in row
+
+    # …sementara prosa TETAP dibatasi, lewat penanda khususnya.
+    hook = (f'[class*="st-key-{theme.PROSE_KEY}"] '
+            f'[data-testid="stMarkdownContainer"] p')
+    assert theme.PROSE_W in css.split(hook + " {")[1].split("}")[0]
 
 
 # ── BAGIAN 3: biaya render ────────────────────────────────────────────────

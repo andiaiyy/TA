@@ -149,7 +149,14 @@ CREATE TABLE IF NOT EXISTS submissions (
     file_hash         TEXT NOT NULL,
     file_size         INTEGER NOT NULL,
     metadata_json     TEXT,
-    validation_json   TEXT
+    validation_json   TEXT,
+    -- Jejak RINGKAS uji coba (siapa menguji, kapan, dataset apa, hasilnya).
+    -- NULLABLE: pengajuan lama tidak pernah diuji dan tetap terbaca apa adanya.
+    trial_json        TEXT,
+    -- Keterangan dataset CONTOH yang dilampirkan kontributor untuk menguji
+    -- pipelinenya. Berkasnya ada di area penampungan pengajuan, bukan di
+    -- `storage/datasets/`. NULLABLE: melampirkan bersifat opsional.
+    trial_dataset_json TEXT
 );
 """
 
@@ -185,6 +192,13 @@ CREATE TABLE IF NOT EXISTS registered_pipelines (
     registered_by  TEXT NOT NULL,
     registered_at  TEXT NOT NULL,
     active         INTEGER NOT NULL DEFAULT 1,
+    -- Penyuntingan oleh Research Admin. NULLABLE: versi 1 lahir dari
+    -- PERSETUJUAN, bukan penyuntingan, jadi ketiganya kosong di sana dan itu
+    -- fakta — bukan data yang hilang. Menyunting TIDAK PERNAH menimpa baris
+    -- ini; ia menambah baris versi berikutnya dengan ketiga kolom terisi.
+    edited_by      TEXT,
+    edited_at      TEXT,
+    change_note    TEXT,
     UNIQUE (name, version)
 );
 """
@@ -193,5 +207,41 @@ CREATE TABLE IF NOT EXISTS registered_pipelines (
 # `eve_cbr.*` supaya tabrakan ID dengan pipeline bawaan tidak mungkin terjadi.
 UPLOADED_PREFIX = "uploaded."
 
+
+# Uji coba pipeline SEBELUM persetujuan — sengaja tabel tersendiri, bukan baris
+# bertanda di `experiments`. Hasil uji bukan hasil penelitian: memisahkannya
+# membuat "jumlah eksperimen penelitian tidak berubah" menjadi sifat struktur,
+# bukan janji yang bergantung pada setiap kueri mengingat sebuah penyaring.
+#
+# Isinya SEMENTARA: dihapus setelah keputusan diambil. Yang bertahan hanyalah
+# jejak ringkas pada `submissions.trial_json`.
+CREATE_PIPELINE_TRIALS_TABLE = """
+CREATE TABLE IF NOT EXISTS pipeline_trials (
+    id             TEXT PRIMARY KEY,
+    submission_id  INTEGER NOT NULL,
+    package_hash   TEXT NOT NULL,
+    dataset_type   TEXT NOT NULL,
+    dataset_path   TEXT NOT NULL,
+    status         TEXT NOT NULL DEFAULT 'QUEUED',
+    started_by     TEXT NOT NULL,
+    started_at     TEXT NOT NULL,
+    finished_at    TEXT,
+    duration_s     REAL,
+    rows_used      INTEGER,
+    metrics_json   TEXT,
+    error_stage    TEXT,
+    error_kind     TEXT,
+    error_message  TEXT,
+    artifacts_dir  TEXT
+);
+"""
+
+TRIAL_QUEUED = "QUEUED"
+TRIAL_RUNNING = "RUNNING"
+TRIAL_PASSED = "PASSED"
+TRIAL_FAILED = "FAILED"
+
+
 ALL_TABLES = [CREATE_EXPERIMENTS_TABLE, CREATE_USERS_TABLE,
-              CREATE_SUBMISSIONS_TABLE, CREATE_REGISTERED_PIPELINES_TABLE]
+              CREATE_SUBMISSIONS_TABLE, CREATE_REGISTERED_PIPELINES_TABLE,
+              CREATE_PIPELINE_TRIALS_TABLE]

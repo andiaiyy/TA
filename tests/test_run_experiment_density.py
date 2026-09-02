@@ -44,10 +44,10 @@ def test_no_control_shares_a_row_with_its_summary_block():
 def test_each_summary_follows_its_control_in_source_order():
     """Urutan sumber = urutan tampil: kontrol dulu, ringkasannya menyusul."""
     pairs = [
-        ('"Pilih dataset"', "render_facts(_dataset_facts("),
+        ('t("re.lbl_pick_dataset")', "render_facts(_dataset_facts("),
         # Penanda khas baris angka milik Pipeline Selection — `render_counts(`
         # sendiri juga dipakai pada keadaan "belum ada dataset terpilih".
-        ('"Pilih research pipeline"', '("algoritma", len(algo_to_pid),'),
+        ('t("re.lbl_pick_pipeline")', '("algoritma", len(algo_to_pid),'),
         ("selected = algo_to_pid.get(algorithm)", "render_facts(_pipeline_facts("),
     ]
     for control, summary in pairs:
@@ -58,7 +58,7 @@ def test_each_summary_follows_its_control_in_source_order():
 
 def test_the_controls_span_their_full_width():
     """Kontrol tidak lagi dibungkus kolom yang menyempitkannya."""
-    for control in ('"Pilih dataset"', '"Pilih research pipeline"'):
+    for control in ('t("re.lbl_pick_dataset")', 't("re.lbl_pick_pipeline")'):
         before = EXECUTE_BODY[:EXECUTE_BODY.index(control)]
         # Tidak ada `with <sesuatu>_left:` yang masih terbuka di atasnya.
         assert "_left:" not in before.splitlines()[-1]
@@ -86,7 +86,7 @@ def test_the_execute_section_stacks_status_above_the_action():
     """Status infrastruktur di atas, kontrol mode & tombol di bawahnya."""
     infra_at = EXECUTE_BODY.index("_render_execution_status_panel(compact=True)")
     mode_at = EXECUTE_BODY.index("render_run_mode_block(selected)")
-    button_at = EXECUTE_BODY.index('st.button("Run Experiment"')
+    button_at = EXECUTE_BODY.index('st.button(t("re.btn_run")')
     assert infra_at < mode_at < button_at
 
 
@@ -272,9 +272,9 @@ def test_section_spacing_stays_generous():
 
 def test_the_standard_section_helper_is_still_used():
     """Tidak ada gaya bagian baru yang dibuat untuk mengisi ruang."""
-    for title in ("Dataset Selection", "Pipeline Selection", "Pilih Algoritma",
-                  "Execute"):
-        assert f'render_section("{title}"' in RUN_SRC
+    for key in ("re.sec_dataset", "re.sec_pipeline", "re.sec_algorithm",
+                "re.sec_execute"):
+        assert f'render_section(t("{key}")' in RUN_SRC, key
     assert "st.header(" not in EXECUTE_BODY
 
 
@@ -285,14 +285,14 @@ def test_mandatory_notes_survive_the_relayout():
         REPO_ROOT / "ui" / "components" / "run_mode_controls.py"
     ).read_text(encoding="utf-8")
     # Sebab tombol Run nonaktif tetap dinyatakan.
-    assert "Dataset belum cocok untuk pipeline ini." in EXECUTE_BODY
+    assert 't("re.msg_not_compatible")' in EXECUTE_BODY
     assert "Eksekusi asinkron belum siap." in EXECUTE_BODY
     assert login.SIGN_IN_HINT
 
 
 def test_the_detail_expanders_were_not_emptied():
     """JANGAN memindahkan SELURUH isi expander ke tampilan utama."""
-    for expander in ('st.expander("Detail dataset (preview & validasi)"',
+    for expander in ('st.expander(t("re.dlg_dataset_detail")',
                      'st.expander("Tentang Research Pipeline (Read-Only)"',
                      'st.expander("Pipeline Detail (Read-Only)")',
                      'st.expander("Pipeline Config Viewer'):

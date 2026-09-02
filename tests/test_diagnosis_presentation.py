@@ -240,8 +240,14 @@ def test_identical_skipped_checks_collapse_into_one_line(monkeypatch):
     assert len(lines) == 2                       # satu baris gagal + satu baris ringkas
     collapsed = lines[1]
     assert collapsed.count(reason) == 1
-    for title in ("Label", "Features", "Dtype", "Classes"):
-        assert title in collapsed                # semua cek yang dilewati disebut
+    # Judul pemeriksaan kini KANONIK: dipetakan dari `key`, bukan diambil dari
+    # `title` yang kebetulan tersimpan. Itulah yang membuatnya ikut berbahasa.
+    from ui.components.validator_messages import DIAGNOSTIC_TITLE_KEYS
+    from ui.i18n.core import lookup
+
+    for key in ("label", "features", "dtype", "classes"):
+        title = lookup(DIAGNOSTIC_TITLE_KEYS[key], "id")
+        assert title in collapsed            # semua cek yang dilewati disebut
 
 
 def test_a_lone_skipped_check_keeps_its_own_line(monkeypatch):

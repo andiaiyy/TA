@@ -11,12 +11,15 @@ usable, while `require_upload` in the action layer stays the real gate.
 """
 import ast
 import re
+from html import escape
 from pathlib import Path
 
 import pytest
 
 import ui.views.run_experiment as rx
 from ui.components import page_flags, pipeline_catalog as pc, upload_cards as uc
+from ui.i18n import CATALOG
+from ui.i18n.core import lookup
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CATALOG_SRC = REPO_ROOT / "ui" / "components" / "pipeline_catalog.py"
@@ -212,11 +215,12 @@ def test_the_dialog_is_decorated_once_at_module_level():
     substring akan meleset."""
     tree = ast.parse(RUN_SRC.read_text(encoding="utf-8"))
     # Dekorasinya kini lewat util bersama, yang selalu memasang on_dismiss.
-    titles = [node.args[0].value for node in ast.walk(tree)
+    titles = [node.args[0].args[0].value for node in ast.walk(tree)
               if isinstance(node, ast.Call)
               and getattr(node.func, "attr", None) in ("dialog", "dialog_decorator")
-              and node.args and isinstance(node.args[0], ast.Constant)]
-    assert titles.count("Detail Research Pipeline") == 1, titles
+              and node.args and isinstance(node.args[0], ast.Call)
+              and getattr(node.args[0].func, "id", "") == "t"]
+    assert titles.count("re.dlg_pipeline_detail") == 1, titles
 
     # Didekorasi di tingkat modul, bukan di dalam sebuah fungsi.
     module_level = {n.targets[0].id for n in tree.body
@@ -265,7 +269,8 @@ def test_there_are_four_uniform_cards():
 def test_each_card_has_a_two_panel_structure():
     for card in uc.CARDS:
         html = uc.card_html(art=uc.pipeline_art(), tint=card["tint"],
-                            title=card["title"], text=card["text"])
+                            title=lookup(card["title"], "id"),
+                            text=lookup(card["text"], "id"))
         assert "ids-card-art" in html            # panel atas: ilustrasi
         assert "ids-card-body" in html           # panel bawah: teks
         assert f"height:{uc.ART_HEIGHT_PX}px" in html
@@ -276,7 +281,8 @@ def test_both_cards_share_the_same_panel_heights():
     """Tinggi seragam supaya dua kartu berdampingan rata."""
     heights = {
         re.search(r"height:(\d+)px", uc.card_html(
-            art="", tint=c["tint"], title=c["title"], text=c["text"])).group(1)
+            art="", tint=c["tint"], title=lookup(c["title"], "id"),
+            text=lookup(c["text"], "id"))).group(1)
         for c in uc.CARDS
     }
     assert len(heights) == 1
@@ -328,15 +334,37 @@ def test_card_text_is_escaped():
     assert "&lt;script&gt;" in html
 
 
-def test_the_card_text_stays_short():
+@pytest.mark.parametrize("lang", ["id", "en"])
+def test_the_card_text_stays_short(lang):
+    """Panjang teks dibatasi pada KEDUA bahasa.
+
+    Keempat kartu berbagi `BODY_MIN_HEIGHT_PX` yang sama, jadi kalimat yang
+    jauh lebih panjang pada satu bahasa membuat barisnya tidak lagi rata —
+    persis kerusakan yang tidak terlihat bila hanya bahasa asal yang diuji.
+    """
     for card in uc.CARDS:
-        assert len(card["text"]) <= 130, card["mode"]
+        assert len(lookup(card["text"], lang)) <= 130, (card["mode"], lang)
+
+
+@pytest.mark.parametrize("lang", ["id", "en"])
+def test_the_card_titles_and_buttons_fit_on_one_line(lang):
+    """Judul & tombol kartu tetap pendek, jadi tidak terpotong atau melipat."""
+    for card in uc.CARDS:
+        assert len(lookup(card["title"], lang)) <= 28, (card["mode"], lang)
+        assert len(lookup(card["button"], lang)) <= 28, (card["mode"], lang)
+
+
+def test_the_cards_carry_keys_not_sentences():
+    """Konstanta modul dievaluasi sekali saat impor — ia tidak boleh berbahasa."""
+    for card in uc.CARDS:
+        for field in ("title", "text", "button", "denied"):
+            assert card[field] in CATALOG, (card["mode"], field)
 
 
 # ── cards: permission is display-only ─────────────────────────────────────
 
 def _render_cards(monkeypatch, may_upload, may_approve=False,
-                  may_manage_users=False):
+                  may_manage_users=False, signed_in=True):
     """Kumpulkan argumen tombol + markup tanpa merender Streamlit sungguhan."""
     calls, markup = [], []
 
@@ -350,39 +378,53 @@ def _render_cards(monkeypatch, may_upload, may_approve=False,
     monkeypatch.setattr(uc.st, "button",
                         lambda label, **kw: calls.append((label, kw)) or False)
     uc.render_upload_cards(may_upload=may_upload, may_approve=may_approve,
-                           may_manage_users=may_manage_users)
+                           may_manage_users=may_manage_users,
+                           signed_in=signed_in)
     return calls, markup
 
 
 def test_the_buttons_are_disabled_for_a_visitor(monkeypatch):
-    calls, markup = _render_cards(monkeypatch, may_upload=False)
-    assert len(calls) == 4
+    """Pengunjung: dua kartu unggah yang MATI, tanpa kartu admin.
+
+    Kartu admin tidak lagi ditampilkan kepada siapa pun selain Research Admin;
+    keberadaan jalurnya diwakili satu baris keterangan.
+    """
+    calls, markup = _render_cards(monkeypatch, may_upload=False,
+                                  signed_in=False)
+    assert len(calls) == 2
     for _label, kwargs in calls:
         assert kwargs["disabled"] is True
 
     # Alasannya TAMPIL sebagai keterangan pada kartu (bukan tooltip yang hanya
     # muncul saat disorot), dan menunjuk ke pemilih mode di sidebar.
     notes = " ".join(m for m in markup if "ids-card-note" in m)
-    assert "Perlu akun Kontributor." in notes
-    assert "Khusus Research Admin." in notes
-    assert uc.SIGN_IN_HINT in notes
+    assert lookup("ap.card_need_contributor", "id") in notes
+    assert lookup("ap.card_denied_hint", "id") in notes
+    # Jalur admin tetap disebut keberadaannya — satu baris, tanpa kartunya.
+    # Dibandingkan dalam bentuk TER-ESCAPE: itu yang sungguh dirender, dan
+    # meng-escape teks kartu adalah properti keamanan yang harus tetap ada.
+    assert escape(lookup(uc.VISITOR_ADMIN_NOTE, "id")) in notes
 
 
 def test_the_upload_buttons_are_enabled_for_a_contributor(monkeypatch):
-    """Kontributor boleh mengunggah; kartu admin tetap mati tetapi tetap tampil."""
-    calls, markup = _render_cards(monkeypatch, may_upload=True)
-    assert len(calls) == 4
+    """Kontributor: hanya dua kartu unggah, keduanya HIDUP.
+
+    Kartu admin tidak ditampilkan sama sekali — bagi kontributor, kartu mati
+    hanya menjadi gangguan atas jalur yang memang tidak bisa mereka tempuh.
+    """
+    calls, markup = _render_cards(monkeypatch, may_upload=True, signed_in=True)
+    assert len(calls) == 2
 
     by_key = {kwargs["key"]: kwargs["disabled"] for _label, kwargs in calls}
-    assert by_key["contrib_go_pipeline"] is False
-    assert by_key["contrib_go_dataset"] is False
-    assert by_key["contrib_go_review"] is True
-    assert by_key["contrib_go_users"] is True
+    assert by_key == {"contrib_go_pipeline": False, "contrib_go_dataset": False}
+    # Kontributor tidak diberi baris keterangan jalur admin.
+    notes = " ".join(m for m in markup if "ids-card-note" in m)
+    assert escape(uc.VISITOR_ADMIN_NOTE) not in notes
 
-    # Kartu admin tetap menjelaskan fungsinya walau aksinya tidak tersedia.
+    # Kartu admin tidak dirender sama sekali bagi kontributor.
     joined = " ".join(markup)
-    assert "Peninjauan Pengajuan" in joined
-    assert "Kelola Pengguna" in joined
+    assert "Peninjauan Pengajuan" not in joined
+    assert "Kelola Pengguna" not in joined
 
 
 def test_every_button_is_enabled_for_a_research_admin(monkeypatch):
@@ -485,9 +527,10 @@ def test_the_contribute_page_renders_with_cards(tmp_path, user):
     at = _run_contribute(tmp_path, user)
     assert at.exception is None or not at.exception
 
+    # Empat kartu HANYA bagi Research Admin; dua bagi yang lain.
     cards = [m.value for m in at.markdown
              if "ids-card-art" in m.value and "<svg" in m.value]
-    assert len(cards) == 4
+    assert len(cards) == (4 if user is ADMIN else 2)
 
     labels = [b.label for b in at.button]
     assert "Unggah pipeline" in labels

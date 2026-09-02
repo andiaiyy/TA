@@ -98,6 +98,7 @@ from ui.components import theme
 from ui.components.sidebar_progress import render_sidebar_progress
 from ui.components.sidebar_chrome import menu_styles, render_breadcrumb
 from ui.components.page_flags import drop_stale_page_flags
+from ui.i18n import t
 
 # Gaya bersama seluruh aplikasi — didefinisikan sekali di
 # ui/components/theme.py dan disuntikkan di sini saja, sehingga tidak ada
@@ -114,8 +115,19 @@ theme.inject()
 # of the repo without the dep installed), fall back to a plain radio so the
 # app stays usable and the user gets a clear hint to install it.
 
+# Nama halaman ini adalah PENGENAL, bukan teks tampilan: ia dipakai untuk
+# routing, disimpan di session_state, dan dibaca test. Karena itu ia TIDAK
+# diterjemahkan — yang diterjemahkan hanya labelnya lewat `_PAGE_LABEL_KEYS`,
+# lalu dipetakan kembali ke pengenal ini. Menerjemahkan pengenalnya akan
+# memutus routing begitu bahasa berganti.
 _PAGES = ("Progress & Status", "Run Experiment", "Add Pipeline & Dataset")
+_PAGE_LABEL_KEYS = ("nav.progress", "nav.run_experiment", "nav.contribute")
 _PAGE_ICONS = ("speedometer2", "play-circle", "plus-square")
+
+
+def _page_labels() -> list[str]:
+    """Label halaman pada bahasa aktif, urut sama dengan `_PAGES`."""
+    return [t(key) for key in _PAGE_LABEL_KEYS]
 # Landing page shown when the app first opens. "Progress & Status" is the main
 # dashboard (all experiments + live progress); index is resolved by name so menu
 # order can change freely without breaking the default.
@@ -154,19 +166,25 @@ def _select_page() -> str:
     """
     if _OPTION_MENU_AVAILABLE:
         with st.sidebar:
-            return option_menu(
+            # Menu menampilkan LABEL, lalu hasilnya dipetakan kembali ke
+            # pengenal halaman lewat posisinya. Pemetaan by-posisi inilah yang
+            # membuat berpindah bahasa tidak memindahkan halaman: posisi yang
+            # terpilih tidak berubah, hanya tulisannya.
+            labels = _page_labels()
+            chosen = option_menu(
                 menu_title=None,
-                options=list(_PAGES),
+                options=labels,
                 icons=list(_PAGE_ICONS),
                 default_index=_remembered_index(),
                 styles=menu_styles(),
             )
+            return _PAGES[labels.index(chosen)] if chosen in labels else _DEFAULT_PAGE
     # Fallback path
-    st.sidebar.caption(
-        "Catatan: streamlit-option-menu belum terpasang. Jalankan "
-        "`pip install streamlit-option-menu` untuk tampilan menu yang lengkap."
-    )
-    return st.sidebar.radio("Navigation", _PAGES, index=_remembered_index())
+    st.sidebar.caption(t("app.menu_missing"))
+    labels = _page_labels()
+    chosen = st.sidebar.radio(t("nav.section"), labels,
+                              index=_remembered_index())
+    return _PAGES[labels.index(chosen)] if chosen in labels else _DEFAULT_PAGE
 
 
 # Blok 1 dari sidebar: jejak lokasi lalu menu tiga halaman.

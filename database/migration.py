@@ -139,6 +139,95 @@ MIGRATIONS = [
         "sql": "ALTER TABLE experiments ADD COLUMN params_changed INTEGER",
         "add_column": ("experiments", "params_changed"),
     },
+    # v19-v21: jejak penyuntingan pipeline kontribusi. ADITIF seluruhnya —
+    # tiga ALTER TABLE ADD COLUMN nullable pada `registered_pipelines`. Tabel
+    # experiments TIDAK disentuh sama sekali, dan tidak ada nilai yang diisi
+    # mundur: versi yang lahir dari persetujuan memang tidak punya penyunting.
+    {
+        "version": 19,
+        "description": "Add nullable edited_by to registered_pipelines",
+        "sql": "ALTER TABLE registered_pipelines ADD COLUMN edited_by TEXT",
+        "add_column": ("registered_pipelines", "edited_by"),
+    },
+    {
+        "version": 20,
+        "description": "Add nullable edited_at to registered_pipelines",
+        "sql": "ALTER TABLE registered_pipelines ADD COLUMN edited_at TEXT",
+        "add_column": ("registered_pipelines", "edited_at"),
+    },
+    {
+        "version": 21,
+        "description": "Add nullable change_note to registered_pipelines",
+        "sql": "ALTER TABLE registered_pipelines ADD COLUMN change_note TEXT",
+        "add_column": ("registered_pipelines", "change_note"),
+    },
+    {
+        # Akun Kontributor tidak lagi menunggu persetujuan. Akun lama yang
+        # terlanjur berstatus `pending` DIAKTIFKAN — bukan dihapus: username,
+        # hash password, peran, `requested_at`, dan `reason`-nya tetap utuh,
+        # hanya statusnya yang berpindah. Tanpa ini, pendaftar lama akan
+        # menunggu selamanya karena antrean persetujuannya sudah tidak ada.
+        #
+        # Akun `disabled` TIDAK ikut: menonaktifkan adalah keputusan sadar
+        # seorang Research Admin, dan itu tetap berlaku.
+        "version": 22,
+        "description": "Activate legacy pending contributor accounts",
+        "sql": ("UPDATE users SET status = 'active' "
+                "WHERE status = 'pending'"),
+    },
+    {
+        # Uji coba pipeline sebelum persetujuan. Catatannya hidup di TABEL
+        # SENDIRI, bukan di `experiments`: hasil uji bukan hasil penelitian,
+        # dan memisahkannya membuat "jumlah eksperimen penelitian tidak
+        # berubah" menjadi sifat struktur — bukan janji yang bergantung pada
+        # setiap kueri mengingat sebuah penyaring.
+        #
+        # Catatan di sini SEMENTARA: dihapus setelah keputusan diambil.
+        "version": 23,
+        "description": "Add pipeline_trials table (temporary pre-approval runs)",
+        "sql": """
+            CREATE TABLE IF NOT EXISTS pipeline_trials (
+                id             TEXT PRIMARY KEY,
+                submission_id  INTEGER NOT NULL,
+                package_hash   TEXT NOT NULL,
+                dataset_type   TEXT NOT NULL,
+                dataset_path   TEXT NOT NULL,
+                status         TEXT NOT NULL DEFAULT 'QUEUED',
+                started_by     TEXT NOT NULL,
+                started_at     TEXT NOT NULL,
+                finished_at    TEXT,
+                duration_s     REAL,
+                rows_used      INTEGER,
+                metrics_json   TEXT,
+                error_stage    TEXT,
+                error_kind     TEXT,
+                error_message  TEXT,
+                artifacts_dir  TEXT
+            )
+        """,
+    },
+    {
+        # Jejak RINGKAS uji coba, menempel pada pengajuan. Ini satu-satunya
+        # bagian yang bertahan setelah keputusan diambil — untuk riwayat,
+        # bukan sebagai hasil penelitian.
+        "version": 24,
+        "description": "Add nullable trial_json to submissions (trial trail)",
+        "sql": "ALTER TABLE submissions ADD COLUMN trial_json TEXT",
+        "add_column": ("submissions", "trial_json"),
+    },
+    {
+        # Dataset CONTOH yang dilampirkan kontributor untuk menguji
+        # pipelinenya. Kolomnya menyimpan KETERANGAN berkasnya (nama, ukuran,
+        # hash, format, waktu unggah, catatan kontributor) — berkasnya sendiri
+        # ada di area penampungan pengajuan, BUKAN di `storage/datasets/`.
+        #
+        # NULLABLE: melampirkan bersifat opsional, dan pengajuan lama tidak
+        # pernah punya lampiran.
+        "version": 25,
+        "description": "Add nullable trial_dataset_json to submissions",
+        "sql": "ALTER TABLE submissions ADD COLUMN trial_dataset_json TEXT",
+        "add_column": ("submissions", "trial_dataset_json"),
+    },
 ]
 
 CREATE_SCHEMA_VERSION_TABLE = """
