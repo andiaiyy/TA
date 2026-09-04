@@ -127,19 +127,38 @@ def test_entries_without_a_dataset_type_are_skipped():
 # ── against the REAL registry ─────────────────────────────────────────────
 
 def test_the_real_catalog_matches_the_real_registry():
-    from config.pipeline_registry import PIPELINE_REGISTRY
+    """Katalog mencerminkan registry GABUNGAN — bawaan + kontribusi aktif.
 
+    Dulu di sini registry statis yang dipakai sebagai pembanding, dan itulah
+    yang membuat cacatnya tidak tertangkap: katalog memang hanya membaca
+    daftar statis, sehingga test dan kode sama-sama salah dengan cara yang
+    sama.
+    """
+    from orchestrator.dynamic_registry import get_all_pipelines
+
+    registry = get_all_pipelines()
     catalog = pc.build_catalog()
     counts = pc.catalog_counts(catalog)
 
-    families = {e["dataset_type"] for e in PIPELINE_REGISTRY.values()}
+    families = {e["dataset_type"] for e in registry.values()
+                if (e or {}).get("dataset_type")}
     assert counts["research"] == len(families)
-    assert counts["algorithms"] == len(PIPELINE_REGISTRY)
+    assert counts["algorithms"] == len(registry)
 
     for group in catalog:
-        expected = sum(1 for e in PIPELINE_REGISTRY.values()
-                       if e["dataset_type"] == group["dataset_type"])
+        expected = sum(1 for e in registry.values()
+                       if (e or {}).get("dataset_type") == group["dataset_type"])
         assert len(group["algorithms"]) == expected, group["dataset_type"]
+
+
+def test_the_real_catalog_still_contains_every_built_in():
+    """Pipeline bawaan tidak boleh hilang karena penggabungan."""
+    from config.pipeline_registry import PIPELINE_REGISTRY
+
+    ids = [a["pipeline_id"] for g in pc.build_catalog()
+           for a in g["algorithms"]]
+    for pipeline_id in PIPELINE_REGISTRY:
+        assert pipeline_id in ids, pipeline_id
 
 
 def test_the_real_titles_come_from_the_attribution_source():

@@ -3383,6 +3383,116 @@ CATALOG: dict[str, dict[str, str]] = {
     "td.sample_caveat": {"id": "Dataset lampiran adalah CONTOH untuk pengujian, bukan dataset penelitian — hasil ujinya tidak menjadi hasil resmi. Uji ini menilai apakah pipeline BERJALAN, bukan seberapa baik hasilnya, jadi angka yang berbeda jauh dari data sesungguhnya adalah hal yang wajar.",
                         "en": "An attached dataset is a SAMPLE for testing, not research data — its results never become official results. This trial judges whether the pipeline RUNS, not how well it scores, so numbers far from those on real data are entirely expected."},
 
+
+    # ── Tahap & pesan kegagalan uji coba ───────────────────────────────────────
+    "trial.stage_load": {"id": "memuat pipeline",
+                        "en": "loading the pipeline"},
+    "trial.stage_read": {"id": "membaca dataset",
+                        "en": "reading the dataset"},
+    "trial.stage_run": {"id": "menjalankan pipeline",
+                       "en": "running the pipeline"},
+    "trial.stage_timeout": {"id": "batas waktu",
+                           "en": "the time limit"},
+    "trial.stage_setup": {"id": "menyiapkan pelaksana",
+                         "en": "preparing the runner"},
+    "trial.msg_timeout": {"id": "Uji coba melampaui batas {seconds} detik dan dihentikan. Pipeline masih berjalan saat batas tercapai — periksa tahap yang paling lama.",
+                         "en": "The trial ran past its {seconds}-second limit and was stopped. The pipeline was still running when the limit was reached — look at whichever stage takes longest."},
+    "trial.msg_process_died": {"id": "Proses uji berakhir tanpa hasil. Kemungkinan dihentikan sistem karena kehabisan memori.",
+                              "en": "The trial process ended without a result. It was most likely stopped by the system for running out of memory."},
+
+
+    # ── Sisa teks antarmuka peninjauan & katalog ───────────────────────────────────────
+    "ap.review_pending_count": {"id": "{count} pengajuan menunggu tinjauan.",
+                               "en": "{count} submissions awaiting review."},
+    "ap.review_history_heading": {"id": "**Riwayat tinjauan**",
+                                 "en": "**Review history**"},
+    "ap.review_history_empty": {"id": " — belum ada pengajuan yang ditinjau.",
+                               "en": " — no submissions have been reviewed yet."},
+    "sr.summary_line": {"id": "**{name}** · {verdict} · {files} berkas · oleh {who} · {when}",
+                       "en": "**{name}** · {verdict} · {files} files · by {who} · {when}"},
+    "pc.pre_stage_parse": {"id": "Parsing & validasi dataset",
+                          "en": "Parsing & validating the dataset"},
+    "pc.pre_stage_note": {"id": "Tahap bergaris putus dijalankan platform sebelum pipeline dipanggil, bukan bagian dari pipeline-nya.",
+                         "en": "The dashed stages are run by the platform before the pipeline is called; they are not part of the pipeline itself."},
+
+
+    # ── Pengajuan saya: keadaan kosong ───────────────────────────────────────
+    "ap.my_submissions_empty": {"id": "Belum ada pengajuan.",
+                               "en": "No submissions yet."},
+
+
+    # ── Katalog: pipeline kontribusi & keadaannya ───────────────────────────────────────
+    "re.cat_contributed_group": {"id": "Pipeline kontribusi · {dataset}",
+                                "en": "Contributed pipeline · {dataset}"},
+    "re.cat_badge_contributed": {"id": "kontribusi v{version}",
+                                "en": "contributed v{version}"},
+    "re.cat_state_broken": {"id": "bermasalah",
+                           "en": "unusable"},
+    "re.cat_state_no_dataset": {"id": "belum ada dataset",
+                               "en": "no dataset yet"},
+    "re.cat_no_dataset_reason": {"id": "Belum ada dataset platform berjenis ini, jadi pipeline ini belum dapat dijalankan. Unggah dataset yang sesuai lewat halaman Tambah Pipeline & Dataset.",
+                                "en": "No platform dataset of this type exists yet, so this pipeline cannot be run. Upload a matching dataset from the Add Pipeline & Dataset page."},
+    "re.cat_broken_heading": {"id": "Tidak dapat dimuat",
+                             "en": "Cannot be loaded"},
+
+
+    # ── Jenis dataset uji coba: penentuan & penolakan ───────────────────────────────────────
+    "td.err_unknown_dataset_type": {"id": "Jenis dataset belum diketahui, jadi uji coba tidak dapat dijalankan. Lengkapi dataset target pada metadata pengajuan, atau pilih dataset platform yang jenisnya dikenali.",
+                                   "en": "The dataset type is not known yet, so the trial cannot run. Fill in the target dataset in the submission metadata, or choose a platform dataset whose type is recognised."},
+    "td.err_trial_failed": {"id": "Uji coba tidak dapat dijalankan karena kesalahan tak terduga ({kind}). Rinciannya tercatat pada log untuk pengembang.",
+                           "en": "The trial could not be run because of an unexpected error ({kind}). The details are recorded in the developer log."},
+    "td.missing_dataset_type": {"id": "Dataset target belum diisi pada pengajuan ini.",
+                               "en": "The target dataset has not been set on this submission."},
+    "ap.lbl_other_dataset": {"id": "Lainnya / belum terdaftar",
+                            "en": "Other / not registered yet"},
+
+    # Pipeline kontribusi di katalog: keterangan rincinya TIDAK dibaca di sini,
+    # dan alasannya dinyatakan alih-alih meninggalkan bidang kosong.
+    "re.cat_uploaded_no_info": {"id": "Keterangan rinci tidak dibaca di katalog — pipeline kontribusi tidak dimuat saat halaman dibuka. Rinciannya tersedia setelah pipeline dijalankan.",
+                               "en": "Detailed information is not read in the catalogue — contributed pipelines are not loaded when the page opens. The details become available once the pipeline has been run."},
+    "re.cat_uploaded_no_info_label": {"id": "Keterangan rinci",
+                                     "en": "Detailed information"},
+
+    # ── Daftar antrean peninjauan: cari, urutkan, penggal, buka ──────────────
+    "ap.lbl_search_queue": {"id": "Cari pengajuan",
+                           "en": "Search submissions"},
+    "ap.ph_search_queue": {"id": "nomor, nama, atau pengaju",
+                          "en": "number, name, or submitter"},
+    "ap.lbl_sort_queue": {"id": "Urutkan",
+                         "en": "Sort"},
+    "ap.sort_oldest": {"id": "Terlama menunggu",
+                      "en": "Waiting longest"},
+    "ap.sort_newest": {"id": "Terbaru diajukan",
+                      "en": "Most recently submitted"},
+    "ap.queue_count": {"id": "Menampilkan {shown} dari {total} pengajuan menunggu.",
+                      "en": "Showing {shown} of {total} waiting submissions."},
+    "ap.btn_prev_page": {"id": "‹ Sebelumnya",
+                        "en": "‹ Previous"},
+    "ap.btn_next_page": {"id": "Berikutnya ›",
+                        "en": "Next ›"},
+    "ap.page_of": {"id": "Halaman {page} dari {total}",
+                  "en": "Page {page} of {total}"},
+    "ap.lbl_open_submission": {"id": "Buka pengajuan",
+                              "en": "Open a submission"},
+    "ap.ph_open_submission": {"id": "pilih satu untuk ditinjau",
+                             "en": "choose one to review"},
+    "ap.btn_back_to_queue": {"id": "‹ Kembali ke antrean",
+                            "en": "‹ Back to the queue"},
+    "ap.err_dataset_type_required": {"id": "Pilih dataset target lebih dulu — tanpa itu pipeline tidak dapat diuji maupun dijalankan.",
+                                    "en": "Choose a target dataset first — without it the pipeline can be neither tested nor run."},
+
+
+    # ── Kesalahan tak terduga pada alur pengajuan ───────────────────────────────────────
+    "ap.err_unexpected": {"id": "Gagal karena kesalahan tak terduga ({kind}). Rinciannya tercatat pada log untuk pengembang.",
+                         "en": "This failed because of an unexpected error ({kind}). The details are recorded in the developer log."},
+    # Pembacaan yang gagal pada alur peninjauan. Keduanya menyatakan keadaan
+    # "tidak dapat dibaca" — BUKAN "tidak ada" — karena tindakan pemulihannya
+    # berbeda, dan gerbang yang tidak terbaca menutup, bukan membuka.
+    "ap.err_gate_unreadable": {"id": "Syarat persetujuan tidak dapat diperiksa saat ini, jadi persetujuan ditahan. Muat ulang halaman; bila tetap begini, periksa log untuk pengembang.",
+                              "en": "The approval requirements could not be checked right now, so approval is held. Reload the page; if it persists, check the developer log."},
+    "trial.err_history_unreadable": {"id": "Riwayat uji coba tidak dapat dibaca saat ini. Rinciannya tercatat pada log untuk pengembang.",
+                                    "en": "The trial history could not be read right now. The details are recorded in the developer log."},
+
     # ── Contoh penyisipan BERNAMA ────────────────────────────────────────
     # Perhatikan urutan katanya berbeda: dalam bahasa Inggris satuannya berada
     # di akhir, dalam bahasa Indonesia di tengah. Penyisipan berdasarkan posisi

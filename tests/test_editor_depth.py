@@ -418,7 +418,15 @@ render()
 
 
 def _run(tmp_path):
-    """Jalankan halaman, lalu KEMBALIKAN state global (AppTest sekerja proses)."""
+    """Jalankan halaman pada bagian "Aktif", lalu KEMBALIKAN state global.
+
+    Penyunting dibuka DARI DALAM bagian "Aktif" (``render_active`` menyerahkan
+    penggambaran ke ``render_editor`` ketika ada pipeline yang sedang
+    disunting), jadi bagian itulah yang harus dipilih. Sebelumnya tidak perlu:
+    bagian "Menunggu tinjauan" ikut menggambar "Aktif" di bawahnya, sehingga
+    penyunting muncul tanpa pernah memilih bagiannya — dan test ini tidak dapat
+    membedakan "penyuntingnya bekerja" dari "bagiannya bocor".
+    """
     import database.db as dbmod
     import orchestrator.dynamic_registry as dr
     from streamlit.testing.v1 import AppTest
@@ -433,6 +441,8 @@ def _run(tmp_path):
                                   str(tmp_path)), encoding="utf-8")
         at = AppTest.from_file(str(script), default_timeout=900)
         at.session_state[login.SESSION_USER_KEY] = ADMIN
+        at.session_state[mp.SECTION_KEY] = mp.SECTION_ACTIVE
+        at.session_state["_mp_section_last"] = mp.SECTION_ACTIVE
         at.run()
         assert at.exception is None or not at.exception, at.exception
         return at

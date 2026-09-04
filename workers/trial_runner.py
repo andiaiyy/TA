@@ -27,6 +27,13 @@ STAGE_LOAD = "memuat pipeline"
 STAGE_READ = "membaca dataset"
 STAGE_RUN = "menjalankan pipeline"
 STAGE_TIMEOUT = "batas waktu"
+#: Tahap SEBELUM pipeline sempat dimuat: pelaksana berbatasnya sendiri tidak
+#: dapat dijalankan (proses anak gagal dibuat). Dibedakan dari `STAGE_LOAD`
+#: karena tindakan pemulihannya berbeda — yang bermasalah lingkungannya, bukan
+#: paket yang sedang diuji. Namanya tinggal di sini bersama tahap lain supaya
+#: seluruh nama tahap tetap punya SATU tempat, dan karena itu tetap dapat
+#: diterjemahkan lewat `TRIAL_STAGE_KEYS`.
+STAGE_SETUP = "menyiapkan pelaksana"
 
 
 class TrialTimeout(RuntimeError):

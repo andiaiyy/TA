@@ -336,4 +336,8 @@ def test_no_subview_leaves_a_table_empty_without_saying_so(tmp_path, view):
             stated = body.split('class="ids-tbl-empty"')[1].split("</td>")[0]
             assert stated.split(">", 1)[1].strip(), (view, stated)
         else:
-            assert "<tr>" in body, (view, html[:150])   # ada baris isi
+            # Baris isi boleh membawa kelas (mis. `ids-tbl-on` untuk versi
+            # aktif), jadi yang dicari adalah ELEMEN barisnya — bukan bentuk
+            # `<tr>` tanpa atribut, yang kebetulan benar hanya selama tidak
+            # ada baris yang disorot.
+            assert "<tr" in body, (view, html[:150])   # ada baris isi

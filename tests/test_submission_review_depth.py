@@ -329,9 +329,11 @@ def test_the_static_check_note_is_one_line_and_shown():
     assert "\n" not in mp.STATIC_CHECK_NOTE
     assert not hasattr(sr, "STATIC_CHECK_NOTE"), "konstanta kembar hidup lagi"
 
-    body = CONTRIB_SRC.split("def _render_pending_section(")[1].split(
-        chr(10) + "def ")[0]
-    assert body.count("STATIC_CHECK_NOTE") == 1
+    # Ditulis SEKALI di seluruh berkas, bukan sekali per fungsi: antrean kini
+    # terbagi menjadi daftar (`_render_pending_list`) dan detail
+    # (`_render_pending_section`), dan menghitung per fungsi tidak akan
+    # menangkap kalau catatannya diduplikasi ke keduanya.
+    assert CONTRIB_SRC.count("STATIC_CHECK_NOTE") == 1
 
 
 # ── Statis, selalu ────────────────────────────────────────────────────────
@@ -440,8 +442,14 @@ render()
 '''
 
 
-def _run(tmp_path, *, seed: bool):
+def _run(tmp_path, *, seed: bool, open_id: int | None = None):
     """Jalankan halaman lewat AppTest, lalu KEMBALIKAN state global.
+
+    ``open_id`` membuka SATU pengajuan. Antrean kini master-detail: daftar
+    menampilkan tabel ikhtisar saja, dan isi lengkap sebuah pengajuan baru
+    tergambar ketika pengajuan itu dibuka. Sebelumnya tidak perlu — seluruh
+    kartu tergambar sekaligus, sehingga test ini tidak dapat membedakan
+    "detailnya lengkap" dari "semuanya kebetulan tergambar".
 
     AppTest menjalankan skripnya DI PROSES YANG SAMA, dan skrip itu memasang
     sambungan basis data sementara dengan penugasan langsung. Tanpa pemulihan
@@ -463,6 +471,8 @@ def _run(tmp_path, *, seed: bool):
                                   str(tmp_path), seed), encoding="utf-8")
         at = AppTest.from_file(str(script), default_timeout=900)
         at.session_state[login.SESSION_USER_KEY] = ADMIN
+        if open_id is not None:
+            at.session_state["_contrib_review_open"] = open_id
         at.run()
         assert at.exception is None or not at.exception, at.exception
         return at
@@ -472,7 +482,7 @@ def _run(tmp_path, *, seed: bool):
 
 
 def test_the_pending_section_renders_a_full_submission(tmp_path):
-    at = _run(tmp_path, seed=True)
+    at = _run(tmp_path, seed=True, open_id=1)
 
     labels = [e.label for e in at.get("expander")]
     joined = " ".join(labels)

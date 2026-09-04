@@ -351,3 +351,77 @@ def test_built_in_pipelines_always_come_from_the_static_registry(env):
     for pipeline_id, entry in PIPELINE_REGISTRY.items():
         assert merged[pipeline_id]["class"] is entry["class"]
         assert not pipeline_id.startswith(UPLOADED_PREFIX)
+
+
+# ── Ketiga bagian harus SALING MENIADAKAN ────────────────────────────────
+# Klaim "SATU bagian tampil pada satu waktu" dulu hanya berlaku untuk dua
+# bagian: jalur "Menunggu tinjauan" tidak berhenti setelah antreannya,
+# melainkan memanggil `render_active` dan `render_history` sekali lagi di
+# bawahnya — sehingga bagian itu memuat SEMUANYA sekaligus.
+
+def test_the_pending_path_never_falls_through_into_the_other_sections():
+    """Penjaga STRUKTURAL atas cacatnya, dibaca dari pohon sintaks.
+
+    Aturannya: setelah antrean digambar, tidak boleh ada lagi pemanggilan
+    penyaji bagian lain — itulah bentuk persis kebocoran yang diperbaiki.
+    Ditulis atas AST, bukan atas potongan teks, supaya penataan ulang kode
+    tidak diam-diam melewatinya.
+    """
+    import ast
+
+    tree = ast.parse(CONTRIB_SRC)
+    flow = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "_render_review_flow")
+
+    def call_name(node):
+        fn = getattr(node, "func", None)
+        return getattr(fn, "attr", None) or getattr(fn, "id", None)
+
+    # Baris tempat antrean digambar — segala sesudahnya milik bagian itu.
+    pending_line = min(
+        n.lineno for n in ast.walk(flow)
+        if isinstance(n, ast.Call) and call_name(n) == "_render_pending_section")
+
+    leaked = sorted(
+        (call_name(n), n.lineno) for n in ast.walk(flow)
+        if isinstance(n, ast.Call)
+        and call_name(n) in ("render_active", "render_history")
+        and n.lineno > pending_line)
+
+    assert not leaked, (
+        "bagian lain ikut tergambar pada jalur 'Menunggu tinjauan': "
+        f"{leaked}")
+
+
+def test_each_section_renderer_is_reached_by_exactly_one_branch():
+    """Penjaga anti-hampa: ketiga penyaji tetap benar-benar dipanggil."""
+    import ast
+
+    tree = ast.parse(CONTRIB_SRC)
+    flow = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "_render_review_flow")
+
+    def call_name(node):
+        fn = getattr(node, "func", None)
+        return getattr(fn, "attr", None) or getattr(fn, "id", None)
+
+    names = [call_name(n) for n in ast.walk(flow) if isinstance(n, ast.Call)]
+    for renderer in ("render_active", "render_history",
+                     "_render_pending_section"):
+        assert names.count(renderer) == 1, (renderer, names.count(renderer))
+
+
+def test_the_submission_history_stays_with_the_pending_section():
+    """Riwayat pengajuan berbicara tentang PENGAJUAN, sama seperti antrean —
+    bukan tentang pipeline terdaftar, jadi ia tinggal di bagian ini."""
+    import ast
+
+    tree = ast.parse(CONTRIB_SRC)
+    flow = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.FunctionDef)
+                and n.name == "_render_review_flow")
+    body = ast.unparse(flow)
+    assert "ap.review_history_heading" in body
+    assert "ap.msg_legacy_dataset_submission" in body      # sisa dataset lama
