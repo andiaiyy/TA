@@ -424,3 +424,188 @@ def test_short_lived_caches_declare_a_ttl():
             assert "ttl=" in text, node.name
             ttl = float(text.split("ttl=")[1].split(",")[0].split(")")[0])
             assert ttl <= limits[node.name], (node.name, ttl)
+
+
+# ── BAGIAN 4: anggaran ANTREAN PENINJAUAN ─────────────────────────────────
+# Bagian 3 di atas merender halaman "Add Pipeline & Dataset" pada keadaan
+# awalnya — kartu pilihan — sehingga alur peninjauan, bagian termahal halaman
+# itu, tidak pernah terukur sama sekali. Di sinilah ia diukur.
+#
+# Yang dijaga BUKAN sebuah angka mutlak, melainkan BENTUK pertumbuhannya:
+# biaya basis data tidak boleh tumbuh mengikuti panjang antrean. Sebelum
+# perbaikan, tiap kartu membayar dua kueri sendiri (satu untuk riwayat ujinya,
+# satu lagi di dalam gerbang persetujuan), jadi antrean 50 pengajuan berarti
+# 100 kueri pada SETIAP penggambaran ulang.
+
+_REVIEW_PKG = '''
+from pipelines.base import BasePipeline
+
+
+class DemoPipeline(BasePipeline):
+    def run(self, pipeline_input, progress=None):
+        raise NotImplementedError
+
+    def get_info(self):
+        return {"dataset_type": "HIKARI2021", "algorithm": "Demo"}
+'''
+
+_ADMIN = {"username": "boss", "role": "research_admin", "status": "active"}
+
+
+def _seed_review(tmp_path, n: int) -> str:
+    """Basis data SEMENTARA berisi `n` pengajuan menunggu tinjauan."""
+    import json
+    import sqlite3
+
+    from database.migration import apply_migrations
+    from database.models import KIND_PIPELINE, SUBMISSION_PENDING
+
+    db = tmp_path / f"review_{n}.db"
+    apply_migrations(str(db))
+    conn = sqlite3.connect(str(db))
+    try:
+        for i in range(n):
+            folder = tmp_path / f"pkg_{n}_{i}"
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "p.py").write_text(_REVIEW_PKG, encoding="utf-8")
+            meta = {"entry_filename": "p.py", "class_name": "DemoPipeline",
+                    "name": f"demo{i}", "dataset_type": "HIKARI2021"}
+            conn.execute(
+                """INSERT INTO submissions
+                   (kind, status, submitted_by, submitted_at, original_filename,
+                    stored_path, file_hash, file_size, metadata_json,
+                    validation_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (KIND_PIPELINE, SUBMISSION_PENDING, "andi", "2026-01-01",
+                 "p.py", str(folder), f"{i:064d}", 100,
+                 json.dumps(meta), json.dumps({"valid": True})))
+        conn.commit()
+    finally:
+        conn.close()
+    return str(db)
+
+
+def _run_review(tmp_path, n: int, open_id: int | None = None):
+    """(cold, warm) biaya render antrean peninjauan berisi `n` pengajuan.
+
+    ``open_id`` membuka satu pengajuan, sehingga biaya DAFTAR dan biaya
+    DETAIL dapat diukur terpisah — itulah pembagian yang menjadi inti
+    master-detail.
+    """
+    from streamlit.testing.v1 import AppTest
+
+    import config.settings as settings
+    import database.db as dbmod
+
+    db = _seed_review(tmp_path, n)
+    old = (dbmod.DB_PATH, settings.DB_PATH)
+    dbmod.DB_PATH, settings.DB_PATH = db, db
+    try:
+        preset = {"_contrib_mode": "review", "auth_user": _ADMIN}
+        if open_id is not None:
+            preset["_contrib_review_open"] = open_id
+        script = tmp_path / f"review_{n}.py"
+        script.write_text(
+            _script("ui.views.contribute", preset, "Add Pipeline & Dataset"),
+            encoding="utf-8")
+        clear_streamlit_caches()
+        at = AppTest.from_file(str(script), default_timeout=900)
+        with RenderCost() as cold:
+            at.run()
+        assert at.exception is None or not at.exception, (n, at.exception)
+        with RenderCost() as warm:
+            at.run()
+        assert at.exception is None or not at.exception, (n, at.exception)
+        return cold, warm
+    finally:
+        dbmod.DB_PATH, settings.DB_PATH = old
+
+
+def test_the_review_queue_actually_examines_the_rows_it_shows(tmp_path):
+    """Penjaga anti-hampa: anggaran yang tidak merender apa pun menjaga nol.
+
+    Sifat lamanya — "antrean lebih panjang selalu lebih mahal" — sengaja sudah
+    TIDAK berlaku sejak daftarnya dipenggal per halaman. Yang menggantikannya
+    berpasangan, dan keduanya harus benar sekaligus:
+
+    * antrean yang belum memenuhi satu halaman memang lebih murah daripada
+      yang memenuhinya — membuktikan barisnya benar-benar diperiksa;
+    * setelah satu halaman penuh, menambah pengajuan TIDAK menambah biaya —
+      membuktikan penggalannya bekerja.
+    """
+    cold_small, _ = _run_review(tmp_path, 2)
+    cold_full, _ = _run_review(tmp_path, 12)
+    cold_bigger, _ = _run_review(tmp_path, 40)
+
+    assert cold_full.total > cold_small.total, (
+        "baris yang ditampilkan tidak diperiksa sama sekali — "
+        f"{cold_small.counts} vs {cold_full.counts}")
+    assert cold_bigger.total == cold_full.total, (
+        "biaya masih tumbuh setelah satu halaman penuh — penggalan tidak "
+        f"bekerja: {cold_full.counts} vs {cold_bigger.counts}")
+
+
+def test_the_review_queue_does_not_pay_per_submission_in_the_database(tmp_path):
+    """Biaya basis data TIDAK tumbuh mengikuti panjang antrean.
+
+    Inilah sifat yang diperbaiki: uji terakhir seluruh antrean diambil dalam
+    SATU kueri (``database.trials.latest_trials_for``) lalu dibagikan ke tiap
+    kartu, menggantikan dua kueri per kartu.
+    """
+    _, warm_small = _run_review(tmp_path, 2)
+    _, warm_big = _run_review(tmp_path, 12)
+    assert warm_big.counts["db"] == warm_small.counts["db"], (
+        "biaya basis data ikut tumbuh dengan panjang antrean: "
+        f"{warm_small.counts['db']} pada 2 pengajuan, "
+        f"{warm_big.counts['db']} pada 12")
+
+
+#: Biaya per pengajuan pada render BERIKUTNYA. NOL: menambah pengajuan ke
+#: antrean tidak boleh menambah pekerjaan berat sama sekali.
+#:
+#: Sebelum master-detail angkanya 1 — pembacaan berkas paket tiap kartu untuk
+#: menentukan jenis dataset yang dideklarasikan pipeline. Ia tidak pernah
+#: di-cache dengan sengaja (nilainya turunan isi berkas, dan yang basi akan
+#: menyentuh gerbang yang menjaga celah "uji bersih lalu sunting lalu
+#: setujui"), jadi satu-satunya cara menghapusnya adalah tidak menggambar
+#: kartu yang belum dibuka — dan itulah yang dilakukan sekarang.
+REVIEW_WARM_PER_SUBMISSION = 0
+
+
+def test_the_review_queue_cost_per_submission_does_not_regress(tmp_path):
+    _, warm_small = _run_review(tmp_path, 2)
+    _, warm_big = _run_review(tmp_path, 30)
+    per = (warm_big.total - warm_small.total) / 28
+    assert per <= REVIEW_WARM_PER_SUBMISSION, (
+        f"biaya per pengajuan naik menjadi {per} "
+        f"(batas {REVIEW_WARM_PER_SUBMISSION}); "
+        f"kecil={warm_small.counts} besar={warm_big.counts}")
+
+
+def test_opening_one_submission_reads_for_one_submission(tmp_path):
+    """Detail membaca untuk SATU pengajuan — bukan untuk seluruh antrean.
+
+    Inilah janji master-detail. Bila membuka satu pengajuan dari antrean 30
+    lebih mahal daripada dari antrean 2, berarti detailnya masih menyentuh
+    pengajuan yang tidak sedang dibuka.
+    """
+    _, small = _run_review(tmp_path, 2, open_id=1)
+    _, big = _run_review(tmp_path, 30, open_id=1)
+    assert big.total == small.total, (
+        "membuka satu pengajuan ikut membayar panjang antrean: "
+        f"{small.counts} vs {big.counts}")
+
+
+def test_the_open_submission_marker_is_dropped_when_the_page_changes(tmp_path):
+    """Penanda "sedang membuka" tidak boleh bertahan setelah pindah halaman.
+
+    Tanpa ini, kembali ke halaman kontribusi akan langsung membuka pengajuan
+    yang dulu dibuka — keadaan yang muncul sendiri, cacat yang sama dengan
+    modal yang pernah "muncul sendiri" pada flag auth.
+    """
+    from ui.components import page_flags
+
+    assert any(("_contrib_review_open").startswith(prefix)
+               for prefix in page_flags.VIEW_STATE_PREFIXES), (
+        "penanda daftar peninjauan berada di luar awalan yang disapu "
+        f"page_flags: {page_flags.VIEW_STATE_PREFIXES}")

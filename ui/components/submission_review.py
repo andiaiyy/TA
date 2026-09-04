@@ -267,6 +267,93 @@ PENDING_COLUMNS = (
 )
 
 
+# ── Menyaring, mengurutkan, memenggal — SEBELUM apa pun diperiksa ─────────
+# Ketiganya bekerja pada kolom baris pengajuan APA ADANYA: nomor, nama, dan
+# pengaju. Tidak satu pun membuka berkas paket.
+#
+# Urutan langkahnya yang penting: menyaring dan memenggal lebih dulu, baru
+# memeriksa. Pemeriksaan statis membaca seluruh berkas sebuah paket, jadi
+# memeriksa dulu lalu memenggal berarti membayar untuk pengajuan yang tidak
+# jadi ditampilkan — biaya yang tumbuh mengikuti panjang antrean, bukan
+# mengikuti apa yang benar-benar dilihat peninjau.
+
+#: Banyak baris per halaman daftar. Dipilih supaya seluruh halaman muat dibaca
+#: tanpa menggulir pada layar biasa, dan supaya pemeriksaan statis yang dibayar
+#: satu render tetap terbatas pada angka ini — bukan pada panjang antrean.
+PAGE_SIZE = 10
+
+SORT_OLDEST = "oldest"
+SORT_NEWEST = "newest"
+
+
+def search_text(item: dict) -> str:
+    """Teks yang dicari untuk satu pengajuan, huruf kecil.
+
+    Isinya kolom yang MEMANG sudah ada di baris pengajuan — tidak ada berkas
+    yang dibuka untuk menyusunnya.
+    """
+    meta = _meta(item)
+    parts = [
+        f"#{item.get('id')}",
+        str(meta.get("name") or ""),
+        str(item.get("original_filename") or ""),
+        str(item.get("submitted_by") or ""),
+    ]
+    return " ".join(p for p in parts if p).lower()
+
+
+def filter_pending(items, query: str) -> list[dict]:
+    """Pengajuan yang cocok dengan ``query``. Kosong berarti semuanya.
+
+    Pencocokannya sederhana dan tanpa kejutan: seluruh kata pada kueri harus
+    muncul pada teks pencarian pengajuan itu.
+    """
+    words = (query or "").strip().lower().split()
+    if not words:
+        return list(items or [])
+    out = []
+    for item in items or []:
+        haystack = search_text(item)
+        if all(word in haystack for word in words):
+            out.append(item)
+    return out
+
+
+def order_pending(items, sort: str = SORT_OLDEST) -> list[dict]:
+    """Urutkan antrean. Bawaannya TERLAMA MENUNGGU LEBIH DULU.
+
+    Bawaannya tidak berubah dari :func:`sort_pending` — antrean tinjauan bukan
+    tumpukan. ``SORT_NEWEST`` hanya membalik urutannya, memakai kunci yang sama
+    supaya keduanya tidak dapat berbeda cara memutus seri.
+    """
+    ordered = sort_pending(items)
+    return list(reversed(ordered)) if sort == SORT_NEWEST else ordered
+
+
+def page_count(total: int, size: int = PAGE_SIZE) -> int:
+    """Banyak halaman untuk ``total`` baris; minimal 1 supaya selalu ada."""
+    size = max(1, int(size or PAGE_SIZE))
+    return max(1, -(-max(0, int(total)) // size))
+
+
+def page_slice(items, page: int = 1, size: int = PAGE_SIZE) -> list[dict]:
+    """Satu halaman dari daftar. Halaman di luar jangkauan dijepit, bukan
+    menghasilkan daftar kosong — pengguna tidak boleh terdampar pada halaman
+    yang tidak ada setelah antreannya menyusut."""
+    items = list(items or [])
+    size = max(1, int(size or PAGE_SIZE))
+    last = page_count(len(items), size)
+    page = min(max(1, int(page or 1)), last)
+    start = (page - 1) * size
+    return items[start:start + size]
+
+
+def result_note(shown: int, total: int) -> tuple[int, int]:
+    """(ditampilkan, seluruhnya) — supaya penyaring tidak menyembunyikan
+    antrean tanpa disadari."""
+    return int(shown), int(total)
+
+
 def pending_table_rows(items, reviewer) -> list[dict]:
     """Baris antrean. ``reviewer`` mengembalikan hasil periksa satu pengajuan.
 
@@ -278,10 +365,16 @@ def pending_table_rows(items, reviewer) -> list[dict]:
 
 
 def summary_line(row: dict) -> str:
-    """Baris daftar sebagai satu teks — nama menonjol, sisanya konteks."""
-    return (f"**{row['name']}** · {row['verdict_text']} · "
-            f"{row['file_count']} berkas · oleh {row['submitted_by']} · "
-            f"{row['submitted_at']}")
+    """Baris daftar sebagai satu teks — nama menonjol, sisanya konteks.
+
+    Nama berkas, nama pengaju, dan waktunya berasal dari basis data dan
+    ditampilkan apa adanya; hanya kerangka kalimatnya yang berbahasa.
+    """
+    from ui.i18n import t
+
+    return t("sr.summary_line", name=row["name"],
+             verdict=row["verdict_text"], files=row["file_count"],
+             who=row["submitted_by"], when=row["submitted_at"])
 
 
 # ── Berkas satu paket ─────────────────────────────────────────────────────

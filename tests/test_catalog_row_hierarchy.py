@@ -118,8 +118,9 @@ def test_row_content_comes_from_the_registry():
     catalog = pc.build_catalog()
     assert catalog
 
-    from config.pipeline_registry import list_all_pipelines
-    registry = list_all_pipelines()
+    # Registry GABUNGAN: katalog memang memuat pipeline kontribusi yang aktif.
+    from orchestrator.dynamic_registry import get_all_pipelines
+    registry = get_all_pipelines()
 
     for group in catalog:
         dtype = group["dataset_type"]
@@ -197,7 +198,9 @@ def test_the_full_note_is_also_still_in_the_detail_modal():
 
 def test_the_algorithm_chips_are_unchanged():
     body = CATALOG_SRC.split("def render_catalog(")[1].split("\ndef ")[0]
-    assert "chips_html(names)" in body
+    # Chip kini menerima ENTRI algoritma (yang membawa asal & keadaannya),
+    # bukan hanya nama — bentuk lama tetap didukung.
+    assert 'chips_html(group.get("algorithms")' in body
     html = pc.chips_html(["Random Forest", "SVC"])
     assert html.count('class="ids-cat-chip"') == 2
     # Chip berada DI BAWAH penjelasan.

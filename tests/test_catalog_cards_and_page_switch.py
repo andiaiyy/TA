@@ -147,7 +147,17 @@ def test_the_row_content_did_not_grow():
     assert body.count(".button(") == 2
     for piece in ("row_head_html(", "chips_html("):
         assert piece in body
-    assert "st.caption(" not in body
+
+    # Satu-satunya teks tambahan adalah SEBAB sebuah pipeline tidak dapat
+    # dipakai, dan ia BERSYARAT: katalog yang sehat tidak menambah satu baris
+    # pun. Yang dijaga penjaga ini tetap sama — tidak ada teks baru untuk
+    # mengisi ruang.
+    assert body.count("st.caption(") == 1
+    assert "group_problems(group)" in body
+    healthy = {"dataset_type": "HIKARI2021", "algorithms": [
+        {"pipeline_id": "hikari2021.dt_pipeline", "algorithm": "Decision Tree",
+         "state": pc.STATE_OK, "state_reason": ""}]}
+    assert pc.group_problems(healthy) == []
 
     head = pc.row_head_html({
         "title": "T", "short": "S", "paper": "P",

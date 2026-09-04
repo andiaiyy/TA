@@ -109,6 +109,42 @@ def latest_trial(submission_id: int, db_path: str | None = None) -> dict | None:
     return trials[0] if trials else None
 
 
+def latest_trials_for(submission_ids, db_path: str | None = None) -> dict:
+    """``{submission_id: uji terakhir}`` untuk BANYAK pengajuan, satu kueri.
+
+    Halaman peninjauan menampilkan seluruh antrean sekaligus, dan menanyakan
+    "uji terakhirnya apa" satu per satu berarti satu kueri per pengajuan —
+    biaya yang tumbuh mengikuti panjang antrean, dibayar pada setiap
+    penggambaran ulang. Di sini pertanyaannya diajukan sekali untuk semuanya.
+
+    Urutan pemenangnya SAMA PERSIS dengan :func:`list_trials`
+    (``started_at DESC, rowid DESC``), termasuk pemutus seri ``rowid`` — kalau
+    keduanya berbeda, "uji terakhir" versi daftar dan versi kartu bisa
+    menunjuk baris yang berlainan, dan gerbang persetujuan ikut salah.
+    Pengajuan tanpa uji sama sekali TIDAK muncul sebagai kunci.
+    """
+    ids = [int(i) for i in (submission_ids or [])]
+    if not ids:
+        return {}
+
+    out: dict[int, dict] = {}
+    with get_connection(db_path) as conn:
+        # Dipecah agar tidak menabrak batas jumlah variabel SQLite (999).
+        for start in range(0, len(ids), 500):
+            chunk = ids[start:start + 500]
+            placeholders = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT * FROM pipeline_trials WHERE submission_id IN ({placeholders}) "
+                "ORDER BY started_at DESC, rowid DESC",
+                chunk).fetchall()
+            for row in rows:
+                item = _row_to_dict(row)
+                # Baris pertama yang terlihat untuk sebuah pengajuan adalah
+                # yang terbaru — urutannya sudah dijamin kueri di atas.
+                out.setdefault(item["submission_id"], item)
+    return out
+
+
 def delete_trials(submission_id: int, db_path: str | None = None) -> list[dict]:
     """Hapus catatan uji sebuah pengajuan; kembalikan yang dihapus.
 

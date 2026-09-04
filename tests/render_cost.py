@@ -7,8 +7,12 @@ dilaporkan tidak mungkin berbeda dari yang diuji.
 
 **Yang dihitung**
 
-``db``      — setiap sambungan basis data dibuka (``database.db.get_connection``
-              adalah satu-satunya pintu; seluruh kueri melewatinya).
+``db``      — setiap sambungan basis data dibuka, dihitung pada
+              ``sqlite3.connect``. Sebelumnya dihitung pada
+              ``database.db.get_connection``, yang MELEWATKAN setiap modul yang
+              mengikat namanya saat impor — dan tidak ada satu pun modul yang
+              memakainya lewat atribut, sehingga seluruh lalu lintas basis data
+              subsistem kontribusi terhitung nol.
 ``listdir`` — setiap penelusuran isi folder (``Path.glob`` / ``Path.iterdir``).
 ``stat``    — setiap pembacaan metadata berkas (``Path.stat``).
 ``open``    — setiap berkas DATA dibuka (hanya di bawah ``storage/``). Impor
@@ -65,9 +69,20 @@ class RenderCost:
         self._restore.append((owner, name, original))
 
     def __enter__(self) -> "RenderCost":
-        import database.db as db
+        import sqlite3
 
-        self._wrap(db, "get_connection", "db")
+        # Ditambal pada `sqlite3.connect`, BUKAN pada
+        # `database.db.get_connection`. Alasannya diukur, bukan diperkirakan:
+        # delapan modul mengikat namanya saat impor
+        # (`from database.db import get_connection`) — seluruh orchestrator
+        # kontribusi dan `database/trials.py` — sehingga menambal atribut modul
+        # tidak pernah menyentuh referensi yang benar-benar dipanggil. Akibatnya
+        # SELURUH lalu lintas basis data subsistem kontribusi terhitung nol,
+        # yaitu justru bagian yang anggarannya paling perlu dijaga.
+        #
+        # `sqlite3.connect` adalah pintu yang pasti dilewati semua jalur dan
+        # tidak menuntut daftar modul yang harus dirawat.
+        self._wrap(sqlite3, "connect", "db")
         self._wrap(Path, "glob", "listdir")
         self._wrap(Path, "iterdir", "listdir")
         self._wrap(Path, "stat", "stat", data_only=True)

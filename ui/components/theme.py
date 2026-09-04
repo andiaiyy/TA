@@ -443,6 +443,24 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
 }}
 .ids-mode-anchor {{ display: none; }}
 
+/* ── Chip katalog: penanda asal & keadaan ──────────────────────────────── */
+/* Keadaan TIDAK disampaikan lewat warna saja: setiap chip bermasalah juga
+   membawa kata ("bermasalah"/"belum ada dataset") dan kalimat sebabnya di
+   bawah baris. Warna hanya mempercepat pemindaian. */
+.ids-cat-chip-mark {{
+    opacity: .72;
+    font-size: .82em;
+    margin-left: .35rem;
+}}
+.ids-cat-chip-broken {{
+    border-color: rgba(200, 70, 70, .55) !important;
+    color: rgb(190, 70, 70);
+}}
+.ids-cat-chip-warn {{
+    border-color: rgba(200, 150, 60, .55) !important;
+    color: rgb(170, 120, 40);
+}}
+
 /* Label mode + dropdown-nya adalah SATU kesatuan: baris label menyebut mode
    yang sedang berlaku, dropdown di bawahnya yang menggantinya. Jaraknya
    dirapatkan supaya label tidak terbaca mengambang di antara pengalih bahasa

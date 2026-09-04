@@ -149,19 +149,33 @@ def trial_blocker(item: dict) -> str:
 
 # ── Gerbang persetujuan ──────────────────────────────────────────────────
 
-def approval_blocker(item: dict, db_path: str | None = None) -> str:
+#: Penanda "tidak ada uji yang disodorkan pemanggil" — dibedakan dari `None`,
+#: yang merupakan jawaban yang SAH ("pengajuan ini belum pernah diuji").
+_NO_TRIAL_GIVEN = object()
+
+
+def approval_blocker(item: dict, db_path: str | None = None, *,
+                     trial=_NO_TRIAL_GIVEN) -> str:
     """Alasan pengajuan ini BELUM boleh disetujui; "" bila boleh.
 
     Tiga keadaan yang berbeda dibedakan, karena tindakan pemulihannya berbeda:
     belum pernah diuji, uji terakhirnya gagal, dan uji terakhirnya sudah tidak
     berlaku karena kodenya berubah sesudahnya.
+
+    ``trial`` OPSIONAL: uji terakhir yang sudah diambil pemanggil (mis. lewat
+    ``latest_trials_for`` untuk seluruh antrean sekaligus). Bila tidak
+    diberikan, uji itu diambil di sini seperti sebelumnya — pemanggil lama
+    tidak berubah perilakunya sama sekali. Yang dihemat hanyalah PEMBACAAN;
+    aturannya di bawah tetap sama persis, dan sidik jari paket tetap dihitung
+    ULANG di sini, tidak pernah diambil dari nilai yang disodorkan.
     """
     from database.models import KIND_PIPELINE
 
     if item.get("kind") != KIND_PIPELINE:
         return ""                            # dataset tidak memerlukan uji
 
-    trial = trial_db.latest_trial(item["id"], db_path)
+    if trial is _NO_TRIAL_GIVEN:
+        trial = trial_db.latest_trial(item["id"], db_path)
     if trial is None:
         return "trial.gate_untested"
     if trial["status"] != trial_db.STATUS_PASSED:
@@ -178,6 +192,128 @@ def may_approve(item: dict, db_path: str | None = None) -> bool:
 
 
 # ── Menjalankan uji coba ─────────────────────────────────────────────────
+
+
+#: Nilai yang kontributor pilih ketika jenis datasetnya BELUM terdaftar di
+#: platform. Disimpan sebagai penanda eksplisit, bukan string kosong: "saya
+#: tahu jenisnya belum ada di daftar" adalah keterangan, sedangkan string
+#: kosong tidak dapat dibedakan dari "tidak pernah diisi".
+DATASET_TYPE_UNREGISTERED = "unregistered"
+
+
+def _usable_type(value) -> str:
+    """Jenis dataset yang benar-benar dapat dipakai, atau "".
+
+    Penanda `unregistered` dan string kosong sama-sama BUKAN jenis yang dapat
+    dipakai memuat dan menjalankan pipeline — keduanya disaring di sini,
+    sekali, supaya tidak ada pemanggil yang perlu mengingatnya.
+    """
+    text = str(value or "").strip()
+    if not text or text == DATASET_TYPE_UNREGISTERED:
+        return ""
+    return text
+
+
+def declared_dataset_type(item: dict) -> str:
+    """Jenis yang DIDEKLARASIKAN pipeline pengajuan ini, dibaca STATIS.
+
+    Dibaca dari teks sumbernya lewat pembaca statis yang sama dengan yang
+    dipakai saat mengunggah — berkasnya tidak pernah diimpor maupun
+    dijalankan untuk menjawab pertanyaan ini.
+    """
+    from ui.components.pipeline_upload import extract_registry_metadata
+
+    metadata = item.get("metadata") or {}
+    entry_name = metadata.get("entry_filename") or ""
+    for name, source in submission_files(item).items():
+        if entry_name and name != entry_name:
+            continue
+        try:
+            found = extract_registry_metadata(source, name) or {}
+        except Exception:                    # pragma: no cover - defensif
+            continue
+        usable = _usable_type(found.get("dataset_type"))
+        if usable:
+            return usable
+    return ""
+
+
+def platform_dataset_type(dataset_path: str | None) -> str:
+    """Jenis milik berkas platform yang dipilih, dari mekanisme yang ada.
+
+    Ini sumber PALING BERWENANG: apa pun yang tertulis di tempat lain, inilah
+    data yang benar-benar akan dibaca pipeline.
+    """
+    if not dataset_path:
+        return ""
+    try:
+        from config.settings import DATASETS_DIR
+        from ui.views.run_experiment import _dataset_options_cached
+
+        options, _sizes = _dataset_options_cached(0, str(DATASETS_DIR))
+        target = Path(dataset_path).resolve()
+        for path, dtype in options:
+            if Path(path).resolve() == target:
+                return _usable_type(dtype)
+    except Exception:                        # pragma: no cover - defensif
+        logger.exception("Jenis dataset platform tidak terbaca untuk %s",
+                         dataset_path)
+    return ""
+
+
+def resolve_dataset_type(item: dict, source: str,
+                         dataset_path: str | None = None) -> str:
+    """Jenis dataset untuk sebuah uji coba — SATU-SATUNYA penentu.
+
+    Urutannya, dan alasannya:
+
+    1. **berkas platform yang dipilih** — paling berwenang, karena itulah data
+       yang benar-benar dibaca; apa pun yang dideklarasikan di tempat lain
+       kalah oleh kenyataan isi berkasnya;
+    2. **deklarasi pipeline** (dibaca statis dari sumbernya) — pernyataan
+       penulis pipeline tentang data yang ia harapkan;
+    3. **metadata pengajuan** — isian kontributor pada formulir, yang paling
+       mudah terlewat dan karena itu paling akhir.
+
+    Untuk dataset LAMPIRAN, langkah 1 dilewati: lampiran tidak punya jenis
+    sendiri — ia disediakan UNTUK pipeline ini, jadi jenisnya adalah jenis
+    yang pipeline itu deklarasikan (dengan cadangan metadata pengajuan).
+
+    Mengembalikan "" bila tidak ada satu pun sumber menghasilkan jenis yang
+    dapat dipakai. Pemanggil WAJIB berhenti pada keadaan itu — lihat
+    :func:`run_trial`.
+    """
+    if source != SOURCE_ATTACHED:
+        found = platform_dataset_type(dataset_path)
+        if found:
+            return found
+
+    found = declared_dataset_type(item)
+    if found:
+        return found
+
+    return _usable_type((item.get("metadata") or {}).get("dataset_type"))
+
+
+def dataset_type_blocker(item: dict, source: str,
+                         dataset_path: str | None = None, *,
+                         resolved: str | None = None) -> str:
+    """Kunci pesan bila jenis dataset tak dapat ditentukan; "" bila dapat.
+
+    Dipakai TAMPILAN untuk menonaktifkan tombol beserta alasannya, dan dipakai
+    :func:`run_trial` untuk menolak lebih awal — satu aturan, dua tempat yang
+    menanyakannya, bukan dua aturan.
+
+    ``resolved`` OPSIONAL: jenis yang SUDAH ditentukan pemanggil lewat
+    :func:`resolve_dataset_type`. Menyodorkannya menghindari penentuan kedua
+    yang membaca berkas paket sekali lagi untuk pertanyaan yang sama. Ia hanya
+    boleh berisi hasil fungsi itu — bukan tebakan pemanggil — karena kunci
+    pesannya tetap diputuskan DI SINI, satu tempat.
+    """
+    value = (resolved if resolved is not None
+             else resolve_dataset_type(item, source, dataset_path))
+    return "" if value else "td.err_unknown_dataset_type"
+
 
 def _entry_from_submission(item: dict) -> tuple[Path, str, str]:
     """(berkas titik masuk, nama kelas, sha256 berkas) sebuah pengajuan."""
@@ -211,7 +347,7 @@ SOURCE_PLATFORM = "platform"
 SOURCE_ATTACHED = "attached"
 
 
-def run_trial(submission_id: int, *, dataset_type: str,
+def run_trial(submission_id: int, *, dataset_type: str | None = None,
               dataset_path: str | None = None, actor: dict | None,
               source: str = SOURCE_PLATFORM,
               db_path: str | None = None) -> dict:
@@ -224,6 +360,11 @@ def run_trial(submission_id: int, *, dataset_type: str,
     ``source`` memilih dataset PLATFORM (dipilih admin dari yang tersedia)
     atau dataset LAMPIRAN pengajuan. Pada lampiran, hash-nya diverifikasi
     lebih dulu: berkas yang berubah setelah diajukan ditolak sebelum dipakai.
+
+    ``dataset_type`` TIDAK perlu diberikan: ia ditentukan
+    :func:`resolve_dataset_type` di sini. Argumennya dipertahankan hanya untuk
+    pemanggil lama; nilai yang tidak dapat dipakai diabaikan, bukan diteruskan
+    apa adanya ke penyimpanan.
     """
     from orchestrator.submission_service import get_submission
 
@@ -247,6 +388,21 @@ def run_trial(submission_id: int, *, dataset_type: str,
     # Sumber dataset diselesaikan SETELAH pengaman paket lolos, supaya
     # pengajuan yang memang tidak boleh diuji tidak pernah membuka berkas
     # apa pun — termasuk lampirannya.
+    # Jenis dataset ditentukan SEKALI, di sini, SEBELUM catatan apa pun
+    # ditulis — dan sebelum jalurnya dinormalkan. Urutan ini disengaja: bila
+    # jenis MAUPUN berkas sama-sama belum ada, "jenis belum diketahui" yang
+    # perlu didengar peninjau, karena yang harus diperbaiki adalah metadata
+    # pengajuannya, bukan pilihan berkasnya.
+    resolved_type = _usable_type(dataset_type) or resolve_dataset_type(
+        item, source, dataset_path)
+    if not resolved_type:
+        raise TrialError(
+            "Jenis dataset belum diketahui, jadi uji coba tidak dapat "
+            "dijalankan. Lengkapi dataset target pada metadata pengajuan, "
+            "atau pilih dataset platform yang jenisnya dikenali.",
+            key="td.err_unknown_dataset_type")
+    dataset_type = resolved_type
+
     dataset_path, dataset_label = _resolve_dataset(item, source, dataset_path)
 
     entry_path, entry_class, entry_hash = _entry_from_submission(item)
@@ -306,11 +462,33 @@ def _execute_trial(*, trial_id, entry_path, entry_class, entry_hash,
     from workers.trial_runner import run_bounded
 
     run = runner or run_bounded
-    outcome = run(
-        entry_file=str(entry_path), entry_class=entry_class,
-        entry_hash=entry_hash, dataset_type=dataset_type,
-        dataset_path=dataset_path, max_rows=TRIAL_LIMITS["max_rows"],
-        max_seconds=TRIAL_LIMITS["max_seconds"])
+    try:
+        outcome = run(
+            entry_file=str(entry_path), entry_class=entry_class,
+            entry_hash=entry_hash, dataset_type=dataset_type,
+            dataset_path=dataset_path, max_rows=TRIAL_LIMITS["max_rows"],
+            max_seconds=TRIAL_LIMITS["max_seconds"])
+    except Exception as exc:
+        # Pelaksana berbatas menjadikan kegagalan PIPELINE sebagai hasil, bukan
+        # lemparan — tetapi ia masih dapat gagal karena sebab LINGKUNGAN
+        # (proses anak tidak dapat dijalankan, antrean tidak dapat dibuat).
+        # Tanpa penangan ini catatan uji tertinggal selamanya pada status
+        # QUEUED: catatan setengah jadi yang tidak pernah punya kesimpulan.
+        # Kegagalan lingkungan pun dicatat sebagai KEGAGALAN yang berkesudahan.
+        logger.exception("Pelaksana uji coba %s gagal dijalankan", trial_id)
+        from workers.trial_runner import STAGE_SETUP
+
+        outcome = {
+            "ok": False,
+            # Nama tahap diambil dari konstanta, bukan ditulis sebagai teks di
+            # sini: `trial_stage()` menerjemahkan lewat pemetaan nama tahap,
+            # dan nama yang tidak terdaftar akan tampil apa adanya — satu
+            # kalimat Inggris dengan potongan Indonesia di dalamnya.
+            "stage": STAGE_SETUP,
+            "kind": type(exc).__name__,
+            "message": str(exc),
+            "rows_used": None,
+        }
 
     duration = round((datetime.now() - started).total_seconds(), 3)
     finished_at = datetime.now().isoformat(timespec="seconds")
@@ -475,10 +653,12 @@ def orphan_trial_dirs(db_path: str | None = None) -> list[Path]:
 
 
 __all__ = [
-    "SOURCE_ATTACHED", "SOURCE_PLATFORM",
+    "DATASET_TYPE_UNREGISTERED", "SOURCE_ATTACHED", "SOURCE_PLATFORM",
     "TRIAL_LIMITS", "TRIAL_ROOT", "TrialError",
-    "approval_blocker", "cleanup_stale_trials", "discard_trials",
-    "may_approve", "orphan_trial_dirs", "package_fingerprint", "run_trial",
+    "approval_blocker", "cleanup_stale_trials", "dataset_type_blocker",
+    "declared_dataset_type", "discard_trials",
+    "may_approve", "orphan_trial_dirs", "package_fingerprint",
+    "platform_dataset_type", "resolve_dataset_type", "run_trial",
     "static_validation_passed", "submission_fingerprint", "trial_blocker",
     "trial_trail",
 ]

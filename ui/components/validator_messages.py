@@ -253,3 +253,49 @@ def stored_error_message(text: str) -> str:
     pesan BARU (lewat :func:`error_message`) dan mana yang pesan TERSIMPAN.
     """
     return text or ""
+
+
+# ── Uji coba pipeline: tahap & pesan kegagalan ───────────────────────────
+#
+# `error_stage` dan `error_kind` pada catatan uji adalah PENGENAL — tersimpan
+# apa adanya dan dipakai untuk membandingkan. Yang dipetakan di sini hanya
+# labelnya, sama seperti nama pemeriksaan validator.
+
+TRIAL_STAGE_KEYS = {
+    "memuat pipeline": "trial.stage_load",
+    "membaca dataset": "trial.stage_read",
+    "menjalankan pipeline": "trial.stage_run",
+    "batas waktu": "trial.stage_timeout",
+    "menyiapkan pelaksana": "trial.stage_setup",
+}
+
+#: Kegagalan yang ditulis PLATFORM (bukan pipeline) → kunci kalimatnya.
+#: Pesan dari pipeline sengaja TIDAK ada di sini: ia kata-kata pipeline itu
+#: sendiri, dan menggantinya berarti mengarang isi laporan kegagalan.
+TRIAL_FAILURE_KEYS = {
+    "TrialTimeout": "trial.msg_timeout",
+    "ProcessDied": "trial.msg_process_died",
+}
+
+
+def trial_stage(stage: str) -> str:
+    """Nama tahap uji coba pada bahasa aktif; tanpa kunci → apa adanya."""
+    key = TRIAL_STAGE_KEYS.get(stage or "")
+    return t(key) if key else (stage or "")
+
+
+def trial_failure_message(kind: str, message: str) -> str:
+    """Pesan kegagalan uji coba pada bahasa aktif.
+
+    Dua kegagalan yang ditulis platform diterjemahkan; sisanya — yaitu pesan
+    yang datang dari pipeline yang sedang diuji — dikembalikan APA ADANYA.
+    Itu justru isi yang dicari peninjau, dan mengubahnya akan menyesatkan.
+    """
+    key = TRIAL_FAILURE_KEYS.get(kind or "")
+    if not key:
+        return message or ""
+    if key == "trial.msg_timeout":
+        from orchestrator.trial_service import TRIAL_LIMITS
+
+        return t(key, seconds=TRIAL_LIMITS["max_seconds"])
+    return t(key)

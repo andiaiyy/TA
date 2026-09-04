@@ -275,6 +275,12 @@ def _render_pipeline_actions(summary: dict, user: dict) -> None:
                 set_pipeline_active(pipeline_id, True, actor=user)
             except (AuthError, DynamicRegistryError) as e:
                 st.error(error_message(e))
+            except Exception as e:
+                # Mengaktifkan menulis ke basis data: kesalahan basis data
+                # bukan turunan AuthError maupun DynamicRegistryError, jadi
+                # sebelumnya ia lolos sebagai jejak teknis.
+                logger.exception("Aktivasi %s gagal tak terduga", pipeline_id)
+                st.error(t("ap.err_unexpected", kind=type(e).__name__))
             else:
                 st.rerun()
 
@@ -303,6 +309,9 @@ def _render_deactivate_confirm(summary: dict, user: dict) -> None:
             set_pipeline_active(pipeline_id, False, actor=user)
         except (AuthError, DynamicRegistryError) as e:
             st.error(error_message(e))
+        except Exception as e:
+            logger.exception("Penonaktifan %s gagal tak terduga", pipeline_id)
+            st.error(t("ap.err_unexpected", kind=type(e).__name__))
         else:
             st.session_state.pop(_CONFIRM_OFF_KEY, None)
             st.rerun()
@@ -780,6 +789,15 @@ def render_editor(user: dict) -> None:
                                        change_note=note, actor=user)
         except (AuthError, PipelineEditError) as e:
             st.error(error_message(e))
+        except Exception as e:
+            # Menyimpan versi menulis BERKAS dan basis data, lalu
+            # mendaftarkannya: OSError, kesalahan basis data, dan
+            # DynamicRegistryError semuanya mungkin dan tidak tertangkap di
+            # atas. Versi lama tidak pernah ditimpa, jadi kegagalan di sini
+            # tidak merusak apa pun yang sudah tersimpan.
+            logger.exception("Penyimpanan versi baru %s gagal tak terduga",
+                             pipeline_id)
+            st.error(t("ap.err_unexpected", kind=type(e).__name__))
         else:
             st.success(
                 f"Tersimpan sebagai **v{created['version']}** "

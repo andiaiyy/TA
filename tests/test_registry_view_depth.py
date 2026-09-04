@@ -521,8 +521,14 @@ render()
 '''
 
 
-def _run(tmp_path, *, seed: bool):
-    """Jalankan halaman, lalu KEMBALIKAN state global.
+def _run(tmp_path, *, seed: bool, section: str = "Aktif"):
+    """Jalankan halaman pada SATU bagian, lalu KEMBALIKAN state global.
+
+    ``section`` wajib dipilih sejak dulu bagian-bagiannya benar-benar saling
+    meniadakan. Sebelumnya bagian "Menunggu tinjauan" ikut menggambar "Aktif"
+    dan "Riwayat versi" di bawahnya, jadi test ini dapat memeriksa keduanya
+    tanpa pernah memilihnya — dan karena itu tidak dapat membedakan
+    "penyajinya bekerja" dari "bagiannya bocor".
 
     AppTest menjalankan skripnya di proses yang sama dan skrip itu memasang
     sambungan basis data sementara lewat penugasan langsung; tanpa pemulihan,
@@ -544,6 +550,8 @@ def _run(tmp_path, *, seed: bool):
                                   str(tmp_path), seed), encoding="utf-8")
         at = AppTest.from_file(str(script), default_timeout=900)
         at.session_state[login.SESSION_USER_KEY] = ADMIN
+        at.session_state[mp.SECTION_KEY] = section
+        at.session_state["_mp_section_last"] = section
         at.run()
         assert at.exception is None or not at.exception, at.exception
         return at
@@ -553,25 +561,48 @@ def _run(tmp_path, *, seed: bool):
 
 
 def test_both_sections_render_for_a_research_admin(tmp_path):
-    at = _run(tmp_path, seed=True)
-    text = " ".join(m.value for m in at.markdown)
+    """Keduanya tergambar — masing-masing DI BAGIANNYA SENDIRI.
 
+    Dulu satu penggambaran cukup untuk memeriksa keduanya, karena bagian
+    "Menunggu tinjauan" ikut menggambar keduanya di bawahnya. Sekarang tiap
+    bagian dipilih secara eksplisit, sehingga test ini membuktikan penyajinya
+    benar-benar bekerja alih-alih menumpang kebocoran.
+    """
+    active = _run(tmp_path, seed=True, section="Aktif")
+    text = " ".join(m.value for m in active.markdown)
     assert "contoh" in text                             # bagian Aktif
     assert "eksperimen" in text
-    labels = {b.label for b in at.button}
+    labels = {b.label for b in active.button}
     assert {"Sunting", "Nonaktifkan", "Riwayat"} <= labels
 
     # Riwayat versi tampil sebagai tabel, dengan versi aktif tertandai.
-    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
+    history = _run(tmp_path, seed=True, section="Riwayat versi")
+    htext = " ".join(m.value for m in history.markdown)
+    tables = [e.proto.body for e in history.get("html")
+              if "ids-tbl" in e.proto.body]
     assert tables
     assert any("v2 ←" in t for t in tables)
-    assert rv.RETENTION_NOTE in text
-    assert rv.READ_ONLY_NOTE in text
+    assert rv.RETENTION_NOTE in htext
+    assert rv.READ_ONLY_NOTE in htext
+
+
+def test_each_section_leaves_the_other_out(tmp_path):
+    """Sisi lain dari test di atas: yang TIDAK dipilih memang tidak tergambar.
+
+    Tanpa ini, kebocoran yang sama dapat kembali tanpa satu test pun gagal.
+    """
+    active = _run(tmp_path, seed=True, section="Aktif")
+    atext = " ".join(m.value for m in active.markdown)
+    assert rv.RETENTION_NOTE not in atext        # milik "Riwayat versi"
+
+    history = _run(tmp_path, seed=True, section="Riwayat versi")
+    hlabels = {b.label for b in history.button}
+    assert "Nonaktifkan" not in hlabels          # milik "Aktif"
 
 
 def test_the_empty_state_renders(tmp_path):
     """Keadaan kosong ada DI DALAM tabel — bukan tabel kosong tanpa penjelasan."""
-    at = _run(tmp_path, seed=False)
+    at = _run(tmp_path, seed=False, section="Aktif")
     tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
     assert tables, "tabel tetap digambar meski tanpa isi"
     assert any(rv.EMPTY_STATE in t for t in tables)

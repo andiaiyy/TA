@@ -223,6 +223,27 @@ def algorithm_details(info: dict) -> list[tuple[str, str]]:
     return out
 
 
+# Label baris yang menampung keterangan "belum tersedia" pada expander detail.
+# Bukan salah satu `_DETAIL_FIELDS`: ia bukan bidang get_info, melainkan
+# keterangan tentang KETIADAAN bidang-bidang itu.
+UPLOADED_NOTICE_KEY = "re.cat_uploaded_no_info"
+UPLOADED_NOTICE_LABEL_KEY = "re.cat_uploaded_no_info_label"
+
+
+def uploaded_notice() -> str:
+    """Kalimat untuk pipeline kontribusi yang keterangannya tidak dibaca.
+
+    Ditulis SEKALI di sini dan dipakai ulang oleh ringkasan maupun detail.
+    Katalog sengaja tidak memuat kode pipeline kontribusi — memanggil
+    ``get_info()`` berarti meng-import modulnya, dan katalog dirender setiap
+    kali halaman dibuka. Jadi yang dinyatakan bukan "tidak ada keterangan",
+    melainkan alasan mengapa keterangan itu tidak dibaca di sini.
+    """
+    from ui.i18n import t
+
+    return t(UPLOADED_NOTICE_KEY)
+
+
 def research_scope(dataset_type: str) -> str:
     """Penjelasan singkat satu kalimat, dari bidang `scope` sumber atribusi."""
     try:
@@ -244,6 +265,84 @@ def dataset_lines(dataset_type: str) -> list[str]:
     return [f"{aspect}: {rule}" for aspect, rule in rows]
 
 
+#: Keadaan satu entri katalog.
+STATE_OK = "ok"
+STATE_BROKEN = "broken"
+STATE_NO_DATASET = "no_dataset"
+
+
+def group_title(dataset_type: str, name_reader) -> str:
+    """Judul grup: nama beratribusi bila dikenal, apa adanya bila tidak.
+
+    Pipeline kontribusi boleh membawa jenis datasetnya sendiri. Tanpa
+    penanganan ini judulnya menjadi pengenal mentah (`MY_OWN_FORMAT`) yang
+    tidak menjelaskan apa pun.
+    """
+    from ui.i18n import t
+
+    try:
+        name = name_reader(dataset_type)
+    except Exception:                       # pragma: no cover - defensif
+        name = ""
+    if name and name != dataset_type:
+        return name
+    return t("re.cat_contributed_group", dataset=dataset_type)
+
+
+def entry_state(pipeline_id: str, entry: dict) -> tuple[str, str]:
+    """(keadaan, sebab) satu entri katalog.
+
+    Pipeline BAWAAN selalu "ok": definisinya ada di git, tidak ada berkas
+    unggahan yang bisa berubah di belakang platform.
+
+    Untuk pipeline kontribusi, dua hal yang bisa membuatnya tidak terpakai
+    diperiksa DI SINI supaya keduanya terlihat, bukan ditemukan saat run:
+
+    * berkasnya tidak dapat dimuat (hash tidak cocok / berkas hilang);
+    * belum ada dataset platform berjenis itu, jadi ia belum dapat dijalankan.
+    """
+    from ui.i18n import t
+
+    if not entry.get("uploaded"):
+        return STATE_OK, ""
+
+    try:
+        from orchestrator.dynamic_registry import get_registered
+        from ui.components.registry_view import version_state
+
+        row = get_registered(pipeline_id)
+        if row is not None:
+            state, reason = version_state(row)
+            from ui.components.registry_view import STATE_OK as RV_OK
+
+            if state != RV_OK:
+                return STATE_BROKEN, reason
+    except Exception:                       # pragma: no cover - defensif
+        pass
+
+    if not _has_dataset_for(entry.get("dataset_type")):
+        return STATE_NO_DATASET, t("re.cat_no_dataset_reason")
+    return STATE_OK, ""
+
+
+def _has_dataset_for(dataset_type: str | None) -> bool:
+    """Adakah dataset platform berjenis ini? Tidak pernah melempar."""
+    if not dataset_type:
+        return False
+    try:
+        from contracts.dataset_schemas import get_schema
+
+        if get_schema(dataset_type) is None:
+            # Jenis dataset yang skemanya tidak dikenal platform: tidak ada
+            # berkas yang dapat dicocokkan dengannya.
+            return False
+        from ui.views.run_experiment import _list_dataset_files
+
+        return bool(_list_dataset_files(dataset_type))
+    except Exception:                       # pragma: no cover - defensif
+        return True                          # jangan menuduh saat ragu
+
+
 def build_catalog(*, registry_reader=None, info_reader=None,
                   name_reader=None) -> list[dict]:
     """Katalog dikelompokkan per research pipeline (satu grup per dataset_type).
@@ -260,8 +359,13 @@ def build_catalog(*, registry_reader=None, info_reader=None,
           "algorithms": [{"pipeline_id", "algorithm", "summary", "details"}]}]
     """
     if registry_reader is None:
-        from config.pipeline_registry import list_all_pipelines
-        registry_reader = list_all_pipelines
+        # Registry GABUNGAN: bawaan + kontribusi yang AKTIF. Sebelumnya di
+        # sini terpasang daftar statis, sehingga pipeline kontribusi yang
+        # sudah disetujui & diaktifkan tidak pernah muncul di katalog —
+        # padahal pemilihan dan worker sudah membacanya. Ketiganya kini
+        # membaca kumpulan yang sama.
+        from orchestrator.dynamic_registry import get_all_pipelines
+        registry_reader = get_all_pipelines
     if info_reader is None:
         info_reader = _registry_info
     if name_reader is None:
@@ -275,7 +379,7 @@ def build_catalog(*, registry_reader=None, info_reader=None,
             continue
         group = groups.setdefault(dataset_type, {
             "dataset_type": dataset_type,
-            "title": name_reader(dataset_type),
+            "title": group_title(dataset_type, name_reader),
             # Penjelasan SINGKAT satu kalimat — bukan karangan: `scope` memang
             # ada sebagai bidang tersendiri di sumber atribusi.
             "short": research_scope(dataset_type),
@@ -288,16 +392,36 @@ def build_catalog(*, registry_reader=None, info_reader=None,
             info = info_reader(pipeline_id) or {}
         except Exception:                   # pipeline rusak != katalog rusak
             info = {}
+        state, reason = entry_state(pipeline_id, entry)
+        summary = algorithm_summary(info)
+        details = algorithm_details(info)
+        # Pipeline kontribusi tidak punya `get_info()` di sini — katalog
+        # sengaja tidak memuat kodenya. Kekosongan itu DINYATAKAN, bukan
+        # dibiarkan tampil sebagai bidang kosong tanpa penjelasan.
+        if entry.get("uploaded") and not summary and not details:
+            from ui.i18n import t
+
+            summary = uploaded_notice()
+            details = [(t(UPLOADED_NOTICE_LABEL_KEY), uploaded_notice())]
         group["algorithms"].append({
             "pipeline_id": pipeline_id,
             # Nama algoritma dari registry; get_info hanya melengkapi keterangan.
             "algorithm": (entry.get("algorithm") or entry.get("name")
                           or pipeline_id),
-            "summary": algorithm_summary(info),
-            "details": algorithm_details(info),
+            "summary": summary,
+            "details": details,
             # get_info mentah — dipakai modal untuk menyusun baris label–nilai
             # tanpa harus menebak balik dari label yang sudah diformat.
             "info": info,
+            # Asal & versi: pembaca berhak tahu ini pipeline kontribusi, dan
+            # versi yang mana.
+            "uploaded": bool(entry.get("uploaded")),
+            "version": entry.get("version"),
+            # Keadaan: "ok" atau sebab ia tidak dapat dimuat. Pipeline yang
+            # rusak TETAP ditampilkan — menghilangkannya membuat pengguna
+            # mencari sesuatu yang tidak pernah menjelaskan dirinya.
+            "state": state,
+            "state_reason": reason,
         })
         if not group["paper"]:
             group["paper"] = str(info.get("paper") or entry.get("paper") or "")
@@ -315,6 +439,31 @@ def _registry_info(pipeline_id: str) -> dict:
         return (instance.get_info() or {}) if instance else {}
     except Exception:                       # pragma: no cover - defensif
         return {}
+
+
+def group_problems(group: dict) -> list[str]:
+    """Kalimat sebab untuk tiap algoritma yang tidak dapat dipakai.
+
+    Dikumpulkan per grup supaya satu grup dengan beberapa pipeline bermasalah
+    tidak mengulang kalimat yang sama.
+    """
+    from ui.i18n import t
+
+    seen, out = set(), []
+    for algo in group.get("algorithms") or []:
+        state = algo.get("state") or STATE_OK
+        if state == STATE_OK:
+            continue
+        reason = str(algo.get("state_reason") or "").strip()
+        name = algo.get("algorithm") or algo.get("pipeline_id") or ""
+        if state == STATE_BROKEN:
+            line = f"**{name}** — {t('re.cat_broken_heading')}: {reason}"
+        else:
+            line = f"**{name}** — {reason}"
+        if line not in seen:
+            seen.add(line)
+            out.append(line)
+    return out
 
 
 def catalog_counts(catalog) -> dict:
@@ -431,9 +580,31 @@ def run_requirements(dataset_type: str) -> list[tuple[str, str]]:
 
 # Tahap yang dijalankan ORCHESTRATOR sebelum pipeline dipanggil. Dibedakan
 # gayanya supaya tidak terbaca sebagai bagian dari pipeline itu sendiri.
+# Rumusan acuan — diimpor & diuji test lama. Kalimat yang TAMPIL datang dari
+# katalog lewat `pre_stages()`/`pre_stage_note()`: konstanta modul dievaluasi
+# sekali saat impor, jadi menerjemahkannya di sini akan membekukannya pada
+# bahasa yang kebetulan aktif.
 PRE_STAGES = ("Parsing & validasi dataset",)
 PRE_STAGE_NOTE = ("Tahap bergaris putus dijalankan platform sebelum pipeline "
                   "dipanggil, bukan bagian dari pipeline-nya.")
+
+PRE_STAGE_KEYS = ("pc.pre_stage_parse",)
+PRE_STAGE_NOTE_KEY = "pc.pre_stage_note"
+
+
+def pre_stage_labels() -> tuple[str, ...]:
+    """Tahap milik platform, pada bahasa aktif.
+
+    Namanya sengaja BEDA dari parameter `pre_stages` di bawah — nama yang sama
+    akan tertutupi parameternya, dan tahap platform hilang tanpa satu pun
+    galat.
+    """
+    return tuple(t(key) for key in PRE_STAGE_KEYS)
+
+
+def pre_stage_note() -> str:
+    """Keterangan tahap bergaris putus, pada bahasa aktif."""
+    return t(PRE_STAGE_NOTE_KEY)
 
 # Ambang: di atas ini grafnya digulir mendatar, bukan dibungkus ke banyak baris.
 GRAPH_CARD_W = 132
@@ -487,7 +658,7 @@ def uses_feature_selection(value) -> bool:
     return not text.startswith(("none", "tidak", "-"))
 
 
-def phase_graph_svg(stages, *, pre_stages=PRE_STAGES) -> str:
+def phase_graph_svg(stages, *, pre_stages=None) -> str:
     """Kartu tahap berjajar mendatar, dihubungkan garis. SVG inline murni.
 
     Lebarnya mengikuti jumlah tahap; wadahnya menggulir mendatar sehingga
@@ -505,7 +676,8 @@ def phase_graph_svg(stages, *, pre_stages=PRE_STAGES) -> str:
     rendah, jadi ia mengikuti warna teks tema yang aktif — tidak ada nilai heksa
     yang bisa menghilang di tema terang atau gelap.
     """
-    nodes = ([{"label": s, "kind": "pre", "note": ""} for s in (pre_stages or [])]
+    stages_before = pre_stage_labels() if pre_stages is None else pre_stages
+    nodes = ([{"label": s, "kind": "pre", "note": ""} for s in stages_before]
              + list(stages or []))
     if not nodes:
         return ""
@@ -570,9 +742,10 @@ def _wrap(text: str, width: int) -> list[str]:
     return lines or [""]
 
 
-def phase_graph_alt(stages, *, pre_stages=PRE_STAGES) -> str:
+def phase_graph_alt(stages, *, pre_stages=None) -> str:
     """Keterangan teks graf — tetap terbaca bila SVG tidak tampil."""
-    names = list(pre_stages or []) + [s["label"] for s in (stages or [])]
+    stages_before = pre_stage_labels() if pre_stages is None else pre_stages
+    names = list(stages_before) + [s["label"] for s in (stages or [])]
     return " → ".join(names)
 
 
@@ -599,7 +772,7 @@ def render_phase_graph(pipeline_id: str, info: dict) -> None:
         st.markdown(markup, unsafe_allow_html=True)
     # SATU baris: urutan tahap (teks alternatif graf) + keterangan tahap
     # pra-pipeline, sebelumnya dua caption bertumpuk.
-    st.caption(f"{phase_graph_alt(stages)} — {PRE_STAGE_NOTE}")
+    st.caption(f"{phase_graph_alt(stages)} — {pre_stage_note()}")
 
 
 # ── Perenderan blok katalog ───────────────────────────────────────────────
@@ -660,10 +833,46 @@ def row_head_html(group: dict) -> str:
 
 
 def chips_html(names) -> str:
-    """Daftar algoritma sebagai chip satu baris. Isinya di-escape."""
-    chips = "".join(f'<span class="ids-cat-chip">{escape(str(n))}</span>'
-                    for n in names or [])
+    """Daftar algoritma sebagai chip satu baris. Isinya di-escape.
+
+    Menerima daftar nama (bentuk lama) ATAU daftar entri algoritma; bentuk
+    entri membawa asal, versi, dan keadaannya.
+    """
+    chips = "".join(_chip_html(item) for item in names or [])
     return f'<div class="ids-cat-chips">{chips}</div>'
+
+
+def _chip_html(item) -> str:
+    """Satu chip. Nama saja, atau nama + penanda asal/keadaan."""
+    from ui.i18n import t
+
+    if not isinstance(item, dict):
+        return f'<span class="ids-cat-chip">{escape(str(item))}</span>'
+
+    label = escape(str(item.get("algorithm") or item.get("pipeline_id") or ""))
+    marks, title, extra = [], "", ""
+
+    if item.get("uploaded"):
+        # Asal & versi dinyatakan pada chipnya sendiri: pembaca tidak perlu
+        # membuka detail untuk tahu ini pipeline kontribusi.
+        marks.append(escape(t("re.cat_badge_contributed",
+                              version=item.get("version") or "?")))
+
+    state = item.get("state") or STATE_OK
+    if state == STATE_BROKEN:
+        marks.append(escape(t("re.cat_state_broken")))
+        title = str(item.get("state_reason") or "")
+        extra = " ids-cat-chip-broken"
+    elif state == STATE_NO_DATASET:
+        marks.append(escape(t("re.cat_state_no_dataset")))
+        title = str(item.get("state_reason") or "")
+        extra = " ids-cat-chip-warn"
+
+    suffix = (f'<span class="ids-cat-chip-mark">{" · ".join(marks)}</span>'
+              if marks else "")
+    tooltip = f' title="{escape(title)}"' if title else ""
+    return (f'<span class="ids-cat-chip{extra}"{tooltip}>'
+            f'{label}{suffix}</span>')
 
 
 def rows_html(rows) -> str:
@@ -711,8 +920,14 @@ def render_catalog(catalog=None, *, on_detail=None,
         with st.container(border=False, key=row_key(group["dataset_type"])):
             st.markdown(row_head_html(group), unsafe_allow_html=True)
 
-            names = [a["algorithm"] for a in group.get("algorithms") or []]
-            st.markdown(chips_html(names), unsafe_allow_html=True)
+            st.markdown(chips_html(group.get("algorithms") or []),
+                        unsafe_allow_html=True)
+
+            # Sebab pipeline tidak dapat dipakai dinyatakan sebagai KALIMAT,
+            # bukan hanya tooltip — tooltip tidak terbaca di layar sentuh dan
+            # tidak terbaca pembaca layar.
+            for problem in group_problems(group):
+                st.caption(problem)
 
             # Dua kolom berukuran SAMA -> kedua tombol selebar & setinggi sama,
             # sejajar pada satu garis dasar; lebar tetapnya dikunci di CSS.

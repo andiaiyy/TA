@@ -576,3 +576,109 @@ def test_the_loader_verifies_the_hash_before_executing(package):
 
     with pytest.raises(DynamicRegistryError):
         load_pipeline_class(entry, "TrialPipeline", stale_hash)
+
+
+# ── Jalur PREFETCH tidak boleh melonggarkan gerbang ──────────────────────
+# Halaman peninjauan kini mengambil uji terakhir SELURUH antrean dalam satu
+# kueri lalu menyodorkannya ke gerbang, supaya biayanya tidak tumbuh mengikuti
+# panjang antrean. Yang dihemat HANYA pembacaan barisnya; sidik jari paket
+# tetap dihitung ulang di dalam gerbang. Tanpa itu, "uji bersih lalu sunting
+# lalu setujui" terbuka kembali lewat pintu belakang.
+
+def test_the_gate_still_catches_an_edit_when_the_trial_is_prefetched(db, package):
+    from database import trials as trial_db
+
+    sid = _insert_submission(db, package)
+    _run(db, sid)
+    item = _submission(db, sid)
+
+    prefetched = trial_db.latest_trials_for([sid], db)[sid]
+    assert trial_service.approval_blocker(item, db, trial=prefetched) == ""
+
+    entry = package / "trial_pipeline.py"
+    entry.write_text(entry.read_text(encoding="utf-8") + "\n# disunting\n",
+                     encoding="utf-8")
+
+    # Baris uji yang disodorkan SENGAJA yang lama — persis keadaan yang
+    # dialami halaman: barisnya diambil sebelum berkasnya disunting.
+    assert trial_service.approval_blocker(item, db, trial=prefetched) == \
+        "trial.gate_stale"
+
+
+def test_the_prefetched_gate_agrees_with_the_unprefetched_one(db, package):
+    """Menyodorkan uji tidak boleh mengubah JAWABAN, hanya pembacaannya."""
+    from database import trials as trial_db
+
+    sid = _insert_submission(db, package)
+    item = _submission(db, sid)
+
+    # (a) belum pernah diuji
+    pre = trial_db.latest_trials_for([sid], db).get(sid)
+    assert trial_service.approval_blocker(item, db, trial=pre) == \
+        trial_service.approval_blocker(item, db)
+
+    # (b) sudah diuji dan lolos
+    _run(db, sid)
+    item = _submission(db, sid)
+    pre = trial_db.latest_trials_for([sid], db).get(sid)
+    assert trial_service.approval_blocker(item, db, trial=pre) == \
+        trial_service.approval_blocker(item, db) == ""
+
+    # (c) berkas disunting sesudahnya
+    entry = package / "trial_pipeline.py"
+    entry.write_text(entry.read_text(encoding="utf-8") + "\n# x\n",
+                     encoding="utf-8")
+    pre = trial_db.latest_trials_for([sid], db).get(sid)
+    assert trial_service.approval_blocker(item, db, trial=pre) == \
+        trial_service.approval_blocker(item, db) == "trial.gate_stale"
+
+
+def test_the_batched_reader_picks_the_same_trial_as_the_single_one(db, package):
+    """Pemenangnya harus SAMA — termasuk pemutus seri `rowid`.
+
+    Kalau keduanya berbeda, "uji terakhir" versi daftar dan versi kartu dapat
+    menunjuk baris yang berlainan, dan gerbang ikut salah.
+    """
+    from database import trials as trial_db
+
+    sid = _insert_submission(db, package)
+    _run(db, sid)
+    _run(db, sid)                            # uji kedua pada detik yang sama
+
+    single = trial_db.latest_trial(sid, db)
+    batched = trial_db.latest_trials_for([sid], db)[sid]
+    assert batched["id"] == single["id"]
+
+
+def test_the_batched_reader_omits_submissions_without_trials(db, package):
+    from database import trials as trial_db
+
+    sid = _insert_submission(db, package)
+    assert trial_db.latest_trials_for([sid], db) == {}
+    assert trial_db.latest_trials_for([], db) == {}
+
+
+def test_the_detail_view_reads_one_submission_and_gates_the_same(db, package):
+    """Jalur DETAIL master-detail membaca uji untuk SATU pengajuan saja.
+
+    Bentuk panggilannya persis yang dipakai tampilan detail
+    (`latest_trials_for([id])` lalu disodorkan ke gerbang). Yang diuji: membaca
+    lebih sempit tidak mengubah jawaban gerbang — termasuk setelah berkasnya
+    disunting.
+    """
+    from database import trials as trial_db
+
+    sid = _insert_submission(db, package)
+    _run(db, sid)
+    item = _submission(db, sid)
+
+    one = trial_db.latest_trials_for([sid], db)          # jalur detail
+    whole = trial_db.latest_trials_for([sid, sid + 99], db)   # jalur daftar
+    assert one[sid]["id"] == whole[sid]["id"]
+    assert trial_service.approval_blocker(item, db, trial=one[sid]) == ""
+
+    entry = package / "trial_pipeline.py"
+    entry.write_text(entry.read_text(encoding="utf-8") + "\n# disunting\n",
+                     encoding="utf-8")
+    assert trial_service.approval_blocker(item, db, trial=one[sid]) == \
+        "trial.gate_stale"
