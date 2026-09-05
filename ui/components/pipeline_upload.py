@@ -376,6 +376,16 @@ def review_package(files: list[tuple[str, bytes]],
         {valid, files: [...], entry_points: [nama], n_problem_files,
          cause, summary}
 
+    **Satu paket boleh memuat BANYAK entry point.** Sebuah research pipeline
+    kontribusi berdiri sendiri dan wajar membawa beberapa algoritma sekaligus —
+    persis seperti keluarga bawaan (HIKARI2021 punya enam). Sebelumnya paket
+    dengan lebih dari satu turunan ``BasePipeline`` DITOLAK dan pengunggah
+    disuruh "tentukan satu entry point saja", sehingga satu pengajuan tidak
+    pernah bisa menjadi lebih dari satu algoritma.
+
+    Yang TIDAK berubah: setiap berkas entry point tetap diperiksa penuh
+    (struktur + keamanan), dan paket tanpa satu pun entry point tetap ditolak.
+
     Setiap elemen ``files`` adalah payload ``review_upload`` + ``role`` +
     ``description``. Tidak pernah menjalankan berkas apa pun.
     """
@@ -417,10 +427,6 @@ def review_package(files: list[tuple[str, bytes]],
     elif len(entry_points) == 0:
         cause = ("Tidak ada berkas yang memuat kelas turunan `BasePipeline`. "
                  "Tepat satu berkas harus menjadi entry point pipeline.")
-    elif len(entry_points) > 1:
-        cause = (f"Ditemukan {len(entry_points)} berkas dengan kelas turunan "
-                 f"`BasePipeline` ({', '.join('`' + n + '`' for n in entry_points)}). "
-                 f"Tentukan satu entry point saja.")
     elif n_problem:
         first = problems[0]
         blocking = first.get("blocking_failures") or []
@@ -436,8 +442,12 @@ def review_package(files: list[tuple[str, bytes]],
     else:
         cause = ""
 
-    valid = bool(reviewed) and len(entry_points) == 1 and n_problem == 0
-    summary = (f"Valid — {len(reviewed)} berkas lolos, 1 entry point."
+    # Sah bila ADA entry point (satu atau lebih) dan tidak ada berkas
+    # bermasalah. Batas atasnya dilepas: banyak entry point berarti
+    # banyak algoritma dalam satu research pipeline, bukan cacat.
+    valid = bool(reviewed) and len(entry_points) >= 1 and n_problem == 0
+    summary = (f"Valid — {len(reviewed)} berkas lolos, "
+               f"{len(entry_points)} algoritma."
                if valid else
                f"Tidak valid — {n_problem} dari {len(reviewed)} berkas bermasalah."
                if n_problem else "Tidak valid — aturan entry point belum terpenuhi.")

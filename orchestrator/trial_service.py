@@ -140,7 +140,15 @@ def trial_blocker(item: dict) -> str:
 
     if item.get("kind") != KIND_PIPELINE:
         return "trial.only_pipeline"
-    if item.get("status") != SUBMISSION_PENDING:
+    # Menunggu ATAU sudah disetujui. Pipeline yang sudah terdaftar dapat
+    # ditinjau ulang langsung dari halamannya, dan uji coba adalah bagian dari
+    # peninjauan itu.
+    #
+    # `rejected` tetap ditolak: berkasnya sudah dipindah ke area penolakan, dan
+    # menjalankannya berarti menghidupkan kembali sesuatu yang sudah diputuskan.
+    from database.models import SUBMISSION_APPROVED
+
+    if item.get("status") not in (SUBMISSION_PENDING, SUBMISSION_APPROVED):
         return "trial.not_pending"
     if not static_validation_passed(item):
         return "trial.static_failed"
@@ -584,9 +592,15 @@ def discard_trials(submission_id: int, db_path: str | None = None) -> int:
     Dipanggil setelah keputusan diambil. Jejak ringkas pada pengajuan tidak
     ikut terhapus — ia memang dimaksudkan bertahan.
     """
-    # Dataset lampiran ikut dibuang: ia berkas CONTOH yang hanya hidup
-    # selama peninjauan berlangsung.
-    _discard_attachment(submission_id, db_path)
+    # Dataset lampiran ikut dibuang: ia berkas CONTOH yang hanya hidup selama
+    # peninjauan berlangsung.
+    #
+    # KECUALI bila ia sudah TERIKAT ke sebuah research pipeline. Research
+    # pipeline yang berdiri sendiri membawa datasetnya secara permanen —
+    # membuangnya di sini akan membuat algoritmanya terdaftar tetapi tidak
+    # pernah dapat dijalankan.
+    if not _dataset_is_bound(submission_id, db_path):
+        _discard_attachment(submission_id, db_path)
 
     removed = trial_db.delete_trials(submission_id, db_path)
     for trial in removed:
@@ -601,6 +615,28 @@ def discard_trials(submission_id: int, db_path: str | None = None) -> int:
         logger.info("Hasil uji pengajuan #%s dibuang: %d catatan",
                     submission_id, len(removed))
     return len(removed)
+
+
+def _dataset_is_bound(submission_id: int, db_path: str | None) -> bool:
+    """Apakah lampiran pengajuan ini sudah menjadi dataset sebuah research.
+
+    Dibaca dari `research_pipelines`, bukan ditebak dari status pengajuan:
+    yang menentukan adalah ADANYA ikatan, bukan keputusan yang mendahuluinya.
+    """
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT dataset_json FROM research_pipelines "
+                "WHERE submission_id = ? AND dataset_json IS NOT NULL",
+                (submission_id,)).fetchone()
+        return row is not None
+    except Exception:                        # pragma: no cover - defensif
+        # Tidak tahu = JANGAN dibuang. Menghapus berkas yang mungkin terikat
+        # jauh lebih merusak daripada meninggalkan berkas yang mungkin yatim;
+        # yang yatim masih dapat disapu `purge_orphans`.
+        logger.exception("Ikatan dataset pengajuan #%s tidak terbaca",
+                         submission_id)
+        return True
 
 
 def _discard_attachment(submission_id: int, db_path: str | None) -> None:

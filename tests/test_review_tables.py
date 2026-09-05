@@ -323,11 +323,23 @@ def test_no_subview_leaves_a_table_empty_without_saying_so(tmp_path, view):
     at = _run(tmp_path, preset, f"empty_{view}.py")
     assert not at.exception, (view, at.exception)
 
-    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
+    import grid_probe
+
+    # Tabel yang barisnya dapat dipilih tunduk pada aturan yang LEBIH KETAT:
+    # ia tidak pernah digambar kosong sama sekali. Judul kolom tanpa satu pun
+    # baris terbaca seperti kegagalan memuat, dan pembacanya tidak punya cara
+    # membedakannya dari "memang belum ada" — jadi keadaan kosongnya berupa
+    # kalimat, bukan tabel hampa.
+    for index in range(grid_probe.count(at)):
+        assert grid_probe.rows(at, index=index), (view, "tabel kosong digambar")
+
     if view in ("pending", "active"):
-        # Kedua bagian ini SELALU menggambar tabelnya — justru supaya keadaan
-        # kosongnya punya tempat untuk dinyatakan.
-        assert tables, view
+        # Kedua bagian ini SELALU menjawab: entah tabel berisi, entah kalimat
+        # yang menyatakan kenapa kosong. Yang dilarang adalah diam.
+        text = " ".join(m.value for m in at.markdown)
+        assert grid_probe.count(at) or "belum" in text.lower(), (view, text[:200])
+
+    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
 
     for html in tables:
         body = html.split("<tbody>")[1]

@@ -247,7 +247,9 @@ def uploaded_notice() -> str:
 def research_scope(dataset_type: str) -> str:
     """Penjelasan singkat satu kalimat, dari bidang `scope` sumber atribusi."""
     try:
-        from config.research_attribution import get_research_attribution
+        from orchestrator.research_registry import (
+            attribution_for as get_research_attribution,
+        )
         attribution = get_research_attribution(dataset_type) or {}
         key = attribution.get("scope_key")
         return t(key) if key else attribution.get("scope", "")
@@ -369,7 +371,9 @@ def build_catalog(*, registry_reader=None, info_reader=None,
     if info_reader is None:
         info_reader = _registry_info
     if name_reader is None:
-        from config.research_attribution import get_research_display_name
+        from orchestrator.research_registry import (
+            display_name_for as get_research_display_name,
+        )
         name_reader = get_research_display_name
 
     groups: dict[str, dict] = {}

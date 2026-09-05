@@ -346,17 +346,23 @@ def test_run_trial_resolves_the_type_itself(db, tmp_path, monkeypatch):
 
 # ── Formulir: wajib & bermakna ───────────────────────────────────────────
 
-def test_the_upload_form_requires_a_target_dataset():
+def test_the_upload_form_requires_a_name_and_a_dataset_contract():
+    """Dahulu yang wajib adalah "dataset target"; kini yang wajib adalah apa
+    yang benar-benar menentukan identitas paket ini — namanya dan kontrak
+    datasetnya. Keduanya menghalangi tombol validasi bila kosong."""
     src = (REPO_ROOT / "ui" / "views" / "contribute.py").read_text(
         encoding="utf-8")
-    assert "disabled=not may_upload or dtype_choice is None" in src
+    assert "disabled=not may_upload or bool(blocked)" in src
+    assert "dtype_choice" not in src
 
 
-def test_the_other_choice_is_stored_meaningfully():
+def test_the_dataset_type_is_always_the_unregistered_marker():
+    """Setiap unggahan berdiri sendiri, jadi tidak ada jenis bawaan yang
+    ditumpangi: penandanya eksplisit, bukan string kosong yang tidak dapat
+    dibedakan dari "tidak pernah diisi"."""
     src = (REPO_ROOT / "ui" / "views" / "contribute.py").read_text(
         encoding="utf-8")
-    assert "DATASET_TYPE_UNREGISTERED" in src
-    assert '"dataset_type": "" if dtype_choice' not in src
+    assert '"dataset_type": DATASET_TYPE_UNREGISTERED,' in src
 
 
 def test_the_metadata_filter_never_drops_the_dataset_type():

@@ -250,6 +250,48 @@ def render_after_upload(user: dict | None) -> None:
     if parts:
         st.caption(t("ap.sub_yours", parts=" · ".join(parts)))
 
+    _render_rejection_notes(user)
+
+
+def rejection_notes(items) -> list[tuple[int, str]]:
+    """[(nomor pengajuan, catatan peninjau)] untuk yang DITOLAK dan bercatatan.
+
+    Fungsi MURNI, dipisah dari perenderannya supaya dapat diperiksa tanpa
+    menjalankan halaman.
+
+    Hanya yang ditolak: pengajuan yang disetujui sudah menjelaskan dirinya
+    sendiri lewat pipeline yang muncul di daftar, sedangkan yang ditolak tidak
+    meninggalkan jejak apa pun selain catatan ini.
+    """
+    out = []
+    for item in items or []:
+        if (item.get("status") or "") != "rejected":
+            continue
+        note = str(item.get("review_note") or "").strip()
+        if note:
+            out.append((item.get("id"), note))
+    return out
+
+
+def _render_rejection_notes(user: dict | None) -> None:
+    """Alasan penolakan — satu-satunya umpan balik yang kontributor terima.
+
+    Dahulu ini hanya terbaca di kolom terakhir tabel "Pengajuan saya". Tabel itu
+    dibuang; catatannya TIDAK, karena tanpanya seorang kontributor mengunggah
+    ulang kesalahan yang sama tanpa pernah tahu apa yang salah.
+    """
+    from ui.i18n import t
+
+    try:
+        from orchestrator.submission_service import list_submissions
+        mine = list_submissions(submitted_by=user["username"])
+    except Exception:                       # pragma: no cover - defensif
+        logger.debug("Catatan penolakan tidak terbaca", exc_info=True)
+        return
+
+    for sid, note in rejection_notes(mine):
+        st.markdown(t("ap.rejection_note", id=sid, note=note))
+
 
 def render_related_pages() -> None:
     """Kaitan ke halaman lain, satu baris.

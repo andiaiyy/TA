@@ -314,26 +314,34 @@ def test_the_warning_reminder_appears_only_when_there_are_warnings():
     assert "belum tentu masalah" in sr.WARNING_REMINDER
 
 
-def test_the_static_check_note_is_one_line_and_shown():
-    """Kejujuran "pemeriksaan statis" tampil TEPAT SEKALI di bagian ini.
+def test_the_static_check_note_is_gone_everywhere():
+    """Kalimat itu dibuang, dan dibuang SELURUHNYA.
 
-    Dulu ada dua konstanta yang mengatakan hal yang sama dan keduanya dirender
-    berurutan. Yang bertahan adalah milik ``manage_pipelines`` — ia menyebut
-    satu hal lebih banyak: berkasnya dibaca, tidak dijalankan.
+    Ia dahulu berdiri di kepala setiap tampilan peninjauan — dibaca sebelum
+    pembacanya tahu ia sedang melihat apa. Konstanta yang tertinggal tanpa
+    pemakai akan mengundang seseorang memasangnya kembali, jadi konstanta,
+    kunci katalog, dan entri katalognya ikut dibuang.
     """
+    from ui.i18n.catalog import CATALOG
     from ui.views import manage_pipelines as mp
 
-    assert "statis" in mp.STATIC_CHECK_NOTE
-    assert "tidak dijalankan" in mp.STATIC_CHECK_NOTE
-    assert "manusia" in mp.STATIC_CHECK_NOTE
-    assert "\n" not in mp.STATIC_CHECK_NOTE
-    assert not hasattr(sr, "STATIC_CHECK_NOTE"), "konstanta kembar hidup lagi"
+    assert not hasattr(mp, "STATIC_CHECK_NOTE")
+    assert not hasattr(mp, "STATIC_CHECK_NOTE_KEY")
+    assert not hasattr(sr, "STATIC_CHECK_NOTE")
+    assert "mp.static_check_note" not in CATALOG
+    assert "STATIC_CHECK_NOTE" not in CONTRIB_SRC
 
-    # Ditulis SEKALI di seluruh berkas, bukan sekali per fungsi: antrean kini
-    # terbagi menjadi daftar (`_render_pending_list`) dan detail
-    # (`_render_pending_section`), dan menghitung per fungsi tidak akan
-    # menangkap kalau catatannya diduplikasi ke keduanya.
-    assert CONTRIB_SRC.count("STATIC_CHECK_NOTE") == 1
+
+def test_the_new_version_note_survives_where_it_is_decided():
+    """Penjaga anti-hampa: yang dibuang dari halaman peninjauan TIDAK dibuang
+    dari penyunting — di sanalah "menyunting membuat versi baru" benar-benar
+    menjadi keputusan, dibaca tepat sebelum tombol Simpan."""
+    from ui.views import manage_pipelines as mp
+
+    assert "versi baru" in mp.NEW_VERSION_NOTE
+    editor = (REPO_ROOT / "ui" / "views" / "manage_pipelines.py").read_text(
+        encoding="utf-8").split("def render_editor(")[1]
+    assert "NEW_VERSION_NOTE" in editor
 
 
 # ── Statis, selalu ────────────────────────────────────────────────────────
@@ -484,15 +492,15 @@ def _run(tmp_path, *, seed: bool, open_id: int | None = None):
 def test_the_pending_section_renders_a_full_submission(tmp_path):
     at = _run(tmp_path, seed=True, open_id=1)
 
-    labels = [e.label for e in at.get("expander")]
-    joined = " ".join(labels)
-    assert "RF Kontribusi" in joined                    # ringkasan daftar
-    assert "up.py" in joined and "helper.py" in joined  # kedua berkas
-    assert "entry point" in joined and "pendukung" in joined
+    # TANPA expander: nama pengajuan dan kedua berkas tergambar langsung, jadi
+    # peninjau melihat ada temuan atau tidak tanpa membuka apa pun.
+    assert not at.get("expander"), "expander hidup lagi di halaman detail"
 
     text = " ".join(m.value for m in at.markdown)
+    assert "RF Kontribusi" in text                      # nama pengajuan
+    assert "up.py" in text and "helper.py" in text      # kedua berkas
+    assert "entry point" in text and "pendukung" in text
     assert "kelas pipeline utama" in text               # penjelasan pengunggah
-    assert "statis" in text                             # kejujuran
     assert "langsung dapat" in text                     # akibat menyetujui
 
     # Kode kedua berkas tampil, bernomor.
@@ -505,10 +513,14 @@ def test_the_pending_section_renders_a_full_submission(tmp_path):
 
 
 def test_the_empty_state_renders(tmp_path):
-    """Antrean kosong dinyatakan DI DALAM tabelnya, bukan tabel kosong."""
+    """Antrean kosong tetap DINYATAKAN, bukan dibiarkan hilang tanpa kata.
+
+    Tabel antrean sama sekali tidak digambar saat kosong — sebuah tabel tanpa
+    baris terbaca seperti kegagalan memuat, jadi keadaannya dikatakan.
+    """
     at = _run(tmp_path, seed=False)
-    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
-    assert tables, "tabel antrean tetap digambar meski kosong"
-    assert any(sr.EMPTY_STATE in t for t in tables)
-    assert any("ids-tbl-empty" in t for t in tables)
+    text = " ".join(m.value for m in at.markdown)
+    assert sr.EMPTY_STATE in text or "menunggu tinjauan" in text.lower()
+    # Tidak ada tabel antrean, dan tidak ada keputusan yang dapat ditekan.
+    assert not at.get("component_instance")
     assert not [b for b in at.button if b.label == "Setujui"]

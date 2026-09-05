@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import logging
 
+from database.models import SUBMISSION_PENDING
 from orchestrator.pipeline_validator import FAIL, WARN
 from ui.components import tables as tbl
 
@@ -69,13 +70,13 @@ def verdict_label(verdict: str) -> str:
     key = VERDICT_LABEL_KEYS.get(verdict)
     return t(key) if key else VERDICT_LABEL.get(verdict, verdict)
 
-# Catatan "pemeriksaan statis" dulu ada DUA — satu di sini, satu di
+# Catatan "pemeriksaan statis" pernah ada DUA — satu di sini, satu di
 # ``manage_pipelines`` — dan keduanya tampil berurutan pada halaman yang sama,
-# mengatakan hal yang sama dengan kalimat berbeda. Yang bertahan adalah
-# ``manage_pipelines.STATIC_CHECK_NOTE`` karena ia menyebut satu hal lebih
-# banyak: berkasnya DIBACA, tidak dijalankan.
+# mengatakan hal yang sama dengan kalimat berbeda. Keduanya kini DIBUANG:
+# kalimat itu berdiri di kepala halaman, terbaca sebelum pembacanya tahu ia
+# sedang melihat apa. Yang bertahan adalah keterangan di bawah ini — ia
+# menempel pada TOMBOLNYA, jadi terbaca tepat saat keputusannya diambil.
 #: Akibat menyetujui, dinyatakan SEBELUM tombolnya ditekan. Satu baris.
-#: Kunci katalog untuk kedua keterangan; konstanta tetap acuan.
 APPROVAL_CONSEQUENCE_KEY = "sr.approve_consequence"
 WARNING_REMINDER_KEY = "sr.warning_note"
 
@@ -375,6 +376,115 @@ def summary_line(row: dict) -> str:
     return t("sr.summary_line", name=row["name"],
              verdict=row["verdict_text"], files=row["file_count"],
              who=row["submitted_by"], when=row["submitted_at"])
+
+
+# ── Riwayat peninjauan ────────────────────────────────────────────────────
+# Dulu daftar markdown datar yang hanya menyebut id, berkas, jenis, status,
+# peninjau, dan catatan. Tiga hal yang SUDAH tersimpan tidak pernah tampil,
+# padahal justru itu yang dicari saat membaca riwayat: KAPAN diputuskan, SIAPA
+# yang mengajukan, dan bagaimana HASIL UJI COBANYA.
+
+#: Status pengajuan adalah PENGENAL di basis data; hanya labelnya dipetakan.
+#: Kuncinya sudah ada — dipakai bersama `render_submission_counts`.
+STATUS_LABEL_KEYS = {
+    SUBMISSION_PENDING: "ap.sub_pending",
+    "approved": "ap.sub_approved",
+    "rejected": "ap.sub_rejected",
+}
+
+
+def status_label(status: str) -> str:
+    """Label status pengajuan pada bahasa aktif.
+
+    Tinggal di sini, bukan di penyajinya: dua halaman memakainya sekarang —
+    "Pengajuan saya" pada alur kontributor dan riwayat tinjauan pada tab
+    Riwayat versi — dan dua salinan akan berarti dua peta status yang dapat
+    berbeda pendapat.
+    """
+    from ui.i18n import t
+
+    key = STATUS_LABEL_KEYS.get(status)
+    return t(key) if key else status
+
+
+HISTORY_COLUMNS = (
+    tbl.column("Pengajuan", "name", kind=tbl.KIND_NAME,
+               label_key="rv.col_submission"),
+    tbl.column("Keputusan", "decision", kind=tbl.KIND_STATUS,
+               label_key="sr.col_decision"),
+    tbl.column("Uji coba", "trial", kind=tbl.KIND_STATUS,
+               label_key="trial.col_outcome"),
+    tbl.column("Diajukan oleh", "submitted_by", kind=tbl.KIND_NAME,
+               label_key="rv.col_submitted_by"),
+    tbl.column("Ditinjau", "reviewed_at", kind=tbl.KIND_TIME,
+               label_key="sr.col_reviewed_at"),
+    tbl.column("Oleh", "reviewed_by", kind=tbl.KIND_NAME,
+               label_key="sr.col_reviewed_by"),
+    tbl.column("Catatan", "note", kind=tbl.KIND_TEXT,
+               label_key="sr.col_note", title_key="note_full"),
+)
+
+#: Panjang catatan pada sel tabel. Teks penuhnya tetap ada di tooltip lewat
+#: `title_key`, jadi tidak ada yang hilang — hanya tidak melebarkan barisnya.
+NOTE_PREVIEW = 60
+
+
+def trial_outcome(item: dict) -> str:
+    """Hasil uji coba sebuah pengajuan, dari jejak yang tersimpan.
+
+    Diambil dari ``trial_json`` — jejak RINGKAS yang memang dimaksudkan
+    bertahan setelah keputusan diambil. Pengajuan yang tidak pernah diuji
+    menghasilkan "—", dan itu fakta, bukan data yang hilang.
+    """
+    import json as _json
+
+    raw = (item or {}).get("trial_json")
+    if not raw:
+        return "—"
+    try:
+        trail = _json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return "—"
+    if not isinstance(trail, dict):
+        return "—"
+
+    status = str(trail.get("status") or "").upper()
+    if status == "PASSED":
+        rows = trail.get("rows_used")
+        secs = trail.get("duration_s")
+        detail = ", ".join(str(x) for x in (
+            f"{rows} baris" if rows else "",
+            f"{secs}s" if secs else "") if x)
+        return f"✔ lolos ({detail})" if detail else "✔ lolos"
+    if status == "FAILED":
+        stage = trail.get("error_stage") or ""
+        return f"✖ gagal — {stage}" if stage else "✖ gagal"
+    return status.lower() or "—"
+
+
+def history_rows(items, *, status_label) -> list[dict]:
+    """Baris riwayat peninjauan. ``status_label`` menerjemahkan statusnya.
+
+    Fungsi MURNI: seluruh isinya berasal dari baris pengajuan yang sudah
+    dibaca, jadi menampilkan riwayat tidak membuka berkas apa pun.
+    """
+    out = []
+    for item in items or []:
+        note = str(item.get("review_note") or "").strip()
+        meta = _meta(item)
+        out.append({
+            "id": item.get("id"),
+            "name": meta.get("name") or item.get("original_filename") or "",
+            "decision": status_label(item.get("status")),
+            "trial": trial_outcome(item),
+            "submitted_by": item.get("submitted_by") or "—",
+            "reviewed_at": (item.get("reviewed_at") or "")[:19] or "—",
+            "reviewed_by": item.get("reviewed_by") or "—",
+            "note": (note[:NOTE_PREVIEW - 1] + "…"
+                     if len(note) > NOTE_PREVIEW else note) or "—",
+            "note_full": note,
+        })
+    return out
 
 
 # ── Berkas satu paket ─────────────────────────────────────────────────────

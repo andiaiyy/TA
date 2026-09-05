@@ -6,7 +6,11 @@ import pandas as pd
 
 from orchestrator.dataset_parser import parse_dataset, resolve_dataset_path
 from orchestrator.validator import validate_dataset, ValidationResult
-from contracts.dataset_schemas import get_schema, supported_datasets
+# Skema & daftar jenis dibaca lewat pembaca GABUNGAN: bawaan + research
+# pipeline terunggah. Lapis ini memang boleh membaca basis data; validator
+# dan diagnosa tidak (lihat batasan impor masing-masing), jadi merekalah
+# yang DISODORI skemanya dari sini.
+from orchestrator.research_registry import all_dataset_types, schema_for
 from orchestrator.dynamic_registry import get_pipelines_for_dataset_merged
 from utils.hashing import sha256_file
 
@@ -30,7 +34,7 @@ def _validate_csv_memory_safe(dataset_type: str, resolved) -> ValidationResult:
     still parsed by the worker via ``parse_dataset`` at execution time — this
     function does not touch that path.
     """
-    schema = get_schema(dataset_type) or {}
+    schema = schema_for(dataset_type) or {}
 
     # Raw header names (no strip) so usecols matches the file exactly; map each
     # stripped name back to its raw header (mirrors parse_dataset's strip).
@@ -57,7 +61,8 @@ def _validate_csv_memory_safe(dataset_type: str, resolved) -> ValidationResult:
 
     # Reuse validate_dataset()'s column/schema decisions on the header sample,
     # then override the count/label fields with the accurate streamed values.
-    result = validate_dataset(sample, dataset_type)
+    result = validate_dataset(sample, dataset_type,
+                              schema=schema_for(dataset_type))
     result.row_count = row_count
     if raw_label:
         result.unique_labels = sorted(uniques, key=lambda x: str(x))
@@ -77,7 +82,7 @@ def validate_for_experiment(dataset_type: str, dataset_path: str) -> dict:
 
     NEVER raises for expected failures — returns success=False with error message.
     """
-    if get_schema(dataset_type) is None:
+    if schema_for(dataset_type) is None:
         return {"success": False, "error": f"Unknown dataset type: {dataset_type}", **_FAILURE}
 
     try:
@@ -90,7 +95,8 @@ def validate_for_experiment(dataset_type: str, dataset_path: str) -> dict:
         else:
             # NDJSON/JSON: parse_dataset already reads only a light ~100-record stub.
             df = parse_dataset(dataset_path)
-            result = validate_dataset(df, dataset_type)
+            result = validate_dataset(
+                df, dataset_type, schema=schema_for(dataset_type))
     except (FileNotFoundError, ValueError) as e:
         return {"success": False, "error": str(e), **_FAILURE}
 
@@ -126,7 +132,7 @@ def validate_for_experiment(dataset_type: str, dataset_path: str) -> dict:
 
 def get_available_datasets() -> list[str]:
     """Return list of supported dataset type names."""
-    return supported_datasets()
+    return all_dataset_types()
 
 
 def get_available_pipelines(dataset_type: str) -> dict:

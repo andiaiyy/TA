@@ -18,6 +18,17 @@ from database.db import init_db
 
 init_db()
 
+# Sumber skema untuk diagnosa dipasang DI SINI, di titik komposisi.
+# `orchestrator/dataset_diagnostics.py` tidak boleh mengimpor `database/`
+# (batasan impornya sendiri), sementara skema research pipeline TERUNGGAH
+# hanya ada di basis data — jadi pembacanya disuntikkan dari sini, tempat
+# yang memang boleh mengetahui keduanya. Tanpa pemasangan ini (mis. di
+# CLI atau test) diagnosa memakai sumber STATIS persis seperti sebelumnya.
+from orchestrator.dataset_diagnostics import use_schema_source
+from orchestrator.research_registry import all_dataset_types, schema_for
+
+use_schema_source(schema_for, all_dataset_types)
+
 
 @st.cache_resource
 def _seed_admin_once():

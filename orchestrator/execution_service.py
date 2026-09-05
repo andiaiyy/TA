@@ -7,7 +7,7 @@ from typing import Callable, Optional
 
 import pandas as pd
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
-from contracts.dataset_schemas import get_schema
+from orchestrator.research_registry import schema_for
 from orchestrator.dynamic_registry import (
     DynamicRegistryError, get_pipeline_instance_merged,
 )
@@ -56,7 +56,9 @@ def execute_pipeline(
     if instance is None:
         raise ValueError(f"Pipeline not found: {pipeline_id}")
 
-    schema = get_schema(dataset_type)
+    # Bawaan + research pipeline terunggah. Jenis tak dikenal tetap
+    # menghasilkan None, jadi penjagaan di bawah tidak berubah.
+    schema = schema_for(dataset_type)
     if schema is None:
         raise ValueError(f"Dataset schema not found: {dataset_type}")
 

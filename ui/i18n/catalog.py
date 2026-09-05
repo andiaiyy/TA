@@ -378,8 +378,6 @@ CATALOG: dict[str, dict[str, str]] = {
     "ap.sec_compare": {"id": "Bandingkan versi", "en": "Compare versions"},
 
     # ── Label widget (frasa pendek) ──────────────────────────────────────
-    "ap.lbl_target_dataset": {"id": "Dataset target", "en": "Target dataset"},
-    "ap.ph_target_dataset": {"id": "Pilih dataset_type…", "en": "Choose dataset_type…"},
     "ap.lbl_review_note": {"id": "Catatan tinjauan", "en": "Review note"},
     "ap.ph_review_note": {"id": "Opsional saat menyetujui; WAJIB saat menolak.",
                           "en": "Optional when approving; REQUIRED when rejecting."},
@@ -387,7 +385,6 @@ CATALOG: dict[str, dict[str, str]] = {
     "ap.lbl_pipeline_files": {"id": "Berkas pipeline", "en": "Pipeline files"},
     "ap.lbl_file_role": {"id": "Peran berkas", "en": "File role"},
     "ap.lbl_pipeline_name": {"id": "Nama pipeline", "en": "Pipeline name"},
-    "ap.lbl_research_pipeline": {"id": "Research pipeline", "en": "Research pipeline"},
     "ap.lbl_paper": {"id": "Paper / rujukan", "en": "Paper / reference"},
     "ap.lbl_note": {"id": "Catatan", "en": "Note"},
     "ap.lbl_dataset_file": {"id": "Berkas dataset", "en": "Dataset file"},
@@ -456,9 +453,6 @@ CATALOG: dict[str, dict[str, str]] = {
               "dataset tersimpan langsung.",
         "en": "Only pipelines are reviewed — they contain code that gets "
               "executed; datasets are stored directly."},
-    "ap.help_dataset_type": {
-        "id": "Menentukan di bawah research pipeline mana pipeline ini muncul.",
-        "en": "Determines which research pipeline this pipeline appears under."},
     "ap.help_reject_reason": {"id": "Alasan wajib diisi pada Catatan tinjauan.",
                               "en": "A reason is required in the Review note."},
     "ap.help_multi_file": {
@@ -856,10 +850,6 @@ CATALOG: dict[str, dict[str, str]] = {
 
 
     # Header kolom tabel "Pengajuan saya".
-    "ap.col_file": {"id": "Berkas", "en": "File"},
-    "ap.col_kind": {"id": "Jenis", "en": "Kind"},
-    "ap.col_status": {"id": "Status", "en": "Status"},
-    "ap.col_time": {"id": "Waktu", "en": "Time"},
 
 
     # ── Teks tertanam yang dipindahkan, batch 1  (Tahap 3A) ──────────────
@@ -952,6 +942,18 @@ CATALOG: dict[str, dict[str, str]] = {
               "pipeline aktif di halaman Add Pipeline & Dataset.",
         "en": "Registered pipeline not found: {pipeline}. Check the active "
               "pipeline list on the Add Pipeline & Dataset page."},
+    "err.research_not_found": {
+        "id": "Research pipeline tidak ditemukan: {research}. Mungkin seluruh "
+              "algoritmanya sudah dihapus.",
+        "en": "Research pipeline not found: {research}. All of its algorithms "
+              "may already have been deleted."},
+    "err.research_builtin_readonly": {
+        "id": "{research} adalah research pipeline bawaan: ia menjadi "
+              "pembanding tetap, jadi kodenya tidak disunting dan "
+              "ketersediaannya tidak diubah dari halaman ini.",
+        "en": "{research} is a built-in research pipeline: it serves as the "
+              "fixed baseline, so its code is not edited and its availability "
+              "is not changed from this page."},
 
     # ── Hak akses ────────────────────────────────────────────────────────
     # Harus terbaca sebagai DITOLAK KARENA HAK, bukan kesalahan sistem.
@@ -2957,17 +2959,6 @@ CATALOG: dict[str, dict[str, str]] = {
 
 
     # ── Peninjauan: kelola pipeline (P5) ───────────────────────────────────────
-    "mp.static_check_note": {"id": "Pemeriksaan bersifat **statis** — berkas dibaca, tidak "
-              "dijalankan; ia menyaring masalah umum, bukan jaminan "
-              "mutlak, jadi tinjauan manusia tetap diperlukan.",
-                            "en": "The check is **static** — the file is read, not executed; "
-              "it filters out common problems but is no absolute "
-              "guarantee, so human review is still required."},
-    "mp.edit_note": {"id": "Menyunting membuat **versi baru**; versi yang sudah dipakai "
-              "eksperimen sebelumnya tidak berubah dan tetap dapat "
-              "ditelusuri.",
-                    "en": "Editing creates a **new version**; versions already used by "
-              "earlier experiments do not change and remain traceable."},
     "mp.idle_heading": {"id": "**Nonaktif ({count})** — tidak dapat dipilih untuk eksperimen baru; catatan & berkasnya tetap utuh.",
                        "en": "**Inactive ({count})** — cannot be chosen for new experiments; their records & files stay intact."},
     "mp.history_empty": {"id": "Tidak ada versi tercatat untuk `{pipeline}`.",
@@ -3402,8 +3393,6 @@ CATALOG: dict[str, dict[str, str]] = {
 
 
     # ── Sisa teks antarmuka peninjauan & katalog ───────────────────────────────────────
-    "ap.review_pending_count": {"id": "{count} pengajuan menunggu tinjauan.",
-                               "en": "{count} submissions awaiting review."},
     "ap.review_history_heading": {"id": "**Riwayat tinjauan**",
                                  "en": "**Review history**"},
     "ap.review_history_empty": {"id": " — belum ada pengajuan yang ditinjau.",
@@ -3417,8 +3406,16 @@ CATALOG: dict[str, dict[str, str]] = {
 
 
     # ── Pengajuan saya: keadaan kosong ───────────────────────────────────────
-    "ap.my_submissions_empty": {"id": "Belum ada pengajuan.",
-                               "en": "No submissions yet."},
+    # Alasan penolakan, dipindah dari kolom terakhir tabel "Pengajuan
+    # saya" yang sudah dibuang. Nomornya ikut disebut supaya kontributor
+    # tahu pengajuan yang mana bila ia mengirim lebih dari satu.
+    # Dua zona halaman peninjauan. Keduanya dibaca dengan sikap berbeda:
+    # yang satu tidak mengubah apa pun, yang lain setiap kendalinya
+    # mengubah keadaan.
+    "ap.zone_examined": {"id": "Yang diperiksa", "en": "What was checked"},
+    "ap.zone_decision": {"id": "Keputusan", "en": "Decision"},
+    "ap.rejection_note": {"id": "Pengajuan #{id} ditolak — **{note}**",
+                          "en": "Submission #{id} was rejected — **{note}**"},
 
 
     # ── Katalog: pipeline kontribusi & keadaannya ───────────────────────────────────────
@@ -3445,6 +3442,130 @@ CATALOG: dict[str, dict[str, str]] = {
                                "en": "The target dataset has not been set on this submission."},
     "ap.lbl_other_dataset": {"id": "Lainnya / belum terdaftar",
                             "en": "Other / not registered yet"},
+
+    # Deklarasi kontrak dataset untuk research pipeline kontribusi yang berdiri
+    # sendiri. Platform tidak pernah menebak skema dari isi berkas — kontraknya
+    # dinyatakan kontributor, lalu dipakai memeriksa datasetnya.
+    # Tinjau ulang: persetujuan bukan lagi keadaan akhir. Pipeline yang
+    # dinonaktifkan dapat dikembalikan ke antrean untuk ditinjau penuh.
+    "ap.btn_reopen": {"id": "Tinjau ulang",
+                     "en": "Review again"},
+    "ap.help_reopen": {"id": "Kembalikan pengajuan ini ke antrean tinjauan — seluruh langkah peninjauan beserta keputusannya dapat diulang. Versi yang sudah terdaftar tidak disentuh; menyetujuinya lagi membuat versi baru.",
+                      "en": "Send this submission back to the review queue — every review step and its decision can be run again. The registered version is left untouched; approving again creates a new version."},
+    "ap.reopen_not_approved": {"id": "Hanya pengajuan yang sudah disetujui yang dapat ditinjau ulang.",
+                              "en": "Only an approved submission can be reviewed again."},
+    "ap.reopen_only_pipeline": {"id": "Hanya pengajuan pipeline yang melewati peninjauan.",
+                               "en": "Only pipeline submissions go through review."},
+    "ap.reopen_still_active": {"id": "Nonaktifkan pipelinenya dulu. Menariknya kembali ke antrean selagi masih dapat dijalankan membuat keadaan yang membingungkan: terdaftar sekaligus menunggu tinjauan.",
+                              "en": "Deactivate the pipeline first. Pulling it back into the queue while it can still be run creates a confusing state: registered and awaiting review at the same time."},
+    "ap.msg_reopened": {"id": "Pengajuan #{number} kembali ke antrean tinjauan. Versi yang terdaftar tidak berubah.",
+                       "en": "Submission #{number} is back in the review queue. The registered version is unchanged."},
+
+    # Identitas research yang AKAN dibuat saat pengajuan berdiri sendiri
+    # disetujui — menggantikan pertanyaan "ini ikut research pipeline mana".
+    # Penolakan saat identitas research tidak dapat dibentuk. Diperiksa
+    # SEBELUM satu berkas pun bergerak, jadi pesannya menyebut apa yang harus
+    # diperbaiki, bukan sekadar bahwa persetujuan gagal.
+    "err.no_research_name": {"id": "Research pipeline ini belum punya nama, jadi pengenalnya tidak dapat dibentuk. Isi nama pipeline pada pengajuan.",
+                            "en": "This research pipeline has no name yet, so its identifier cannot be formed. Fill in the pipeline name on the submission."},
+    "err.bad_research_name": {"id": "Nama research pipeline tidak menghasilkan pengenal yang sah: {name}. Pakai huruf, angka, atau tanda hubung.",
+                             "en": "The research pipeline name does not produce a valid identifier: {name}. Use letters, digits, or hyphens."},
+
+    # Halaman satu pipeline terdaftar.
+    # Menghapus — selalu menyebut apa yang ikut hilang sebelum dikonfirmasi.
+    # Kolom riwayat peninjauan.
+    "sr.col_decision": {"id": "Keputusan", "en": "Decision"},
+    # Kuncinya di namespace `trial.` — bukan `sr.` — karena isinya memang
+    # konsep uji coba, dan itulah yang dikecualikan glosarium. Bukan
+    # melebarkan pengecualian, melainkan memakainya sesuai maksudnya.
+    "trial.col_outcome": {"id": "Uji coba", "en": "Trial"},
+    "sr.col_reviewed_at": {"id": "Ditinjau", "en": "Reviewed"},
+    "sr.col_reviewed_by": {"id": "Oleh", "en": "By"},
+    "sr.col_note": {"id": "Catatan", "en": "Note"},
+
+    "mp.btn_delete_version": {"id": "Hapus versi",
+                             "en": "Delete version"},
+    "mp.delete_blocked_used": {"id": "Versi ini dipakai eksperimen yang sudah tercatat. Menghapusnya membuat eksperimen itu menunjuk kode yang tidak ada lagi. Nonaktifkan saja — ia hilang dari pilihan, catatannya tetap utuh.",
+                              "en": "This version is used by recorded experiments. Deleting it would leave those experiments pointing at code that no longer exists. Deactivate it instead — it disappears from the choices while its record stays intact."},
+    # ── Kelola research pipeline dari halaman Jalankan Eksperimen ────────
+    # Dua tingkat yang sengaja dibedakan: SATU algoritma, atau research
+    # pipeline UTUH. Keduanya menghasilkan akibat yang berbeda dan karena itu
+    # tidak pernah disatukan menjadi satu tombol.
+    "mp.blocked_last_algorithm": {"id": "Ini satu-satunya algoritma yang masih aktif. Menonaktifkannya membuat research pipeline ini lenyap dari pilihan tanpa pernah dinyatakan dimatikan — pakai \"Nonaktifkan research pipeline\" bila memang itu yang dimaksud.",
+                                  "en": "This is the only algorithm still active. Deactivating it would make this research pipeline vanish from the choices without ever being declared off — use \"Deactivate research pipeline\" if that is what you mean."},
+    "re.sec_manage": {"id": "Kelola research pipeline ini",
+                      "en": "Manage this research pipeline"},
+    "re.help_manage": {"id": "Hanya Research Admin. Menonaktifkan tidak menghapus apa pun: eksperimen yang sudah tercatat tetap utuh lengkap dengan versi dan hash-nya.",
+                       "en": "Research Admin only. Deactivating deletes nothing: recorded experiments stay intact, complete with their version and hash."},
+    "re.lbl_algorithm_state": {"id": "Algoritma ({live} dari {total} aktif)",
+                               "en": "Algorithms ({live} of {total} active)"},
+    "re.btn_research_off": {"id": "Nonaktifkan research pipeline",
+                            "en": "Deactivate research pipeline"},
+    "re.btn_research_on": {"id": "Aktifkan research pipeline",
+                           "en": "Activate research pipeline"},
+    "re.btn_algorithm_off": {"id": "Nonaktifkan", "en": "Deactivate"},
+    "re.btn_algorithm_on": {"id": "Aktifkan", "en": "Activate"},
+    "re.btn_edit_code": {"id": "Sunting kode", "en": "Edit code"},
+    "re.btn_delete_algorithm": {"id": "Hapus", "en": "Delete"},
+    "re.msg_builtin_readonly": {"id": "Research pipeline bawaan menjadi pembanding tetap penelitian ini: kodenya tidak disunting dan ketersediaannya tidak diubah dari halaman ini.",
+                                "en": "Built-in research pipelines are this study's fixed baseline: their code is not edited and their availability is not changed from this page."},
+    "re.msg_research_off": {"id": "{research} dinonaktifkan — {count} algoritma hilang dari pilihan eksperimen baru.",
+                            "en": "{research} deactivated — {count} algorithms removed from the new-experiment choices."},
+    "re.msg_research_on": {"id": "{research} diaktifkan — {count} algoritma dapat dipilih lagi.",
+                           "en": "{research} activated — {count} algorithms can be chosen again."},
+    "re.msg_algorithm_off": {"id": "{algorithm} dinonaktifkan.",
+                             "en": "{algorithm} deactivated."},
+    "re.msg_algorithm_on": {"id": "{algorithm} diaktifkan.",
+                            "en": "{algorithm} activated."},
+    "re.msg_edit_elsewhere": {"id": "Penyunting kode ada di halaman Add Pipeline & Dataset, bagian Aktif — di situ pula riwayat versinya terbaca.",
+                              "en": "The code editor lives on the Add Pipeline & Dataset page, Active section — that is also where its version history is read."},
+    "mp.delete_blocked_running": {"id": "Ada eksperimen yang sedang berjalan memakai versi ini. Tunggu sampai selesai.",
+                                 "en": "An experiment is currently running on this version. Wait until it finishes."},
+    "mp.delete_confirm": {"id": "Hapus **{name} v{version}**? Baris registry dan berkas versi ini dibuang permanen. Versi lain tidak tersentuh.",
+                         "en": "Delete **{name} v{version}**? This version's registry row and file are removed permanently. Other versions are untouched."},
+    "mp.msg_version_deleted": {"id": "{name} v{version} dihapus.",
+                              "en": "{name} v{version} has been deleted."},
+    "ap.btn_delete_submission": {"id": "Hapus pengajuan",
+                                "en": "Delete submission"},
+    "ap.delete_confirm": {"id": "Hapus pengajuan #{number}? Yang ikut hilang: {files} berkas paket, {uji} hasil uji{extra}. Tindakan ini tidak dapat dibatalkan.",
+                         "en": "Delete submission #{number}? This also removes: {files} package files, {uji} pre-approval test runs{extra}. This cannot be undone."},
+    "ap.delete_keeps_dataset": {"id": ", dan dataset yang sudah terikat ke research pipeline TIDAK ikut terhapus",
+                               "en": ", and the dataset already bound to a research pipeline is NOT removed"},
+    "ap.delete_warns_registered": {"id": "Pengajuan ini sudah menjadi {count} pipeline terdaftar. Pipeline-nya tetap berjalan, tetapi halaman peninjauannya akan kehilangan kartunya.",
+                                  "en": "This submission has become {count} registered pipeline(s). They keep working, but their review page will lose its card."},
+    "ap.msg_submission_deleted": {"id": "Pengajuan #{number} dihapus.",
+                                 "en": "Submission #{number} has been deleted."},
+    "mp.submission_deleted": {"id": "Pengajuan asal versi ini sudah dihapus, jadi tidak ada kartu peninjauan yang dapat dibuka. Pipeline-nya sendiri tetap berjalan.",
+                             "en": "The submission behind this version has been deleted, so there is no review card to open. The pipeline itself keeps working."},
+
+    "ap.btn_back_to_pipelines": {"id": "‹ Kembali ke daftar pipeline",
+                                "en": "‹ Back to the pipeline list"},
+    "mp.no_submission_behind": {"id": "Versi ini lahir dari penyuntingan, bukan dari pengajuan — jadi tidak ada kartu peninjauan yang dapat dibuka untuknya.",
+                               "en": "This version came from an edit, not from a submission — so there is no review card to open for it."},
+    "mp.submission_unreadable": {"id": "Pengajuan asal versi ini tidak dapat dibaca saat ini. Rinciannya tercatat pada log untuk pengembang.",
+                                "en": "The submission behind this version cannot be read right now. The details are recorded in the developer log."},
+
+    "ap.lbl_research_identity": {"id": "Research pipeline baru",
+                                "en": "New research pipeline"},
+    "ap.lbl_research_identifier": {"id": "Pengenal",
+                                  "en": "Identifier"},
+    "ap.help_research_identity": {"id": "Pengajuan ini berdiri sendiri: ia membawa kontrak datasetnya sendiri, jadi pengenalnya dibentuk dari namanya dan tidak perlu dipilih.",
+                                 "en": "This submission stands on its own: it carries its own dataset contract, so its identifier is derived from its name and does not need to be chosen."},
+
+    "ap.sec_declare_schema": {"id": "Kontrak dataset research pipeline ini",
+                             "en": "Dataset contract for this research pipeline"},
+    "ap.help_declare_schema": {"id": "Jenis datasetnya belum terdaftar, jadi platform tidak mengenal bentuknya. Nyatakan kontraknya di sini — inilah yang dipakai memeriksa berkas dataset yang Anda lampirkan.",
+                              "en": "This dataset type is not registered yet, so the platform does not know its shape. Declare its contract here — this is what the dataset file you attach will be checked against."},
+    "ap.lbl_label_column": {"id": "Kolom label",
+                           "en": "Label column"},
+    "ap.lbl_file_format": {"id": "Format berkas",
+                          "en": "File format"},
+    "ap.lbl_required_columns": {"id": "Kolom wajib",
+                               "en": "Required columns"},
+    "ap.help_required_columns": {"id": "Dipisahkan koma atau baris baru. Kolom inilah yang harus ada pada berkas dataset agar dianggap cocok.",
+                                "en": "Separated by commas or new lines. These are the columns a dataset file must contain to be considered compatible."},
+    "ap.err_schema_incomplete": {"id": "Kontrak dataset belum lengkap: {fields}. Tanpa itu datasetnya tidak dapat diperiksa.",
+                                "en": "The dataset contract is incomplete: {fields}. Without it the dataset cannot be checked."},
 
     # Pipeline kontribusi di katalog: keterangan rincinya TIDAK dibaca di sini,
     # dan alasannya dinyatakan alih-alih meninggalkan bidang kosong.
@@ -3478,8 +3599,6 @@ CATALOG: dict[str, dict[str, str]] = {
                              "en": "choose one to review"},
     "ap.btn_back_to_queue": {"id": "‹ Kembali ke antrean",
                             "en": "‹ Back to the queue"},
-    "ap.err_dataset_type_required": {"id": "Pilih dataset target lebih dulu — tanpa itu pipeline tidak dapat diuji maupun dijalankan.",
-                                    "en": "Choose a target dataset first — without it the pipeline can be neither tested nor run."},
 
 
     # ── Kesalahan tak terduga pada alur pengajuan ───────────────────────────────────────
@@ -3490,6 +3609,18 @@ CATALOG: dict[str, dict[str, str]] = {
     # berbeda, dan gerbang yang tidak terbaca menutup, bukan membuka.
     "ap.err_gate_unreadable": {"id": "Syarat persetujuan tidak dapat diperiksa saat ini, jadi persetujuan ditahan. Muat ulang halaman; bila tetap begini, periksa log untuk pengembang.",
                               "en": "The approval requirements could not be checked right now, so approval is held. Reload the page; if it persists, check the developer log."},
+    # Empat sebab sebuah pengajuan TIDAK AKAN PERNAH dapat disetujui apa
+    # adanya. Berbeda dari gerbang uji coba ("belum boleh sekarang"), keempatnya
+    # hanya dapat diperbaiki dengan mengunggah ulang — jadi kalimatnya menyebut
+    # jalan keluar itu, bukan menyuruh peninjau mencoba lagi.
+    "ap.err_identity_no_name": {"id": "Pengajuan ini tidak membawa nama research pipeline, jadi pengenalnya tidak dapat dibentuk. Minta pengunggah mengirim ulang dengan nama terisi.",
+                                "en": "This submission carries no research pipeline name, so its identifier cannot be formed. Ask the uploader to resubmit with a name filled in."},
+    "ap.err_identity_bad_name": {"id": "Nama research pipeline pada pengajuan ini tidak menghasilkan pengenal yang sah. Minta pengunggah mengirim ulang dengan nama yang memuat huruf atau angka.",
+                                 "en": "The research pipeline name on this submission does not produce a valid identifier. Ask the uploader to resubmit with a name containing letters or digits."},
+    "ap.err_identity_legacy": {"id": "Pengajuan ini dibuat sebelum tiap unggahan berdiri sendiri, dan tidak membawa kontrak dataset maupun jenis dataset. Minta pengunggah mengirim ulang lewat formulir sekarang.",
+                               "en": "This submission predates standalone uploads and carries neither a dataset contract nor a dataset type. Ask the uploader to resubmit through the current form."},
+    "ap.err_identity_no_entry_class": {"id": "Nama kelas titik masuk tidak tercatat pada pengajuan ini, jadi pipelinenya tidak dapat didaftarkan. Minta pengunggah mengirim ulang.",
+                                       "en": "The entry point class name is not recorded on this submission, so its pipeline cannot be registered. Ask the uploader to resubmit."},
     "trial.err_history_unreadable": {"id": "Riwayat uji coba tidak dapat dibaca saat ini. Rinciannya tercatat pada log untuk pengembang.",
                                     "en": "The trial history could not be read right now. The details are recorded in the developer log."},
 

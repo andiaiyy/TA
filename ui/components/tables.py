@@ -128,6 +128,19 @@ def _cell(row: dict, col: dict) -> tuple[str, str]:
     return str(raw), str(full or raw)
 
 
+def cell(row: dict, col: dict) -> tuple[str, str]:
+    """(teks tampil, teks tooltip) untuk satu sel — bentuk PUBLIK dari
+    :func:`_cell`.
+
+    Tabel HTML dan tabel AgGrid memakai fungsi yang sama supaya keduanya
+    menampilkan nilai yang identik: hash dipendekkan dengan panjang yang sama,
+    waktu diformat dengan aturan yang sama, versi diberi awalan "v" yang sama.
+    Tanpa ini, dua tabel yang menampilkan baris yang sama dapat menampilkannya
+    secara berbeda, dan tidak ada yang memberi tahu bahwa itu terjadi.
+    """
+    return _cell(row, col)
+
+
 def table_html(columns, rows, *, empty: str = EMPTY_FALLBACK,
                limit: int | None = None) -> str:
     """Markup tabel — SATU bentuk untuk semua tabel di bagian ini.

@@ -228,6 +228,34 @@ MIGRATIONS = [
         "sql": "ALTER TABLE submissions ADD COLUMN trial_dataset_json TEXT",
         "add_column": ("submissions", "trial_dataset_json"),
     },
+    {
+        # Identitas research pipeline TERUNGGAH. Tabel BARU — tidak menyentuh
+        # `experiments`, `submissions`, maupun `registered_pipelines`, jadi
+        # seluruh data lama tidak terpengaruh sama sekali.
+        #
+        # Baris `registered_pipelines` yang SUDAH ADA tetap membawa
+        # `dataset_type` bawaan (mis. HIKARI2021) dan tetap berarti persis
+        # seperti sebelumnya: menumpang keluarga bawaan. Tidak ada yang diisi
+        # mundur ke model baru.
+        "version": 26,
+        "description": "Create research_pipelines table (uploaded research identity)",
+        "sql": models.CREATE_RESEARCH_PIPELINES_TABLE,
+    },
+    {
+        # Dataset yang MENYATU dengan research pipeline terunggah. Sebelumnya
+        # lampiran dataset bersifat SEMENTARA: ia hanya hidup selama peninjauan
+        # lalu dibuang. Sebuah research pipeline yang berdiri sendiri
+        # membutuhkan datasetnya secara permanen — tanpa itu, algoritmanya
+        # terdaftar tetapi tidak pernah dapat dijalankan.
+        #
+        # Kolom NULLABLE: research pipeline yang menumpang jenis bawaan memakai
+        # dataset platform dan memang tidak punya dataset sendiri. Itu keadaan
+        # yang sah, bukan isian yang terlewat.
+        "version": 27,
+        "description": "Add nullable dataset_json to research_pipelines (bound dataset)",
+        "sql": "ALTER TABLE research_pipelines ADD COLUMN dataset_json TEXT",
+        "add_column": ("research_pipelines", "dataset_json"),
+    },
 ]
 
 CREATE_SCHEMA_VERSION_TABLE = """

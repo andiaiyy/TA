@@ -256,12 +256,30 @@ def test_package_without_an_entry_point_fails():
     assert "BasePipeline" in result["cause"]
 
 
-def test_package_with_two_entry_points_fails_as_ambiguous():
+def test_package_with_two_entry_points_is_two_algorithms():
+    """PERSYARATANNYA BERUBAH, bukan penjaganya yang dilonggarkan.
+
+    Dulu paket dengan dua turunan `BasePipeline` ditolak sebagai "ambigu", dan
+    pengunggah disuruh menentukan satu entry point saja. Akibatnya satu
+    pengajuan tidak pernah bisa menjadi lebih dari satu algoritma — padahal
+    sebuah research pipeline kontribusi berdiri sendiri dan wajar membawa
+    beberapa algoritma sekaligus, persis seperti keluarga bawaan (HIKARI2021
+    punya enam).
+
+    Yang TIDAK ikut longgar dijaga dua test di bawah: paket TANPA entry point
+    tetap ditolak, dan setiap berkas entry point tetap diperiksa penuh.
+    """
     result = _pkg(("a_pipeline.py", VALID_SOURCE), ("b_pipeline.py", VALID_SOURCE))
-    assert result["valid"] is False
+    assert result["valid"] is True
     assert len(result["entry_points"]) == 2
-    assert "entry point" in result["cause"]
-    assert "a_pipeline.py" in result["cause"] and "b_pipeline.py" in result["cause"]
+    assert not result["cause"]
+
+
+def test_every_entry_point_in_a_package_is_still_fully_checked():
+    """Melonggarkan JUMLAHnya tidak melonggarkan PEMERIKSAANnya."""
+    unsafe = VALID_SOURCE + "\nimport os\n"
+    result = _pkg(("a_pipeline.py", VALID_SOURCE), ("b_pipeline.py", unsafe))
+    assert result["valid"] is False, "entry point kedua lolos padahal tidak aman"
 
 
 def test_security_failure_in_a_SUPPORT_file_fails_the_whole_package():

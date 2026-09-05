@@ -13,6 +13,7 @@ pengajuan apa adanya dan tidak boleh membuka berkas apa pun.
 """
 from __future__ import annotations
 
+import io
 import json
 import sqlite3
 from pathlib import Path
@@ -203,11 +204,39 @@ def _render(tmp_path, n: int, *, open_id: int | None = None):
         dbmod.DB_PATH, settings.DB_PATH = saved
 
 
-def test_the_list_shows_a_table_and_controls_but_no_submission_detail(tmp_path):
+def _grid(at):
+    """Isi tabel antrean: (nama kolom tampil, jumlah baris, gridOptions).
+
+    AgGrid adalah komponen pihak ketiga, jadi AppTest hanya melihatnya sebagai
+    satu `component_instance`. Datanya tetap dapat diperiksa: baris dikirim
+    sebagai Arrow, dan setelan grid sebagai JSON.
+    """
+    els = at.get("component_instance")
+    assert len(els) == 1, f"tabel antrean tidak tunggal: {len(els)}"
+    el = els[0]
+    assert el.proto.component_name.endswith("agGrid"), el.proto.component_name
+    import pyarrow as pa
+    raw = el.proto.special_args[0].arrow_dataframe.data.data
+    table = pa.ipc.open_stream(io.BytesIO(raw)).read_all()
+    options = json.loads(el.proto.json_args)["gridOptions"]
+    shown = [c["headerName"] for c in options["columnDefs"] if not c.get("hide")]
+    return shown, table.num_rows, options
+
+
+def test_the_list_shows_a_clickable_table_and_controls_but_no_detail(tmp_path):
+    """Daftar antrean kini SATU benda: tabel yang barisnya dapat dipilih.
+
+    Sebelumnya ada dua — tabel HTML ikhtisar, lalu daftar tombol di bawahnya —
+    dan yang dapat diklik hanya yang kedua. Mekanismenya kini sama persis
+    dengan riwayat eksperimen: pilih barisnya, pengajuannya terbuka.
+    """
     at = _render(tmp_path, 12)
 
-    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
-    assert tables, "tabel ikhtisar tidak tergambar"
+    shown, count, options = _grid(at)
+    assert count == sr.PAGE_SIZE, "satu halaman antrean tidak utuh"
+    assert options["rowSelection"] == "single"
+    # Tabel HTML antrean sudah TIDAK ada — satu benda, bukan dua.
+    assert not [e for e in at.get("html") if "ids-tbl" in e.proto.body]
     # Kontrol daftar ada…
     assert at.text_input, "kolom pencarian tidak ada"
     assert at.selectbox, "pemilih urutan/pembuka tidak ada"
@@ -215,6 +244,17 @@ def test_the_list_shows_a_table_and_controls_but_no_submission_detail(tmp_path):
     assert not at.get("code"), "kode berkas tergambar padahal belum dibuka"
     labels = {b.label for b in at.button}
     assert "Setujui" not in labels and "Tolak" not in labels
+
+
+def test_the_table_shows_the_queue_columns_and_hides_the_raw_id(tmp_path):
+    """Nomor pengajuan tetap dibawa (dipakai saat baris dipilih) tetapi tidak
+    ditampilkan — kolomnya sama dengan yang dipakai tabel antrean sebelumnya."""
+    at = _render(tmp_path, 3)
+
+    shown, _, options = _grid(at)
+    assert shown == [sr.tbl._label(c) for c in sr.PENDING_COLUMNS]
+    hidden = [c["field"] for c in options["columnDefs"] if c.get("hide")]
+    assert hidden == ["_full_id"]
 
 
 def test_opening_one_submission_replaces_the_list(tmp_path):
@@ -225,8 +265,7 @@ def test_opening_one_submission_replaces_the_list(tmp_path):
     labels = {b.label for b in at.button}
     assert "Setujui" in labels and "Tolak" in labels
     # …dan daftarnya TIDAK.
-    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
-    assert not tables, "tabel antrean masih tergambar di tampilan detail"
+    assert not at.get("component_instance"),         "tabel antrean masih tergambar di tampilan detail"
 
 
 def test_the_detail_offers_a_way_back_to_the_queue(tmp_path):
@@ -239,8 +278,8 @@ def test_an_open_submission_that_left_the_queue_falls_back_to_the_list(tmp_path)
     """Pengajuan yang baru saja diputuskan tidak boleh menyisakan halaman
     kosong yang tidak dapat ditinggalkan."""
     at = _render(tmp_path, 3, open_id=999)          # tidak ada di antrean
-    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
-    assert tables, "tidak kembali ke daftar"
+    shown, count, _ = _grid(at)                     # kembali ke daftar
+    assert count == 3
 
 
 def test_the_queue_states_how_many_it_shows(tmp_path):
@@ -250,10 +289,18 @@ def test_the_queue_states_how_many_it_shows(tmp_path):
     assert str(sr.PAGE_SIZE) in captions       # dan berapa yang tampil
 
 
-def test_the_honesty_notes_are_shown_on_both_the_list_and_the_detail(tmp_path):
-    """Peringatan "pemeriksaannya statis, keputusannya manusia" paling perlu
-    terbaca di tempat keputusan diambil — yaitu pada detailnya."""
-    for open_id in (None, 1):
-        at = _render(tmp_path, 3, open_id=open_id)
-        text = " ".join(m.value for m in at.markdown)
-        assert "statis" in text, open_id
+def test_the_consequence_of_approving_is_stated_where_it_is_decided(tmp_path):
+    """Dua paragraf peringatan yang dahulu berdiri di atas SETIAP tampilan
+    dibuang: keduanya terbaca sebelum pembacanya tahu ia sedang melihat apa.
+
+    Yang WAJIB bertahan adalah kejujuran yang menempel pada keputusannya —
+    "menyetujui membuat pipeline ini langsung dapat dijalankan" — dan tempatnya
+    tepat sebelum tombol Setujui, bukan di kepala halaman.
+    """
+    at = _render(tmp_path, 3, open_id=1)
+    text = " ".join(m.value for m in at.markdown)
+    assert "langsung dapat" in text
+
+    # …dan tidak ikut tergambar pada DAFTAR, tempat belum ada yang diputuskan.
+    listed = " ".join(m.value for m in _render(tmp_path, 3).markdown)
+    assert "langsung dapat" not in listed

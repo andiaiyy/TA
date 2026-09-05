@@ -24,12 +24,17 @@ from orchestrator.execution_service import get_pipeline_info
 from orchestrator.validation_service import get_available_datasets
 from orchestrator.result_service import get_experiment_metrics, get_full_experiment, get_experiment_metadata
 from config.settings import DATASETS_DIR
-from config.research_attribution import (
-    get_research_attribution, get_research_display_name,
-    get_research_short_label,
+# Nama & atribusi dibaca lewat pembaca GABUNGAN: bawaan + research
+# pipeline terunggah. Nama fungsinya di-alias ke nama lama supaya tidak
+# ada satu pun titik panggil yang berubah — yang bergeser hanya SUMBER-nya.
+from orchestrator.research_registry import (
+    attribution_for as get_research_attribution,
+    display_name_for as get_research_display_name,
+    short_label_for as get_research_short_label,
 )
 from ui.views._artifact_browser import render_file_browser, format_size
 from ui.components import dialogs as dlg
+from ui.components import research_admin_panel
 from ui.components.result_views import normalize_result_payload, render_results
 from ui.components.run_mode_controls import render_run_mode_block
 from ui.components.page_flags import wait_before_refresh
@@ -406,6 +411,29 @@ _TYPE_META = {
 
 
 def _list_dataset_files(dataset_type: str) -> list[str]:
+    """Berkas dataset yang boleh dipakai sebuah research pipeline.
+
+    Research pipeline TERUNGGAH membawa datasetnya sendiri dan hanya boleh
+    memakai itu: datasetnya tidak pernah masuk ``storage/datasets/``, dan
+    dataset platform tidak pernah ditawarkan untuknya. Itulah yang menjaga
+    perbandingan tetap jujur — dataset kontribusi tidak dapat dipakai
+    menjalankan pipeline bawaan yang menjadi dasar hasil penelitian.
+
+    Research BAWAAN tidak berubah sama sekali: isinya tetap
+    ``storage/datasets/`` yang disaring menurut ekstensi jenisnya.
+    """
+    from database.models import is_uploaded_research
+
+    if is_uploaded_research(dataset_type):
+        from orchestrator.research_registry import dataset_files_for
+
+        try:
+            return dataset_files_for(dataset_type)
+        except Exception:               # pragma: no cover - defensif
+            logger.exception("Dataset terikat tidak terbaca untuk %s",
+                             dataset_type)
+            return []
+
     d = Path(DATASETS_DIR)
     if not d.exists():
         return []
@@ -2252,6 +2280,15 @@ def _render_execute():
                 "Pilih algoritma di bawah untuk melihat preprocessing & "
                 "hyperparameter spesifik algoritma tersebut."
             )
+
+        # Panel Research Admin: kelola research pipeline INI dari tempat ia
+        # dipakai. Digambar hanya untuk yang berhak, dan tiap aksinya tetap
+        # memeriksa izinnya sendiri di lapis aksi — lihat modulnya. Letaknya
+        # SESUDAH keterangan read-only dan SEBELUM pemilih algoritma, karena
+        # itulah urutan membacanya: kenali dulu, baru ubah, baru jalankan.
+        from ui.views.login import current_user as _panel_user
+
+        research_admin_panel.render(_pdtype or research, _panel_user())
 
         # BAGIAN penuh, bukan sekadar label widget — inilah yang dulu membuat
         # "Pilih algoritma" tampil berbeda dari bagian di atasnya. Label widget

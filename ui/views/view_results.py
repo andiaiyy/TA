@@ -12,6 +12,8 @@ import pandas as pd
 
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, JsCode
 
+from ui.components import grid
+
 from orchestrator.result_service import (
     list_all_experiments, get_full_experiment, get_experiment_metrics,
 )
@@ -1087,16 +1089,14 @@ def _render_history(experiments: list[dict], all_rows: list[dict]) -> None:
 
 
 def _selected_ids(grid_response) -> list[str]:
-    """ID eksperimen yang dicentang. Bentuk kembalian AgGrid berbeda antar
-    versi (DataFrame atau list), jadi keduanya ditangani."""
-    sel = grid_response.get("selected_rows")
-    if isinstance(sel, pd.DataFrame):
-        if sel.empty or "_full_id" not in sel.columns:
-            return []
-        return [str(v) for v in sel["_full_id"].tolist()]
-    if isinstance(sel, list):
-        return [r.get("_full_id") for r in sel if r.get("_full_id")]
-    return []
+    """ID eksperimen yang dicentang.
+
+    Pembacaannya dipakai bersama seluruh tabel-yang-dapat-dipilih di aplikasi
+    (`ui.components.grid`): bentuk kembalian AgGrid berbeda antar versi
+    — DataFrame pada sebagian, list pada sebagian lain — dan menangani itu di
+    tiga tempat berarti memperbaikinya di tiga tempat pula.
+    """
+    return grid.selected_ids(grid_response, cast=str)
 
 
 def render():

@@ -236,6 +236,56 @@ CREATE TABLE IF NOT EXISTS pipeline_trials (
 );
 """
 
+# Research pipeline TERUNGGAH — identitas penelitiannya sendiri (Tahap 1).
+#
+# Sampai sekarang sebuah unggahan harus MENUMPANG salah satu `dataset_type`
+# bawaan, karena hanya `contracts/dataset_schemas.py` dan
+# `config/research_attribution.py` yang mendefinisikan apa itu "research
+# pipeline" — dan keduanya statis. Itulah sebabnya kartu peninjauan sempat
+# harus bertanya "ini ikut research pipeline mana": pertanyaan itu akibat,
+# bukan pilihan desain.
+#
+# Tabel ini memberi unggahan identitasnya sendiri. Ia TIDAK menggantikan kedua
+# berkas statis itu — keduanya tidak pernah disentuh, dan saat digabung entri
+# statis SELALU menang (lihat orchestrator/research_registry.py).
+#
+# `schema_json` menyimpan kontrak dataset yang DIDEKLARASIKAN kontributor
+# (kolom label, kolom wajib, format berkas). Platform tidak pernah mengarangnya
+# dari isi berkas.
+CREATE_RESEARCH_PIPELINES_TABLE = """
+CREATE TABLE IF NOT EXISTS research_pipelines (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    dataset_type   TEXT NOT NULL UNIQUE,
+    name           TEXT NOT NULL,
+    submission_id  INTEGER,
+    schema_json    TEXT NOT NULL,
+    attribution_json TEXT,
+    registered_by  TEXT NOT NULL,
+    registered_at  TEXT NOT NULL,
+    active         INTEGER NOT NULL DEFAULT 1,
+    -- Dataset yang MENYATU dengan research pipeline ini. NULL bila ia
+    -- menumpang jenis bawaan dan memakai dataset platform.
+    dataset_json   TEXT
+);
+"""
+
+# Awalan `dataset_type` research pipeline terunggah. Dipisahkan supaya tabrakan
+# dengan HIKARI2021 / EVE_SURICATA tidak mungkin terjadi — bukan tidak
+# disengaja, melainkan tidak dapat terjadi.
+RESEARCH_PREFIX = "uploaded:"
+
+
+def build_research_dataset_type(name: str) -> str:
+    """`uploaded:<nama>` — pengenal research pipeline terunggah."""
+    cleaned = "".join(ch if ch.isalnum() or ch in "_-" else "_"
+                      for ch in (name or "").strip().lower()).strip("_-")
+    return f"{RESEARCH_PREFIX}{cleaned[:60]}" if cleaned else ""
+
+
+def is_uploaded_research(dataset_type) -> bool:
+    return str(dataset_type or "").startswith(RESEARCH_PREFIX)
+
+
 TRIAL_QUEUED = "QUEUED"
 TRIAL_RUNNING = "RUNNING"
 TRIAL_PASSED = "PASSED"
@@ -244,4 +294,5 @@ TRIAL_FAILED = "FAILED"
 
 ALL_TABLES = [CREATE_EXPERIMENTS_TABLE, CREATE_USERS_TABLE,
               CREATE_SUBMISSIONS_TABLE, CREATE_REGISTERED_PIPELINES_TABLE,
-              CREATE_PIPELINE_TRIALS_TABLE]
+              CREATE_PIPELINE_TRIALS_TABLE,
+              CREATE_RESEARCH_PIPELINES_TABLE]

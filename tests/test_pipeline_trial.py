@@ -183,8 +183,26 @@ def test_a_passing_package_may_be_tested(db, package):
     assert trial_service.trial_blocker(_submission(db, sid)) == ""
 
 
-def test_a_decided_submission_cannot_be_tested(db, package):
+def test_an_approved_submission_can_be_tested_again(db, package):
+    """PERSYARATANNYA BERUBAH, bukan penjaganya yang dilonggarkan.
+
+    Pipeline yang sudah terdaftar kini dapat ditinjau ulang langsung dari
+    halamannya, dan uji coba adalah bagian dari peninjauan itu. Sebelumnya
+    status `approved` memblokirnya, sehingga satu-satunya jalan memperbaiki
+    pipeline bermasalah adalah menyunting berkasnya tanpa pernah mengujinya
+    lagi.
+    """
     sid = _insert_submission(db, package, status=SUBMISSION_APPROVED)
+    assert trial_service.trial_blocker(_submission(db, sid)) == ""
+
+
+def test_a_rejected_submission_still_cannot_be_tested(db, package):
+    """Yang TIDAK ikut longgar: berkas pengajuan yang ditolak sudah dipindah
+    ke area penolakan, dan menjalankannya berarti menghidupkan kembali sesuatu
+    yang sudah diputuskan."""
+    from database.models import SUBMISSION_REJECTED
+
+    sid = _insert_submission(db, package, status=SUBMISSION_REJECTED)
     assert trial_service.trial_blocker(_submission(db, sid)) == "trial.not_pending"
 
 

@@ -165,14 +165,39 @@ def validate_package(files: dict[str, str]) -> dict:
     """Validasi STATIS seluruh berkas paket + aturan tingkat paket.
 
     Meneruskan ke ``review_package`` — mekanisme yang SAMA dengan jalur unggah
-    dan jalur peninjauan. Aturannya tidak dilonggarkan di sini: berkas
-    pendukung tetap wajib lolos pemeriksaan keamanan, dan paket tetap harus
-    memuat TEPAT SATU titik masuk. Tidak pernah menjalankan kode.
+    dan jalur peninjauan. Berkas pendukung tetap wajib lolos pemeriksaan
+    keamanan, dan kode tidak pernah dijalankan.
+
+    **Satu aturan tambahan yang HANYA berlaku di sini: tepat satu titik masuk.**
+
+    Jalur unggah sengaja menerima banyak titik masuk — satu pengajuan memang
+    boleh membawa beberapa algoritma sekaligus. Penyunting versi berbeda: satu
+    baris ``registered_pipelines`` memetakan ke SATU ``entry_class``, jadi
+    titik masuk kedua di paket yang sama tidak akan pernah dimuat. Ia akan
+    terbaca seperti algoritma baru padahal tidak terdaftar dan tidak dapat
+    dijalankan — kegagalan yang senyap.
+
+    Menambah algoritma dilakukan lewat pengajuan + peninjauan, bukan lewat
+    penyuntingan versi.
     """
     from ui.components.pipeline_upload import review_package
 
     payload = [(name, text.encode("utf-8")) for name, text in (files or {}).items()]
-    return review_package(payload)
+    result = review_package(payload)
+
+    entry_points = result.get("entry_points") or []
+    if len(entry_points) > 1:
+        listed = ", ".join(f"`{name}`" for name in entry_points)
+        result = {
+            **result,
+            "valid": False,
+            "cause": (
+                f"Ditemukan {len(entry_points)} titik masuk ({listed}). Satu "
+                f"versi pipeline memetakan ke satu kelas, jadi titik masuk "
+                f"kedua tidak akan pernah dimuat. Tambahkan algoritma lewat "
+                f"pengajuan baru, bukan lewat penyuntingan versi."),
+        }
+    return result
 
 
 def package_rejection_reason(reviewed) -> str:
@@ -366,6 +391,97 @@ def version_history(name: str, db_path: str | None = None) -> list[dict]:
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+def delete_blocker(pipeline_id: str, db_path: str | None = None) -> str:
+    """Alasan versi ini BELUM boleh dihapus; "" bila boleh.
+
+    SATU aturan, dua yang menanyakannya: tampilan memakainya untuk
+    menonaktifkan tombol beserta alasannya, dan :func:`delete_version`
+    memakainya untuk menolak — sehingga memanggil fungsinya langsung tidak
+    dapat melewati gerbang yang sama.
+
+    Yang dijaga adalah janji yang sudah tertulis di
+    ``dynamic_registry.set_pipeline_active``: eksperimen lama tetap tercatat
+    lengkap dengan versi & hash-nya. Menghapus versi yang pernah dipakai
+    membuat ``experiments.pipeline_id`` menunjuk sesuatu yang tidak ada lagi,
+    dan pertanyaan "eksperimen ini memakai kode yang mana persisnya" berhenti
+    punya jawaban.
+
+    Menonaktifkan tetap tersedia untuk kasus itu: ia menghilangkan pipeline
+    dari pilihan tanpa menghapus catatannya.
+    """
+    used = experiment_counts(db_path).get(pipeline_id, 0)
+    if used:
+        return "mp.delete_blocked_used"
+    if running_experiments(pipeline_id, db_path):
+        return "mp.delete_blocked_running"
+    return ""
+
+
+def may_delete(pipeline_id: str, db_path: str | None = None) -> bool:
+    return delete_blocker(pipeline_id, db_path) == ""
+
+
+def delete_version(pipeline_id: str, *, actor: dict | None,
+                   db_path: str | None = None) -> dict:
+    """Hapus SATU versi pipeline kontribusi: barisnya dan berkasnya.
+
+    Versi LAIN sekeluarga tidak tersentuh — menghapus v2 tidak menyentuh v1
+    maupun v3, karena masing-masing punya berkas dan hash sendiri.
+
+    Mengembalikan keterangan apa yang terhapus, supaya pemanggil dapat
+    mengatakannya apa adanya alih-alih "berhasil".
+    """
+    from orchestrator.auth_service import require_approve
+    from orchestrator.dynamic_registry import get_registered
+
+    require_approve(actor, db_path)
+
+    row = get_registered(pipeline_id, db_path)
+    if row is None:
+        raise PipelineEditError(
+            f"Pipeline terdaftar tidak ditemukan: {pipeline_id}",
+            key="err.pipeline_not_registered",
+            values={"pipeline": pipeline_id})
+
+    blocker = delete_blocker(pipeline_id, db_path)
+    if blocker:
+        raise PipelineEditError(
+            "Versi ini tidak dapat dihapus karena masih dipakai eksperimen.",
+            key=blocker)
+
+    entry = Path(row["entry_file"])
+    folder = entry.parent
+    removed_files = []
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute("DELETE FROM registered_pipelines WHERE pipeline_id = ?",
+                     (pipeline_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    # Berkas dibuang SETELAH barisnya hilang: bila penghapusan baris gagal,
+    # berkasnya masih utuh dan keadaannya tetap konsisten. Urutan sebaliknya
+    # meninggalkan baris yang menunjuk berkas yang sudah tidak ada.
+    try:
+        if entry.is_file():
+            entry.unlink()
+            removed_files.append(entry.name)
+        # Folder versi ikut dibuang bila sudah kosong — jangan tinggalkan
+        # folder yatim tanpa berkas maupun catatan.
+        if folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()
+    except OSError:
+        logger.warning("Berkas versi %s tidak dapat dibuang seluruhnya",
+                       pipeline_id, exc_info=True)
+
+    logger.info("Versi %s dihapus oleh %s", pipeline_id,
+                (actor or {}).get("username"))
+    return {"pipeline_id": pipeline_id, "name": row["name"],
+            "version": row["version"], "files": removed_files}
 
 
 def experiment_counts(db_path: str | None = None) -> dict[str, int]:

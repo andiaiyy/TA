@@ -216,7 +216,6 @@ def card_rows(cards=CARDS, per_row: int = CARDS_PER_ROW) -> list[tuple]:
 def render_upload_cards(*, may_upload: bool, may_approve: bool = False,
                         may_manage_users: bool = False,
                         signed_in: bool | None = None,
-                        counts: dict | None = None,
                         on_choose=None) -> str | None:
     """Keempat kartu, dua baris berisi dua. Mengembalikan mode terpilih atau None.
 
@@ -226,14 +225,11 @@ def render_upload_cards(*, may_upload: bool, may_approve: bool = False,
     menjadi satu-satunya penghalang, dan kartu yang tombolnya mati tetap
     menjelaskan fungsinya.
 
-    ``counts`` opsional: {"review": n, "users": n} untuk menambahkan satu baris
-    keterangan jumlah antrean pada kartu yang bersangkutan.
     """
     from ui.i18n import t
 
     allowed = {"upload": bool(may_upload), "approve": bool(may_approve),
                "manage_users": bool(may_manage_users)}
-    counts = counts or {}
 
     # `signed_in` tidak diwajibkan supaya pemanggil lama tetap bekerja: bila
     # tidak diberikan, ia disimpulkan dari hak yang ada.
@@ -256,11 +252,13 @@ def render_upload_cards(*, may_upload: bool, may_approve: bool = False,
                               badge=card["badge"]),
                     unsafe_allow_html=True)
 
-                note = counts.get(card["mode"], "")
-                if not permitted:
-                    # Kartu tetap tampil; keterangannya menunjuk ke pemilih mode
-                    # di sidebar, karena tidak ada lagi tombol "Masuk" di sini.
-                    note = f"{t(card['denied'])} {t('ap.card_denied_hint')}"
+                # SATU-SATUNYA keterangan pada kartu: sebab tombolnya mati.
+                # Baris jumlah antrean dahulu juga tinggal di sini; ia dibuang
+                # karena angkanya sudah tampak begitu bagian peninjauan dibuka,
+                # dan mengulanginya di halaman muka berarti satu kueri basis
+                # data untuk kabar yang belum tentu dibaca.
+                note = ("" if permitted
+                        else f"{t(card['denied'])} {t('ap.card_denied_hint')}")
                 if note:
                     st.markdown(
                         f'<div class="ids-card-note">{escape(note)}</div>',
