@@ -105,13 +105,16 @@ def test_the_renderers_are_called_not_copied():
 
 
 def test_the_pending_section_still_offers_review_actions():
-    """Kartu tinjauan milik contribute dipertahankan — ia yang menyediakan
-    pemilih `dataset_type` yang dibutuhkan `approve_submission`."""
+    """Kartu tinjauan milik contribute dipertahankan — di situlah keputusan
+    setujui/tolak benar-benar diambil."""
     body = CONTRIB_SRC.split("def _render_submission_review_card(")[1].split(
         chr(10) + "def ")[0]
     assert "approve_submission(" in body
     assert "reject_submission(" in body
-    assert "dataset_type=chosen_type" in body          # kemampuan yang dijaga
+    # Yang dijaga kini KEBALIKANNYA: peninjau tidak lagi menyodorkan
+    # `dataset_type`, karena pengenalnya berasal dari pengajuannya sendiri.
+    assert "dataset_type=" not in body
+    assert "approval_identity_blocker(item)" in body
 
     # Sumbernya kini dibaca lewat `submission_review`, satu lapis di bawah —
     # jaminannya tetap: TEKS, tidak pernah di-import maupun dijalankan.
@@ -159,14 +162,20 @@ def test_the_history_table_carries_the_traceability_columns(env):
     assert env["row"]["file_hash"] in table
 
 
-def test_the_page_states_both_honest_notes():
-    assert "statis" in mp.STATIC_CHECK_NOTE
-    assert "bukan jaminan mutlak" in mp.STATIC_CHECK_NOTE
+def test_the_editor_states_the_note_that_belongs_to_it():
+    """Satu kalimat, satu baris, dan di tempat yang tepat.
+
+    Yang tentang pemeriksaan statis dibuang dari halaman peninjauan atas
+    permintaan; yang tentang versi baru bertahan DI PENYUNTING, karena di sana
+    ia menjelaskan akibat dari tombol yang sedang akan ditekan.
+    """
     assert "versi baru" in mp.NEW_VERSION_NOTE
     assert "tidak berubah" in mp.NEW_VERSION_NOTE
-    # Masing-masing satu baris.
-    for note in (mp.STATIC_CHECK_NOTE, mp.NEW_VERSION_NOTE):
-        assert "\n" not in note
+    assert chr(10) not in mp.NEW_VERSION_NOTE
+    assert not hasattr(mp, "STATIC_CHECK_NOTE")
+
+    editor = PAGE_SRC.split("def render_editor(")[1].split(chr(10) + "def ")[0]
+    assert "NEW_VERSION_NOTE" in editor
 
 
 def test_the_save_button_is_disabled_until_the_check_passes():
@@ -413,9 +422,10 @@ def test_each_section_renderer_is_reached_by_exactly_one_branch():
         assert names.count(renderer) == 1, (renderer, names.count(renderer))
 
 
-def test_the_submission_history_stays_with_the_pending_section():
-    """Riwayat pengajuan berbicara tentang PENGAJUAN, sama seperti antrean —
-    bukan tentang pipeline terdaftar, jadi ia tinggal di bagian ini."""
+def test_the_submission_history_left_the_pending_section():
+    """Antrean adalah tempat MEMUTUSKAN; yang sudah diputuskan pindah ke tab
+    "Riwayat versi", bersama riwayat lain. Sisa pengajuan dataset lama TETAP
+    di sini — itu pekerjaan yang belum selesai, bukan riwayat."""
     import ast
 
     tree = ast.parse(CONTRIB_SRC)
@@ -423,5 +433,9 @@ def test_the_submission_history_stays_with_the_pending_section():
                 if isinstance(n, ast.FunctionDef)
                 and n.name == "_render_review_flow")
     body = ast.unparse(flow)
-    assert "ap.review_history_heading" in body
+    assert "ap.review_history_heading" not in body
     assert "ap.msg_legacy_dataset_submission" in body      # sisa dataset lama
+
+    manage = (REPO_ROOT / "ui" / "views" / "manage_pipelines.py").read_text(
+        encoding="utf-8")
+    assert "ap.review_history_heading" in manage

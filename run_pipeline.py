@@ -69,6 +69,14 @@ def main():
 
     print(f"[5/7] Running pipeline...")
     schema = get_schema(args.dataset_type)
+    if schema is None:
+        # Sebelumnya baris berikutnya langsung meng-index `schema`, jadi
+        # jenis yang tidak dikenal jatuh sebagai TypeError yang tidak
+        # menjelaskan apa pun. CLI hanya membaca registry STATIS, jadi
+        # research pipeline terunggah memang tidak tersedia di sini.
+        parser.error(
+            f"Dataset schema not found: {args.dataset_type}. "
+            f"CLI hanya mendukung jenis bawaan.")
     pipeline_input = PipelineInput(df=df, label_column=schema["label_column"], dataset_type=args.dataset_type)
     result = run_pipeline(pipeline_instance, pipeline_input)
     print(f"      Accuracy:  {result.accuracy:.4f}")

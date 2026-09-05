@@ -146,8 +146,10 @@ def test_only_platform_written_failures_are_translated():
 # ── Sisa teks bagian peninjauan ──────────────────────────────────────────
 
 REVIEW_KEYS = [
-    "ap.review_pending_count", "ap.review_history_heading",
-    "ap.review_history_empty", "ap.my_submissions_empty",
+    # `ap.review_pending_count` dan `ap.my_submissions_empty` DIBUANG bersama
+    # tabel "Pengajuan saya" dan baris jumlah antrean di halaman muka.
+    "ap.review_history_heading", "ap.review_history_empty",
+    "ap.rejection_note",
     "sr.summary_line", "pc.pre_stage_parse", "pc.pre_stage_note",
 ]
 
@@ -160,13 +162,17 @@ def test_the_review_texts_exist_in_both_languages(key):
 
 
 def test_the_submission_status_labels_reuse_the_existing_keys():
-    """Tiga label yang sama tidak boleh punya dua salinan."""
-    import ui.views.contribute as c
+    """Tiga label yang sama tidak boleh punya dua salinan.
 
-    assert set(c._STATUS_LABEL_KEYS.values()) == {
+    Dua halaman memakainya sekarang — "Pengajuan saya" dan riwayat tinjauan —
+    jadi petanya tinggal di komponen, bukan di salah satu penyajinya.
+    """
+    from ui.components import submission_review as sr
+
+    assert set(sr.STATUS_LABEL_KEYS.values()) == {
         "ap.sub_pending", "ap.sub_approved", "ap.sub_rejected"}
     core.st.session_state[core.LANG_KEY] = "en"
-    assert c._status_label("approved") == lookup("ap.sub_approved", "en")
+    assert sr.status_label("approved") == lookup("ap.sub_approved", "en")
 
 
 def test_the_platform_stage_labels_are_not_frozen_at_import():

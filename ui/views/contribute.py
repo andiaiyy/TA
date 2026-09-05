@@ -36,9 +36,13 @@ import streamlit as st
 
 from ui.i18n import t
 
-from config.research_attribution import get_research_short_label
+# Nama & atribusi dibaca lewat pembaca GABUNGAN: bawaan + research
+# pipeline terunggah. Nama fungsinya di-alias ke nama lama supaya tidak
+# ada satu pun titik panggil yang berubah — yang bergeser hanya SUMBER-nya.
+from orchestrator.research_registry import (
+    short_label_for as get_research_short_label,
+)
 from config.settings import DATASETS_DIR, STORAGE_DIR
-from contracts.dataset_schemas import supported_datasets
 from database.models import (
     ALL_ROLES, KIND_DATASET, KIND_PIPELINE, ROLE_CONTRIBUTOR,
     ROLE_RESEARCH_ADMIN, STATUS_ACTIVE, STATUS_DISABLED, STATUS_PENDING,
@@ -72,6 +76,8 @@ from ui.components.pipeline_upload import (
 from ui.components.instructions import (
     render_dataset_instructions, render_pipeline_instructions,
 )
+from ui.components import grid
+from ui.components import review_style as rp
 from ui.components import submission_review as sr
 from ui.components.contribute_context import render_page_context
 from ui.components import tables as tbl
@@ -159,100 +165,34 @@ def _render_choice_boxes() -> None:
         may_approve=bool(can_approve(user)),
         may_manage_users=bool(can_manage_users(user)),
         signed_in=bool(user),
-        counts=_admin_queue_notes(user),
     )
     if mode:
         st.session_state[_MODE_KEY] = mode
         st.rerun()
 
-    _render_my_submissions()
-
-
-def _admin_queue_notes(user: dict | None) -> dict:
-    """Baris jumlah antrean pada kartu admin — hanya dibaca bila memang berhak.
-
-    Dipisah dari perenderan supaya kartu tetap bebas dari pembacaan basis data,
-    dan supaya pengguna tanpa hak tidak memicu kueri apa pun.
-    """
-    notes: dict[str, str] = {}
-    if can_approve(user):
-        try:
-            n = len(list_submissions(status=SUBMISSION_PENDING))
-            notes["review"] = t("ap.review_pending_count", count=n)
-        except Exception:                   # pragma: no cover - defensive
-            pass
-    return notes
-
 
 # ── Pengajuan: milik sendiri & peninjauan ─────────────────────────────────
-
-# Status pengajuan adalah PENGENAL di basis data; hanya labelnya dipetakan.
-# Kuncinya sudah ada — dipakai bersama `render_submission_counts`.
-_STATUS_LABEL_KEYS = {
-    SUBMISSION_PENDING: "ap.sub_pending",
-    "approved": "ap.sub_approved",
-    "rejected": "ap.sub_rejected",
-}
-
-
-def _status_label(status: str) -> str:
-    """Label status pengajuan pada bahasa aktif."""
-    key = _STATUS_LABEL_KEYS.get(status)
-    return t(key) if key else status
-
-
-def _my_submission_columns():
-    """Kolom "Pengajuan saya" — jenis kolom yang sama dengan tabel lain.
-
-    FUNGSI, bukan konstanta: konstanta modul dievaluasi sekali saat impor, jadi
-    judul kolomnya akan terkunci pada bahasa yang kebetulan aktif saat itu dan
-    tidak pernah ikut berganti. Pola yang sama dipakai `sidebar_progress`.
-    """
-    return (
-        tbl.column("#", "id", kind=tbl.KIND_MARK, width="4.5rem"),
-        tbl.column(t("ap.col_file"), "filename", kind=tbl.KIND_NAME),
-        tbl.column(t("ap.col_kind"), "kind", kind=tbl.KIND_STATUS),
-        tbl.column(t("ap.col_status"), "status", kind=tbl.KIND_STATUS),
-        tbl.column(t("ap.col_time"), "when", kind=tbl.KIND_TIME),
-        tbl.column(t("ap.lbl_review_note"), "note"),
-    )
-
-
-def _render_my_submissions() -> None:
-    """Status pengajuan milik pengguna yang sedang masuk."""
-    user = current_user()
-    if not can_upload(user):
-        return
-    try:
-        mine = list_submissions(submitted_by=user["username"])
-    except Exception as e:                  # pragma: no cover - defensive
-        st.warning(f"Daftar pengajuan tidak dapat dibaca: {e}")
-        return
-    if not mine:
-        return
-
-    st.divider()
-    st.markdown("Pengajuan saya")
-    # Tabel yang SAMA dengan tabel lain di halaman ini. Dulu satu baris markdown
-    # per pengajuan, dipotong diam-diam pada 10 — pembaca tidak pernah tahu ada
-    # berapa seluruhnya. `limit` kini menyebutkan totalnya.
-    rows = [{
-        "id": f"#{item['id']}",
-        "filename": item["original_filename"],
-        "kind": item["kind"],
-        "status": _status_label(item["status"]),
-        "when": item.get("submitted_at") or "",
-        "note": item.get("review_note") or "",
-    } for item in mine]
-    tbl.render_table(_my_submission_columns(), rows, limit=10,
-                     empty=t("ap.my_submissions_empty"))
-
 
 # ── Penanda daftar peninjauan ─────────────────────────────────────────────
 # Semuanya berawalan `_contrib`, jadi ``page_flags.VIEW_STATE_PREFIXES`` sudah
 # membuangnya saat pengguna berpindah halaman — tidak perlu mekanisme baru,
 # dan tidak ada daftar nama kedua yang bisa ketinggalan.
 _OPEN_KEY = "_contrib_review_open"       # id pengajuan yang sedang dibuka
+
+
+def _detail_is_open() -> bool:
+    """Apakah sebuah tampilan DALAM sedang terbuka di halaman ini.
+
+    Dua pemilik keadaan, masing-masing ditanya tentang miliknya sendiri: kartu
+    pengajuan milik modul ini, dan tampilan pipeline/penyunting/perbandingan
+    milik ``manage_pipelines``. Tidak ada daftar nama kunci kedua yang bisa
+    ketinggalan saat salah satunya bertambah.
+    """
+    from ui.views import manage_pipelines as mp
+
+    return st.session_state.get(_OPEN_KEY) is not None or mp.detail_open()
+
+
 _QUERY_KEY = "_contrib_review_query"
 _SORT_KEY = "_contrib_review_sort"
 _PAGE_KEY = "_contrib_review_page"
@@ -265,8 +205,15 @@ def _open_submission(submission_id: int) -> None:
 
 def _close_submission() -> None:
     """Kembali ke daftar. Penyaring & halaman SENGAJA tidak disentuh, supaya
-    peninjau kembali ke tempat yang sama dengan saat ia membuka."""
+    peninjau kembali ke tempat yang sama dengan saat ia membuka.
+
+    Nonce grid dinaikkan supaya AgGrid kembali TANPA baris terpilih: barisnya
+    masih tercentang di sisi frontend, dan tanpa ini daftar akan langsung
+    membuka lagi pengajuan yang barusan ditutup.
+    """
     st.session_state.pop(_OPEN_KEY, None)
+    st.session_state[_GRID_NONCE_KEY] = st.session_state.get(
+        _GRID_NONCE_KEY, 0) + 1
 
 
 def _render_pending_list(pending: list, user: dict) -> None:
@@ -299,8 +246,15 @@ def _render_pending_list(pending: list, user: dict) -> None:
     def _reviewed(item):
         return _reviewed_package(item["id"], item.get("file_hash") or "", item)
 
-    tbl.render_table(sr.PENDING_COLUMNS, sr.pending_table_rows(visible, _reviewed),
-                     empty=t(sr.EMPTY_STATE_KEY))
+    # TABEL YANG BARISNYA DAPAT DIKLIK — mekanisme yang SAMA dengan riwayat
+    # eksperimen pada halaman "Progress & Status": AgGrid dengan pemilihan
+    # baris. Memilih sebuah baris langsung membuka pengajuannya; tidak ada
+    # tombol "buka" terpisah, dan tidak ada daftar kedua di bawah tabelnya.
+    rows = sr.pending_table_rows(visible, _reviewed)
+    if not rows:
+        prose(t(sr.EMPTY_STATE_KEY), key="queue_empty")
+    else:
+        _render_queue_grid(rows)
 
     # Jumlah hasil DINYATAKAN: penyaring tidak boleh menyembunyikan antrean
     # tanpa disadari.
@@ -319,19 +273,25 @@ def _render_pending_list(pending: list, user: dict) -> None:
                       on_click=lambda: st.session_state.update(
                           {_PAGE_KEY: page + 1}))
 
-    if not visible:
-        return
 
-    # MEMBUKA satu pengajuan. Tabel di atas digambar sebagai HTML supaya gaya,
-    # kolom, dan terjemahannya tetap satu dengan tabel lain di aplikasi ini —
-    # dan HTML tidak dapat memuat widget, jadi pemilihannya diletakkan di
-    # sini sebagai satu kontrol, bukan satu tombol per baris.
-    labels = {row["id"]: sr.summary_line(row)
-              for row in sr.pending_table_rows(visible, _reviewed)}
-    chosen = st.selectbox(
-        t("ap.lbl_open_submission"), list(labels), index=None,
-        placeholder=t("ap.ph_open_submission"),
-        format_func=lambda sid: labels[sid], key="review_pick")
+#: Nonce kunci grid. Menutup detail MENAIKKANNYA, sehingga AgGrid kembali
+#: tanpa baris terpilih. Tanpa ini, kembali ke daftar akan langsung membuka
+#: lagi pengajuan yang barusan ditutup — barisnya masih tercentang, dan
+#: "terbuka sendiri" adalah cacat yang sama dengan modal yang muncul sendiri.
+_GRID_NONCE_KEY = "_contrib_queue_nonce"
+
+
+def _render_queue_grid(rows: list[dict]) -> None:
+    """Antrean peninjauan: SATU tabel, barisnya dapat dipilih.
+
+    Mekanismenya dipakai bersama dengan riwayat eksperimen dan daftar pipeline
+    terdaftar — lihat `ui.components.grid`. Kolomnya `sr.PENDING_COLUMNS`,
+    yaitu kolom yang sama yang dahulu dipakai tabel HTML-nya, jadi tidak ada
+    keterangan yang hilang saat bentuknya berubah.
+    """
+    nonce = st.session_state.get(_GRID_NONCE_KEY, 0)
+    chosen = grid.render(sr.PENDING_COLUMNS, rows, id_key="id",
+                         key=f"review_queue_grid_{nonce}", cast=int)
     if chosen is not None:
         _open_submission(chosen)
         st.rerun()
@@ -350,16 +310,6 @@ def _render_pending_section(pending: list, user: dict) -> None:
     penggambaran ulang, sepanjang apa pun antreannya. Dengan detail yang
     menggantikan daftar, yang dibaca hanya pengajuan yang benar-benar dibuka.
     """
-    from ui.views import manage_pipelines as mp
-
-    # Dua kejujuran WAJIB, satu baris — dipakai apa adanya dari modul penyaji.
-    # Ditulis SEKALI, di atas percabangan, sehingga ia tampil pada daftar
-    # MAUPUN detail. Di detail-lah keputusan setujui/tolak benar-benar diambil,
-    # jadi justru di sana peringatan "pemeriksaannya statis, keputusannya
-    # manusia" paling perlu terbaca.
-    prose(f"{t(mp.STATIC_CHECK_NOTE_KEY)} {t(mp.NEW_VERSION_NOTE_KEY)}",
-          key="review_notes")
-
     open_id = st.session_state.get(_OPEN_KEY)
     item = next((s for s in pending if s["id"] == open_id), None)
     if open_id is not None and item is None:
@@ -473,18 +423,6 @@ def _render_review_flow() -> None:
                                f"storage/datasets/.")
                     st.rerun()
 
-    st.divider()
-    history = [s for s in list_submissions() if s["status"] != SUBMISSION_PENDING]
-    st.markdown(t("ap.review_history_heading")
-                + ("" if history else t("ap.review_history_empty")))
-    for item in history[:15]:
-        # SATU baris per pengajuan yang sudah ditinjau (sebelumnya 4 caption).
-        note = f" · {item['review_note']}" if item.get("review_note") else ""
-        st.markdown(
-            f"`#{item['id']}` **{item['original_filename']}** — {item['kind']} · "
-            f"{_status_label(item['status'])} · "
-            f"oleh {item.get('reviewed_by') or '-'}{note}")
-
 
 @st.cache_data(ttl=60, show_spinner=False)
 def _reviewed_package(submission_id: int, file_hash: str, _item: dict) -> dict:
@@ -537,12 +475,12 @@ def _render_trial_compatibility(dataset_type: str, dataset_path: str) -> None:
     try:
         report = diagnose_dataset(dataset_path, dataset_type)
     except Exception:
-        st.caption(t("trial.compat_unavailable"))
+        prose(t("trial.compat_unavailable"), key="compat_unavail_a")
         return
     # `diagnose_dataset` mengembalikan DICT (ramah cache/JSON), bukan objek.
     checks = (report or {}).get("checks") or []
     if not checks:
-        st.caption(t("trial.compat_unavailable"))
+        prose(t("trial.compat_unavailable"), key="compat_unavail_b")
         return
     mark = {"pass": "✔", "warn": "⚠", "fail": "✖"}
     lines = []
@@ -572,7 +510,7 @@ def _render_trial_outcome(trial: dict) -> None:
                            if isinstance(value, float) else str(value))
                           for name, value in metrics.items()])
         else:
-            st.caption(t("trial.no_metrics"))
+            prose(t("trial.no_metrics"), key="trial_no_metrics")
         return
     # Tahap & pesan diterjemahkan lebih dulu. Menyisipkannya mentah membuat
     # satu kalimat memuat dua bahasa — cacat yang sama dengan catatan kaki
@@ -600,8 +538,12 @@ def _render_trial_step(item: dict, user: dict | None,
     """
     st.markdown(f"**{t('trial.heading')}**")
     limits = trial_service.TRIAL_LIMITS
-    st.caption(t("trial.intro", rows=f"{limits['max_rows']:,}".replace(",", "."),
-                 seconds=limits["max_seconds"]))
+    # `prose`, bukan `caption`: ini kalimat yang MENJELASKAN batas uji coba —
+    # berapa baris dan berapa detik — dan justru itu yang menentukan apakah
+    # hasil ujinya berarti. Keterangan sekunder di halaman ini tinggal tiga:
+    # jumlah antrean, siapa yang menguji, dan batas ukuran lampiran.
+    prose(t("trial.intro", rows=f"{limits['max_rows']:,}".replace(",", "."),
+            seconds=limits["max_seconds"]), key="trial_intro")
 
     blocker = trial_service.trial_blocker(item)
     if blocker:
@@ -620,7 +562,7 @@ def _render_trial_step(item: dict, user: dict | None,
     # Ketiadaan dataset target dinyatakan sebagai KEKURANGAN, bukan dibiarkan
     # ditemukan sendiri saat tombol ditekan.
     if not intrinsic_type:
-        st.caption(t("td.missing_dataset_type"))
+        prose(t("td.missing_dataset_type"), key="td_missing_dtype")
 
     from orchestrator.trial_dataset_service import attachment_of, human_size
 
@@ -640,7 +582,7 @@ def _render_trial_step(item: dict, user: dict | None,
         format_func=lambda value: source_labels[value],
         key=f"trial_src_{item['id']}")
     if not attachment:
-        st.caption(t("td.no_attachment_hint"))
+        prose(t("td.no_attachment_hint"), key="td_no_attach")
 
     picked = None
     if source == trial_service.SOURCE_ATTACHED:
@@ -651,8 +593,9 @@ def _render_trial_step(item: dict, user: dict | None,
                       size=human_size(attachment.get("size") or 0),
                       when=(attachment.get("uploaded_at") or "")[:19]))
         if attachment.get("note"):
-            st.caption(t("td.contributor_note", note=attachment["note"]))
-        st.caption(t("td.sample_caveat"))
+            prose(t("td.contributor_note", note=attachment["note"]),
+                  key="td_contrib_note")
+        prose(t("td.sample_caveat"), key="td_sample_caveat")
         # Jenis untuk lampiran datang dari PENENTU yang sama — lampiran tidak
         # punya jenis sendiri, ia memakai jenis pipeline yang sedang diuji.
         # Itu PERSIS pertanyaan yang sudah dijawab `intrinsic_type` di atas
@@ -734,7 +677,7 @@ def _render_trial_step(item: dict, user: dict | None,
         latest = _safe_read("riwayat uji terakhir", trial_db.latest_trial,
                             item["id"], default=_UNREADABLE)
     if latest is _UNREADABLE:
-        st.caption(t("trial.err_history_unreadable"))
+        prose(t("trial.err_history_unreadable"), key="trial_hist_err")
     elif latest:
         _render_trial_outcome(latest)
         # Uji yang sudah tidak berlaku dikatakan APA ADANYA di sebelah
@@ -749,44 +692,131 @@ def _render_trial_step(item: dict, user: dict | None,
             st.warning(t("trial.gate_stale"))
 
 
+def _render_review_header(row: dict) -> None:
+    """Kepala halaman: pengajuan mana, dan bagaimana hasil periksanya.
+
+    Menggantikan label expander pembungkus yang dahulu memuat kalimat yang
+    sama. Bedanya, kepala ini TIDAK dapat ditutup: pengajuan yang sedang dibuka
+    adalah satu-satunya hal di halaman ini, jadi menyembunyikan namanya tidak
+    pernah berguna.
+    """
+    rp.review_header(name=row["name"], verdict=row["verdict"],
+                     verdict_text=row["verdict_text"],
+                     files=row["file_count"], who=row["submitted_by"],
+                     when=row["submitted_at"])
+
+
 def _render_file_review(row: dict) -> None:
-    """Satu berkas paket: peran, ukuran, penjelasan pengunggah, temuan, kode."""
+    """Satu berkas paket: peran, ukuran, penjelasan pengunggah, temuan, kode.
+
+    TANPA expander. Sebuah expander per berkas berarti peninjau harus membuka
+    setiap berkas satu per satu untuk tahu apakah ada temuan di dalamnya —
+    padahal justru itu yang ia cari. Isinya kini tergambar langsung, dan
+    kodenya tetap tinggal di wadah bergulir sehingga berkas panjang tidak
+    mendominasi layar.
+    """
     entry = row["entry"]
-    mark = "✔" if row["ok"] else "✖"
-    size = f" · {format_size(row['size'])}" if row.get("size") else ""
-    header = f"{mark} {row['filename']} · {row['role']}{size}"
 
-    with st.expander(header, expanded=not row["ok"]):
-        # Penjelasan PENGUNGGAH — konteks yang paling membantu peninjau, dan
-        # selama ini hanya ada di dalam blob JSON.
-        if row["description"]:
-            st.markdown(f"Penjelasan pengunggah: {row['description']}")
+    rp.file_heading(filename=row["filename"], role=row["role"],
+                    size=format_size(row["size"]) if row.get("size") else "",
+                    ok=bool(row["ok"]))
 
-        if not entry.get("ok"):
-            st.error(entry.get("error") or "Berkas tidak dapat diperiksa.")
-            return
+    # Penjelasan PENGUNGGAH — konteks yang paling membantu peninjau, dan
+    # selama ini hanya ada di dalam blob JSON.
+    if row["description"]:
+        st.markdown(f"Penjelasan pengunggah: {row['description']}")
 
-        if row["role"] == ROLE_SUPPORT:
-            st.markdown(t("ap.note_support_file"))
+    if not entry.get("ok"):
+        st.error(entry.get("error") or "Berkas tidak dapat diperiksa.")
+        return
 
-        _render_check_groups(entry)
+    if row["role"] == ROLE_SUPPORT:
+        st.markdown(t("ap.note_support_file"))
 
-        lines = sr.finding_lines(entry)
-        if lines:
-            st.markdown("Temuan ada di baris: "
-                        + ", ".join(f"**{n}**" for n in lines)
-                        + " — nomornya tercetak di sisi kiri kode.")
+    _render_check_groups(entry)
 
-        # Kode dengan NOMOR BARIS, dalam wadah yang dapat digulir sehingga
-        # berkas panjang tidak mendominasi layar.
-        source = entry.get("source") or ""
-        with st.container(height=320, border=True):
-            st.code(sr.numbered_source(source), language="python")
-        st.download_button(
-            t("ap.btn_download_file"), data=source.encode("utf-8"),
-            file_name=row["filename"], mime="text/x-python",
-            key=f"review_dl_{row['filename']}_{id(entry)}",
-            help=t("ap.help_open_outside"))
+    lines = sr.finding_lines(entry)
+    if lines:
+        st.markdown("Temuan ada di baris: "
+                    + ", ".join(f"**{n}**" for n in lines)
+                    + " — nomornya tercetak di sisi kiri kode.")
+
+    # Kode dengan NOMOR BARIS, dalam wadah yang dapat digulir sehingga
+    # berkas panjang tidak mendominasi layar.
+    source = entry.get("source") or ""
+    with st.container(height=320, border=True):
+        st.code(sr.numbered_source(source), language="python")
+    st.download_button(
+        t("ap.btn_download_file"), data=source.encode("utf-8"),
+        file_name=row["filename"], mime="text/x-python",
+        key=f"review_dl_{row['filename']}_{id(entry)}",
+        help=t("ap.help_open_outside"))
+
+
+def render_review_body(item: dict, user: dict) -> None:
+    """Kartu peninjauan satu pengajuan — permukaan PUBLIK modul ini.
+
+    Dipakai halaman pipeline terdaftar (``ui/views/manage_pipelines``) supaya
+    peninjauan penuh tidak perlu disalin ke sana. Impornya LAZY di sisi
+    pemanggil: ``contribute`` sudah mengimpor ``manage_pipelines`` di tingkat
+    modul, jadi impor balik di tingkat modul akan sirkular.
+    """
+    _render_submission_review_card(item, user)
+
+
+_CONFIRM_DEL_SUB_KEY = "_contrib_confirm_delete"
+
+
+def _render_delete_submission(item: dict, user: dict) -> None:
+    """Tombol "Hapus pengajuan" + konfirmasi yang MENYEBUT apa yang ikut hilang.
+
+    Berlaku untuk semua status. Yang sudah disetujui ikut dapat dihapus —
+    pipeline terdaftarnya tetap berjalan, hanya kartu peninjauannya yang
+    hilang, dan itu dikatakan sebelum tombolnya ditekan.
+    """
+    from orchestrator.submission_service import (
+        SubmissionError, delete_submission, deletion_summary,
+    )
+
+    sid = item["id"]
+    if st.session_state.get(_CONFIRM_DEL_SUB_KEY) != sid:
+        if st.button(t("ap.btn_delete_submission"), key=f"del_sub_{sid}",
+                     use_container_width=True):
+            st.session_state[_CONFIRM_DEL_SUB_KEY] = sid
+            st.rerun()
+        return
+
+    summary = _safe_read("ringkasan penghapusan", deletion_summary, item,
+                         default={}) or {}
+    extra = ""
+    if summary.get("attachment_kept"):
+        extra += t("ap.delete_keeps_dataset")
+    st.warning(t("ap.delete_confirm", number=sid,
+                 files=summary.get("files", 0),
+                 uji=summary.get("trials", 0), extra=extra))
+    if summary.get("registered"):
+        st.warning(t("ap.delete_warns_registered",
+                     count=summary["registered"]))
+
+    confirm = st.columns([1, 1, 3])
+    if confirm[0].button(t("ap.btn_delete_submission"), key=f"del_yes_{sid}",
+                         type="primary", use_container_width=True):
+        try:
+            delete_submission(sid, actor=user)
+        except (AuthError, SubmissionError) as e:
+            st.error(error_message(e))
+        except Exception as e:
+            logger.exception("Penghapusan pengajuan #%s gagal tak terduga", sid)
+            st.error(t("ap.err_unexpected", kind=type(e).__name__))
+        else:
+            st.session_state.pop(_CONFIRM_DEL_SUB_KEY, None)
+            _close_submission()
+            st.success(t("ap.msg_submission_deleted", number=sid))
+            st.rerun()
+    if confirm[1].button(t("action.cancel"), key=f"del_no_{sid}",
+                         use_container_width=True):
+        st.session_state.pop(_CONFIRM_DEL_SUB_KEY, None)
+        st.rerun()
 
 
 def _render_submission_review_card(item: dict, user: dict,
@@ -801,14 +831,28 @@ def _render_submission_review_card(item: dict, user: dict,
     sendiri.
 
     Dipanggil untuk pengajuan yang BENAR-BENAR DIBUKA saja — satu pada satu
-    waktu. Wadahnya tetap expander, tetapi kini terbuka sejak awal: peninjau
-    sudah memilih pengajuan ini, jadi menyuruhnya mengklik sekali lagi untuk
-    melihat isinya tidak menambah apa pun.
+    waktu, TANPA expander pembungkus: peninjau sudah memilih pengajuan ini,
+    jadi wadah yang harus diklik untuk melihat isinya hanya menambah satu
+    langkah tanpa menyembunyikan apa pun.
+
+    Halamannya dibagi DUA ZONA yang dibedakan secara visual, karena keduanya
+    dibaca dengan sikap yang berbeda:
+
+    * **yang diperiksa** — identitas, berkas, temuan, kode. Dibaca.
+    * **keputusan** — dataset uji, catatan, setujui/tolak/hapus. Dikerjakan.
+
+    Sebelumnya keduanya berselang-seling di dalam satu expander bersama dua
+    paragraf peringatan, sehingga tidak ada tempat yang jelas untuk memulai
+    maupun mengakhiri.
     """
     reviewed = _reviewed_package(item["id"], item.get("file_hash") or "", item)
     row = sr.summary_row(item, reviewed)
 
-    with st.expander(sr.summary_line(row), expanded=True):
+    _render_review_header(row)
+
+    with st.container(border=True):
+        rp.zone_heading(rp.ZONE_READ, t("ap.zone_examined"))
+
         # 1. Identitas & metadata — pasangan label–nilai ringkas.
         render_facts(sr.metadata_rows(item))
 
@@ -823,21 +867,51 @@ def _render_submission_review_card(item: dict, user: dict,
         if warnings:
             st.warning(t(sr.WARNING_REMINDER_KEY))
 
-        # 4. Uji coba — SEBELUM keputusan, karena ia syarat persetujuan.
-        st.divider()
-        _render_trial_step(item, user, latest)
+    with st.container(border=True):
+        rp.zone_heading(rp.ZONE_WORK, t("ap.zone_decision"))
 
-        # 5. Keputusan.
+        # 4. Uji coba — SEBELUM keputusan, karena ia syarat persetujuan.
+        _render_trial_step(item, user, latest)
         st.divider()
-        options = list(supported_datasets())
-        meta_type = (item.get("metadata") or {}).get("dataset_type")
-        chosen_type = st.selectbox(
-            t("ap.lbl_target_dataset"), options,
-            index=options.index(meta_type) if meta_type in options else None,
-            format_func=_dataset_label, placeholder=t("ap.ph_target_dataset"),
-            key=f"review_dtype_{item['id']}",
-            help=t("ap.help_dataset_type"),
+
+        # Pertanyaan "ini ikut research pipeline mana" hanya bermakna bagi
+        # pengajuan yang MENUMPANG keluarga bawaan. Sebuah research pipeline
+        # yang berdiri sendiri membawa kontrak datasetnya sendiri, jadi
+        # pengenalnya dibentuk dari namanya — bukan dipilih peninjau. Menanyakan
+        # itu di sana akan meminta keputusan yang tidak ada pilihannya.
+        from orchestrator.submission_service import (
+            approval_identity_blocker, declared_schema_of, is_standalone,
+            research_name_of,
         )
+
+        # TIDAK ADA "Dataset target" di sini. Peninjau tidak punya kewenangan
+        # untuk menentukannya: paket yang diunggah ADALAH research pipeline-nya
+        # sendiri, jadi pengenalnya dibentuk dari namanya. Meminta peninjau
+        # memilih dataset target berarti meminta keputusan yang tidak ada
+        # pilihan benarnya, lalu menyimpannya sebagai fakta.
+        if is_standalone(item):
+            from database.models import build_research_dataset_type
+
+            declared = declared_schema_of(item)
+            render_facts([
+                (t("ap.lbl_research_identity"), research_name_of(item)),
+                (t("ap.lbl_research_identifier"),
+                 build_research_dataset_type(research_name_of(item))),
+                (t("ap.lbl_label_column"), declared.get("label_column") or "—"),
+                (t("ap.lbl_required_columns"),
+                 str(len(declared.get("expected_columns") or []))),
+            ])
+            prose(t("ap.help_research_identity"), key="research_identity")
+        else:
+            # Pengajuan LAMA: identitasnya tercatat pada metadatanya sendiri,
+            # ditampilkan apa adanya. Bila memang tidak ada, itu dinyatakan
+            # lewat gerbang di bawah — bukan ditambal dengan isian.
+            meta = item.get("metadata") or {}
+            render_facts([
+                (t("ap.lbl_research_identity"), research_name_of(item)),
+                (t("ap.lbl_research_identifier"),
+                 (meta.get("dataset_type") or "").strip() or "—"),
+            ])
         note = st.text_input(
             t("ap.lbl_review_note"), key=f"review_note_{item['id']}",
             placeholder=t("ap.ph_review_note"))
@@ -857,14 +931,21 @@ def _render_submission_review_card(item: dict, user: dict,
             "gerbang persetujuan", trial_service.approval_blocker, item,
             default="ap.err_gate_unreadable",
             **({} if latest is _UNREADABLE else {"trial": latest}))
+        # Identitas diperiksa LEBIH DULU: "tidak akan pernah dapat disetujui"
+        # adalah keterangan yang lebih berguna daripada "belum diuji", dan
+        # menyuruh peninjau menguji sesuatu yang tetap akan ditolak hanya
+        # membuang waktunya.
+        gate = approval_identity_blocker(item) or gate
         cols = st.columns(2)
         if cols[0].button(t("action.approve"),
                           key=f"review_approve_{item['id']}",
                           type="primary", use_container_width=True,
                           disabled=bool(gate), help=t(gate) if gate else None):
             try:
-                approve_submission(item["id"], actor=user, note=note,
-                                   dataset_type=chosen_type)
+                # `dataset_type` TIDAK disodorkan lagi: layanannya sudah
+                # mengambilnya dari metadata pengajuan, dan tidak ada lagi
+                # nilai pilihan peninjau yang dapat menimpanya.
+                approve_submission(item["id"], actor=user, note=note)
             except AuthError as e:
                 st.error(error_message(e))
             except Exception as e:
@@ -874,8 +955,8 @@ def _render_submission_review_card(item: dict, user: dict,
                 # tidak satu pun turunan AuthError. Sebelumnya semuanya lolos
                 # sebagai jejak teknis ke peninjau.
                 logger.exception(
-                    "Persetujuan pengajuan #%s gagal tak terduga "
-                    "(dataset_type=%r)", item["id"], chosen_type)
+                    "Persetujuan pengajuan #%s gagal tak terduga",
+                    item["id"])
                 st.error(t("ap.err_unexpected", kind=type(e).__name__))
             else:
                 registered = _latest_registration(item)
@@ -885,6 +966,8 @@ def _render_submission_review_card(item: dict, user: dict,
                     f"{now_iso()[:19]}."
                     + (f" Catatan: {note}" if note.strip() else ""))
                 st.rerun()
+        _render_delete_submission(item, user)
+
         # Menolak TANPA alasan tidak dijalankan sama sekali — berkasnya tetap
         # ada, hanya statusnya yang berubah.
         if cols[1].button("Tolak", key=f"review_reject_{item['id']}",
@@ -1253,8 +1336,21 @@ def _render_valid_followup(result: dict, form: dict) -> None:
         if st.button(t("ap.btn_submit_review"), key="contrib_submit_pipeline",
                      type="primary",
                      help=t("ap.help_submit_review")):
-            # Nama kelas entry point dibaca STATIS dari AST — dibutuhkan
-            # peninjau untuk mendaftarkan pipeline saat menyetujui.
+            # Nama kelas SETIAP entry point dibaca STATIS dari AST —
+            # dibutuhkan peninjau untuk mendaftarkan pipeline saat menyetujui.
+            # Satu paket boleh memuat BANYAK entry point: sebuah research
+            # pipeline kontribusi berdiri sendiri dan wajar membawa beberapa
+            # algoritma, persis seperti keluarga bawaan.
+            entry_files = [f for f in result["files"] if f["role"] == ROLE_ENTRY]
+            algorithms = []
+            for entry in entry_files:
+                found = extract_registry_metadata(entry["source"],
+                                                  entry["filename"]) or {}
+                algorithms.append({
+                    "filename": entry["filename"],
+                    "class_name": found.get("class_name"),
+                    "algorithm": found.get("algorithm"),
+                })
             static_meta = extract_registry_metadata(entry_item["source"],
                                                     entry_item["filename"])
             try:
@@ -1262,7 +1358,11 @@ def _render_valid_followup(result: dict, form: dict) -> None:
                     [(f["filename"], f["source"]) for f in result["files"]],
                     entry_item["filename"], user=user,
                     metadata={**_submission_metadata(form),
-                              "entry_class": static_meta.get("class_name")},
+                              # Dipertahankan untuk pengajuan lama & pembaca
+                              # yang hanya mengenal satu entry point.
+                              "entry_class": static_meta.get("class_name"),
+                              # Daftar LENGKAP algoritma paket ini.
+                              "algorithms": algorithms},
                     validation={
                         "valid": result["valid"],
                         "entry_points": result["entry_points"],
@@ -1287,17 +1387,6 @@ def _render_valid_followup(result: dict, form: dict) -> None:
 
 
 # ── Jalur pipeline ────────────────────────────────────────────────────────
-
-_OTHER_DATASET_OPTION = "Lainnya / belum terdaftar"
-
-
-def _dataset_label(dataset_type: str) -> str:
-    """Label dropdown: nama beratribusi ringkas, nilai internal tetap
-    dataset_type. Opsi "lainnya" dibiarkan apa adanya."""
-    if dataset_type == _OTHER_DATASET_OPTION:
-        return dataset_type
-    return get_research_short_label(dataset_type)
-
 
 def _render_pipeline_flow() -> None:
     st.subheader(t("ap.sec_upload_pipeline"))
@@ -1338,42 +1427,91 @@ def _render_pipeline_flow() -> None:
     c1, c2 = st.columns(2)
     name = c1.text_input(t("ap.lbl_pipeline_name"), key="contrib_meta_name",
                          placeholder="mis. Random Forest — HIKARI2021")
-    dtype_options = list(supported_datasets()) + [_OTHER_DATASET_OPTION]
-    dtype_choice = c2.selectbox(
-        t("ap.lbl_research_pipeline"), dtype_options, index=None,
-        format_func=_dataset_label, placeholder="Pilih research pipeline…",
-        key="contrib_meta_dtype",
-        help="Menentukan `dataset_type` pada entri registry.",
-    )
-    algorithm = c1.text_input("Algoritma", key="contrib_meta_algo",
-                              placeholder="mis. Random Forest")
+    # TIDAK ADA pertanyaan "ikut research pipeline mana". Paket yang diunggah
+    # ADALAH sebuah research pipeline: ia membawa algoritmanya sendiri — boleh
+    # lebih dari satu — dan kontrak datasetnya sendiri. Menanyakan induk kepada
+    # sesuatu yang berdiri sendiri adalah pertanyaan tanpa jawaban yang benar,
+    # dan jawabannya dahulu menentukan `dataset_type` yang keliru.
     paper = c2.text_input(t("ap.lbl_paper"), key="contrib_meta_paper",
                           placeholder="mis. Rayyan (2024), Universitas Hasanuddin")
+    algorithm = c1.text_input("Algoritma", key="contrib_meta_algo",
+                              placeholder="mis. Random Forest")
     notes = st.text_area(t("ap.lbl_note"), key="contrib_meta_notes", height=80,
                          help=t("ap.help_optional_report"))
 
+    # ── Kontrak dataset yang DIDEKLARASIKAN ──────────────────────────────
+    # Sebuah research pipeline kontribusi berdiri sendiri: ia membawa
+    # datasetnya sendiri, dan platform tidak dapat menebak seperti apa
+    # bentuknya. Kontraknya DIDEKLARASIKAN di sini, lalu dipakai memeriksa
+    # berkas datasetnya — platform tidak pernah mengarang skema dari nama
+    # atau isi berkas.
+    #
+    # SELALU dideklarasikan, bukan hanya bila jenisnya "belum terdaftar":
+    # setiap paket berdiri sendiri, jadi tidak pernah ada skema bawaan untuk
+    # ditumpangi, dan platform tidak boleh mengarang satu dari nama berkas
+    # maupun isinya.
+    st.markdown(f"**{t('ap.sec_declare_schema')}**")
+    # `prose`, bukan `caption`: ini kalimat penjelasan setara bagian
+    # lain di halaman ini, dan kuota teks kecil per halaman = 3.
+    prose(t("ap.help_declare_schema"), key="declare_schema")
+    d1, d2 = st.columns(2)
+    label_column = d1.text_input(
+        t("ap.lbl_label_column"), key="contrib_schema_label",
+        placeholder="mis. attack")
+    file_format = d2.selectbox(
+        t("ap.lbl_file_format"), ["csv", "ndjson"], index=0,
+        format_func=lambda value: value.upper(),
+        key="contrib_schema_format")
+    required_raw = st.text_area(
+        t("ap.lbl_required_columns"), key="contrib_schema_cols", height=80,
+        placeholder="flow_duration, src_port, attack",
+        help=t("ap.help_required_columns"))
+    # Koma ATAU baris baru — pengunggah tidak perlu menebak pemisahnya.
+    columns = [c.strip()
+               for c in (required_raw or "").replace("\n", ",").split(",")
+               if c.strip()]
+    declared_schema = {
+        "label_column": (label_column or "").strip(),
+        "expected_columns": columns,
+        "file_format": file_format,
+    }
+    if file_format == "ndjson":
+        declared_schema["expected_top_level_keys"] = columns
+    # Nama ikut diperiksa DI SINI: pengenal research pipeline dibentuk dari
+    # namanya, jadi nama kosong berarti pengajuan yang tidak akan pernah dapat
+    # disetujui — dan itu harus ketahuan sekarang, bukan di meja peninjau.
+    missing = [lbl for lbl, ok in (
+        (t("ap.lbl_pipeline_name"), (name or "").strip()),
+        (t("ap.lbl_label_column"), declared_schema["label_column"]),
+        (t("ap.lbl_required_columns"), columns)) if not ok]
+    if missing:
+        st.warning(t("ap.err_schema_incomplete", fields=", ".join(missing)))
+
     form = {
         "name": name,
-        # "Lainnya" disimpan sebagai PENANDA eksplisit, bukan string kosong:
-        # "jenisnya belum terdaftar" adalah keterangan yang berguna, sedangkan
-        # string kosong tidak dapat dibedakan dari "tidak pernah diisi".
-        "dataset_type": (DATASET_TYPE_UNREGISTERED
-                         if dtype_choice == _OTHER_DATASET_OPTION
-                         else (dtype_choice or "")),
+        # Kontrak dataset yang dideklarasikan kontributor. Kosong bila
+        # pipelinenya menumpang jenis bawaan — itu keadaan yang sah, bukan
+        # isian yang terlewat.
+        "declared_schema": declared_schema,
+        # PENANDA eksplisit, bukan string kosong: "jenisnya belum terdaftar"
+        # adalah keterangan yang berguna, sedangkan string kosong tidak dapat
+        # dibedakan dari "tidak pernah diisi". Pengenal yang sesungguhnya
+        # dibentuk dari NAMA research pipeline ini saat pengajuan disetujui.
+        "dataset_type": DATASET_TYPE_UNREGISTERED,
         "algorithm": algorithm,
         "paper": paper,
         "notes": notes,
     }
 
-    # Dataset target WAJIB: tanpa jenis, pipeline tidak dapat diuji maupun
-    # dijalankan — jadi kekurangan itu dinyatakan di sini, saat masih murah
-    # diperbaiki, bukan saat peninjau menekan tombol uji.
-    if dtype_choice is None:
-        st.caption(t("ap.err_dataset_type_required"))
+    # Nama dan kontrak dataset WAJIB: tanpa keduanya pipeline tidak dapat diuji
+    # maupun dijalankan, dan pengenalnya tidak dapat dibentuk. Alasan tombol
+    # nonaktif SELALU menempel pada tombolnya — tombol mati tanpa keterangan
+    # membuat pengunggah menebak apa yang kurang.
+    blocked = (t("ap.err_schema_incomplete", fields=", ".join(missing))
+               if missing else "")
     if st.button(t("ap.btn_upload_validate"), type="primary", key="contrib_validate",
-                 disabled=not may_upload or dtype_choice is None,
-                 help=(t("ap.err_dataset_type_required")
-                       if dtype_choice is None else None)):
+                 disabled=not may_upload or bool(blocked),
+                 help=blocked or None):
         problems = []
         if not uploaded:
             problems.append("unggah minimal satu berkas `.py`")
@@ -1863,10 +2001,17 @@ def render() -> None:
         _render_choice_boxes()
         return
 
-    if st.button(t("ap.btn_back"), key="contrib_back"):
-        for key in (_MODE_KEY, _RESULT_KEY, _FORM_KEY):
-            st.session_state.pop(key, None)
-        st.rerun()
+    # SATU tombol kembali, dan selalu yang PALING DALAM. Ketika sebuah detail
+    # sedang terbuka — satu pengajuan, satu pipeline, penyunting, atau
+    # perbandingan versi — tampilan itu sudah menggambar tombol kembalinya
+    # sendiri. Menggambar tombol kedua di atasnya menaruh dua tombol bertumpuk
+    # yang tujuannya berbeda tanpa ada yang menjelaskan bedanya; keluar sampai
+    # ke pilihan jalur tetap dapat ditempuh dengan menekan kembali dua kali.
+    if not _detail_is_open():
+        if st.button(t("ap.btn_back"), key="contrib_back"):
+            for key in (_MODE_KEY, _RESULT_KEY, _FORM_KEY):
+                st.session_state.pop(key, None)
+            st.rerun()
 
     if mode == "pipeline":
         _render_pipeline_flow()

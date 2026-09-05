@@ -37,7 +37,8 @@ from ui.i18n import t
 
 from orchestrator.auth_service import AuthError
 from orchestrator.dynamic_registry import (
-    DynamicRegistryError, list_registered, set_pipeline_active,
+    DynamicRegistryError, get_registered, list_registered,
+    set_pipeline_active,
 )
 from orchestrator.pipeline_versions import (
     PipelineEditError, current_hash, entry_name, experiment_counts,
@@ -45,8 +46,8 @@ from orchestrator.pipeline_versions import (
     running_experiments, save_new_version, validate_package, validate_source,
     version_history,
 )
+from ui.components import grid
 from ui.components import registry_view as rv
-from ui.components import tables as tbl
 from ui.components.validator_messages import (
     check_name,
     check_message, error_message,
@@ -77,16 +78,10 @@ SECTION_ACTIVE = "Aktif"
 SECTION_HISTORY = "Riwayat versi"
 SECTION_KEY = "_mp_section"
 
-# Dua kejujuran yang WAJIB tampil, masing-masing satu baris.
-#: Kunci katalog untuk kedua catatan; konstanta di bawah tetap acuan.
-STATIC_CHECK_NOTE_KEY = "mp.static_check_note"
-NEW_VERSION_NOTE_KEY = "mp.edit_note"
-
-STATIC_CHECK_NOTE = (
-    "Pemeriksaan bersifat **statis** — berkas dibaca, tidak dijalankan; ia "
-    "menyaring masalah umum, bukan jaminan mutlak, jadi tinjauan manusia tetap "
-    "diperlukan."
-)
+#: Dibaca tepat sebelum tombol Simpan pada PENYUNTING — di situlah "menyunting
+#: membuat versi baru" benar-benar menjadi keputusan. Ia tidak lagi ikut
+#: tergambar di halaman peninjauan: di sana tidak ada yang disunting, jadi
+#: kalimat itu hanya menambah paragraf pada halaman yang sudah padat.
 NEW_VERSION_NOTE = (
     "Menyunting membuat **versi baru**; versi yang sudah dipakai eksperimen "
     "sebelumnya tidak berubah dan tetap dapat ditelusuri."
@@ -215,6 +210,115 @@ def active_rows() -> list[dict]:
     return out
 
 
+#: Pipeline terdaftar yang sedang dibuka halamannya. Berawalan `_mp_` sehingga
+#: `page_flags.VIEW_STATE_PREFIXES` sudah membuangnya saat pengguna berpindah
+#: halaman — tidak perlu mekanisme baru.
+_OPEN_PIPELINE_KEY = "_mp_open_pipeline"
+
+
+def detail_open() -> bool:
+    """Apakah sebuah tampilan DALAM sedang menggantikan daftarnya.
+
+    Empat keadaan, semuanya "satu hal pada satu waktu": halaman satu pipeline,
+    penyunting berkas, perbandingan versi. Masing-masing menggambar tombol
+    kembalinya SENDIRI, jadi pembungkus halaman tidak boleh menggambar tombol
+    kembali kedua di atasnya — dua tombol kembali bertumpuk dengan tujuan
+    berbeda tidak memberi tahu pembacanya yang mana yang ia maksud.
+    """
+    return any(st.session_state.get(key) for key in
+               (_OPEN_PIPELINE_KEY, _EDIT_KEY, _COMPARE_KEY))
+
+
+def open_pipeline(pipeline_id: str) -> None:
+    """Buka halaman satu pipeline. Dipanggil dari CALLBACK tombol."""
+    st.session_state[_OPEN_PIPELINE_KEY] = pipeline_id
+
+
+def close_pipeline() -> None:
+    st.session_state.pop(_OPEN_PIPELINE_KEY, None)
+    # Kunci grid diganti, jika tidak barisnya masih tercentang dan halaman
+    # yang barusan ditutup langsung terbuka kembali.
+    st.session_state[_GRID_NONCE_KEY] =         st.session_state.get(_GRID_NONCE_KEY, 0) + 1
+
+
+def _render_pipeline_page(summary: dict, user: dict) -> None:
+    """Halaman satu pipeline terdaftar: peninjauan PENUH.
+
+    Berbeda dari daftar sebelumnya yang hanya membawa aksi, halaman ini memuat
+    kartu peninjauan lengkap — berkas, temuan, langkah uji coba, dan keputusan.
+    Pipeline yang sudah terdaftar karena itu dapat ditinjau ulang langsung dari
+    sini, tanpa harus dinonaktifkan lebih dulu.
+
+    Menyetujui dari sini menghasilkan VERSI BARU lewat jalur yang sudah ada;
+    versi lama tidak pernah ditimpa, dan konvensi yang berlaku (lihat
+    ``pipeline_versions.save_new_version``) menonaktifkannya sebagai versi yang
+    digantikan.
+    """
+    st.button(t("ap.btn_back_to_pipelines"), key="mp_back_pipeline",
+              on_click=close_pipeline)
+
+    # Blok identitas & aksi yang sudah ada dipakai ulang apa adanya.
+    _render_pipeline_block(summary, user)
+    _render_delete(summary, user)
+
+    # Kartu peninjauan penuh, bila pipeline ini memang lahir dari sebuah
+    # pengajuan. Versi hasil PENYUNTINGAN tidak punya pengajuan — itu fakta,
+    # bukan data yang hilang, dan dinyatakan apa adanya.
+    submission_id = _submission_of(summary)
+    if not submission_id:
+        # `prose`, bukan `caption`: ini kalimat penjelasan setara bagian lain
+        # di halaman ini, dan kuota teks kecil per halaman = 3.
+        prose(t("mp.no_submission_behind"), key="mp_no_submission")
+        return
+
+    from orchestrator.submission_service import get_submission
+
+    item = _safe(lambda: get_submission(submission_id), default=_UNREAD)
+    if item is _UNREAD:
+        prose(t("mp.submission_unreadable"), key="mp_submission_unreadable")
+        return
+    if not item:
+        # Pengajuannya DIHAPUS — keadaan yang berbeda dari "tidak terbaca",
+        # dan tindakannya juga berbeda: tidak ada yang perlu diperiksa di log.
+        prose(t("mp.submission_deleted"), key="mp_submission_deleted")
+        return
+
+    st.divider()
+    from ui.views.contribute import render_review_body
+
+    render_review_body(item, user)
+
+
+#: Naik satu setiap kali halaman pipeline ditutup. Nilainya ikut ke kunci
+#: grid, sehingga tabelnya digambar ulang TANPA baris yang masih tercentang di
+#: sisi frontend. Tanpa ini, "kembali ke daftar" langsung membuka lagi
+#: pipeline yang barusan ditutup — halaman yang tidak dapat ditinggalkan.
+_GRID_NONCE_KEY = "_mp_grid_nonce"
+
+
+def _render_pipeline_grid(summaries: list[dict]) -> None:
+    """Daftar pipeline terdaftar: SATU tabel, barisnya dapat dipilih.
+
+    Bentuknya sama persis dengan riwayat eksperimen dan antrean peninjauan —
+    lihat `ui.components.grid`. Tidak ada pembacaan disk maupun basis data di
+    sini: `active_rows()` sudah menyusun semuanya, jadi menambah pipeline
+    tidak menambah pekerjaan berat pada penggambaran daftar.
+
+    Yang nonaktif TIDAK dipisah ke daftar sendiri: `active_rows()` sudah
+    mengurutkan yang aktif lebih dulu, dan kolom "Status" menyebut keadaannya
+    apa adanya — termasuk sebab sebuah pipeline dianggap rusak. Satu tabel
+    berarti kesepuluh pipeline dapat diurutkan dan dibandingkan berdampingan,
+    yang justru mustahil ketika keduanya terpisah.
+    """
+    nonce = st.session_state.get(_GRID_NONCE_KEY, 0)
+    chosen = grid.render(rv.ACTIVE_COLUMNS, rv.active_table_rows(summaries),
+                         id_key="pipeline_id",
+                         key=f"active_pipelines_grid_{nonce}")
+    if chosen is not None:
+        open_pipeline(chosen)
+        st.rerun()
+
+
 def _render_pipeline_block(summary: dict, user: dict) -> None:
     """Satu pipeline kontribusi: identitas, ketertelusuran, aksi."""
     mark = rv.STATE_MARK.get(summary["state"], "·")
@@ -284,6 +388,13 @@ def _render_pipeline_actions(summary: dict, user: dict) -> None:
             else:
                 st.rerun()
 
+        # Pipeline yang dinonaktifkan sering dinonaktifkan KARENA bermasalah,
+        # dan sampai sekarang satu-satunya jalan memperbaikinya adalah menyunting
+        # berkasnya. Peninjauan penuh — uji coba, temuan, keputusan — tidak
+        # pernah dapat diulang. Di sinilah jalan itu dibuka; versi yang sudah
+        # terdaftar TIDAK disentuh.
+        _render_reopen(summary, user)
+
     # Riwayat adalah BAGIAN tersendiri: berpindah ke sana lewat callback,
     # bukan membentang tabel di tengah daftar pipeline.
     cols[2].button(t("ap.btn_history"), key=f"mp_hist_{pipeline_id}",
@@ -295,6 +406,134 @@ def _render_pipeline_actions(summary: dict, user: dict) -> None:
 
     if st.session_state.get(_CONFIRM_OFF_KEY) == pipeline_id:
         _render_deactivate_confirm(summary, user)
+
+
+def _submission_of(summary: dict):
+    """`submission_id` asal keluarga versi ini, atau None.
+
+    Ditelusuri dari versi TERTUA ke terbaru: versi 1 lahir dari persetujuan dan
+    membawa pengajuannya; versi berikutnya lahir dari penyuntingan dan tidak.
+    """
+    versions = summary.get("versions") or []
+    ids = [v.get("pipeline_id") for v in versions if isinstance(v, dict)]
+    ids.append(summary.get("pipeline_id"))
+    for pipeline_id in ids:
+        if not pipeline_id:
+            continue
+        row = _safe(lambda pid=pipeline_id: get_registered(pid))
+        if row and row.get("submission_id"):
+            return row["submission_id"]
+    return None
+
+
+_CONFIRM_DEL_KEY = "_mp_confirm_delete"
+
+
+def _render_delete(summary: dict, user: dict) -> None:
+    """Tombol "Hapus versi" + konfirmasinya.
+
+    Aturan boleh/tidaknya dijawab ``pipeline_versions.delete_blocker`` — satu
+    tempat, dipakai di sini untuk menonaktifkan tombol beserta alasannya dan
+    dipakai fungsi aksinya untuk menolak. Menyembunyikan tombol tidak pernah
+    menjadi satu-satunya penghalang.
+    """
+    from orchestrator.pipeline_versions import delete_blocker, delete_version
+
+    pipeline_id = summary["pipeline_id"]
+    blocker = _safe(lambda: delete_blocker(pipeline_id))
+    # Tidak tahu = TOLAK. Menghapus sesuatu yang mungkin dipakai eksperimen
+    # jauh lebih merusak daripada menahan penghapusan yang sebenarnya aman.
+    if blocker is None:
+        blocker = "mp.delete_blocked_used"
+
+    if st.session_state.get(_CONFIRM_DEL_KEY) == pipeline_id:
+        st.warning(t("mp.delete_confirm", name=summary["name"],
+                     version=summary["version"]))
+        confirm = st.columns([1, 1, 3])
+        if confirm[0].button(t("mp.btn_delete_version"),
+                             key=f"mp_del_yes_{pipeline_id}", type="primary",
+                             use_container_width=True):
+            try:
+                delete_version(pipeline_id, actor=user)
+            except (AuthError, PipelineEditError) as e:
+                st.error(error_message(e))
+            except Exception as e:
+                logger.exception("Penghapusan %s gagal tak terduga", pipeline_id)
+                st.error(t("ap.err_unexpected", kind=type(e).__name__))
+            else:
+                st.session_state.pop(_CONFIRM_DEL_KEY, None)
+                close_pipeline()
+                st.success(t("mp.msg_version_deleted", name=summary["name"],
+                             version=summary["version"]))
+                st.rerun()
+        if confirm[1].button(t("action.cancel"), key=f"mp_del_no_{pipeline_id}",
+                             use_container_width=True):
+            st.session_state.pop(_CONFIRM_DEL_KEY, None)
+            st.rerun()
+        return
+
+    if st.button(t("mp.btn_delete_version"), key=f"mp_del_{pipeline_id}",
+                 use_container_width=True, disabled=bool(blocker),
+                 help=t(blocker) if blocker else t("mp.delete_confirm",
+                                                   name=summary["name"],
+                                                   version=summary["version"])):
+        st.session_state[_CONFIRM_DEL_KEY] = pipeline_id
+        st.rerun()
+
+
+def _render_reopen(summary: dict, user: dict) -> None:
+    """Tombol "Tinjau ulang" pada pipeline yang sedang nonaktif.
+
+    Aturan boleh/tidaknya dijawab ``submission_service.reopen_blocker`` — satu
+    tempat, dipakai tampilan untuk menonaktifkan tombol beserta alasannya dan
+    dipakai fungsi aksinya untuk menolak. Menyembunyikan tombol tidak pernah
+    menjadi satu-satunya penghalang.
+    """
+    from orchestrator.submission_service import (
+        SubmissionError, get_submission, reopen_blocker, reopen_submission,
+    )
+
+    # `summary` tidak membawa `submission_id` — ia meringkas registry, bukan
+    # antrean. Pengajuannya dicari lewat KELUARGA versi pipeline ini: hanya
+    # versi yang lahir dari PERSETUJUAN yang punya `submission_id`; versi hasil
+    # penyuntingan tidak, dan itu fakta, bukan data yang hilang.
+    submission_id = _submission_of(summary)
+    if not submission_id:
+        return
+
+    item = _safe(lambda: get_submission(submission_id))
+    if not item:
+        return
+
+    blocker = reopen_blocker(item)
+    if st.button(t("ap.btn_reopen"), key=f"mp_reopen_{summary['pipeline_id']}",
+                 use_container_width=True, disabled=bool(blocker),
+                 help=t(blocker) if blocker else t("ap.help_reopen")):
+        try:
+            reopen_submission(submission_id, actor=user)
+        except (AuthError, SubmissionError) as e:
+            st.error(error_message(e))
+        except Exception as e:
+            logger.exception("Tinjau ulang pengajuan #%s gagal tak terduga",
+                             submission_id)
+            st.error(t("ap.err_unexpected", kind=type(e).__name__))
+        else:
+            st.success(t("ap.msg_reopened", number=submission_id))
+            st.rerun()
+
+
+#: Penanda "pembacaan GAGAL" — dibedakan dari `None`, yang di sini merupakan
+#: jawaban yang sah ("pengajuannya sudah dihapus").
+_UNREAD = object()
+
+
+def _safe(fn, *, default=None):
+    """Bacaan yang tidak boleh menjatuhkan daftar pipeline."""
+    try:
+        return fn()
+    except Exception:
+        logger.exception("Pembacaan gagal pada blok pipeline")
+        return default
 
 
 def _render_deactivate_confirm(summary: dict, user: dict) -> None:
@@ -328,28 +567,45 @@ def render_active(user: dict) -> None:
         render_editor(user)
         return
 
+    # Halaman SATU pipeline menggantikan daftarnya — bukan disisipkan di
+    # tengahnya, mengikuti pola yang sudah dipakai penyunting dan perbandingan
+    # versi.
+    open_id = st.session_state.get(_OPEN_PIPELINE_KEY)
+    if open_id:
+        summary = next((r for r in active_rows()
+                        if r["pipeline_id"] == open_id), None)
+        if summary is None:
+            # Sudah tidak terdaftar (baru dihapus/diganti). Kembali ke daftar
+            # alih-alih menggambar halaman kosong.
+            close_pipeline()
+        else:
+            _render_pipeline_page(summary, user)
+            return
+
     render_section("Aktif",
                    help=t("ap.help_active_list"))
     summaries = active_rows()
 
-    # IKHTISAR dulu: seluruh pipeline berdampingan dalam satu tabel, memakai
-    # angka yang memang sudah dihitung. Blok per pipeline di bawahnya tetap ada
-    # karena ia membawa AKSI (sunting, nonaktifkan, riwayat) — widget Streamlit
-    # tidak dapat hidup di dalam sel tabel HTML.
-    tbl.render_table(rv.ACTIVE_COLUMNS, rv.active_table_rows(summaries),
-                     empty=t(rv.EMPTY_STATE_KEY))
+    # SATU tabel, bukan tabel-mati DITAMBAH tumpukan tombol. Sebelumnya kedua
+    # benda itu digambar berurutan dengan isi yang sama persis, dan yang dapat
+    # diklik justru yang tidak berkolom — tidak dapat diurutkan, tidak dapat
+    # dibandingkan berdampingan. Aksinya (sunting, nonaktifkan, riwayat)
+    # tinggal di HALAMAN pipeline yang terbuka saat barisnya dipilih; widget
+    # Streamlit memang tidak dapat hidup di dalam sel tabel, dan memaksakannya
+    # justru melahirkan dua daftar.
+    if not summaries:
+        prose(t(rv.EMPTY_STATE_KEY), key="mp_active_empty")
+        return
 
-    live = [s for s in summaries if s["is_active"]]
+    _render_pipeline_grid(summaries)
+
+    # Kolom "Status" menyebut sebuah pipeline nonaktif, tetapi tidak menyebut
+    # AKIBATNYA. Ketika yang nonaktif masih punya sub-judul sendiri, kalimat
+    # ini melekat di sana; setelah keduanya menjadi satu tabel, ia harus tetap
+    # tertulis — jika tidak, "nonaktif" berubah menjadi kata tanpa arti.
     idle = [s for s in summaries if not s["is_active"]]
-
-    for summary in live:
-        _render_pipeline_block(summary, user)
-
     if idle:
-        st.divider()
-        st.markdown(t("mp.idle_heading", count=len(idle)))
-        for summary in idle:
-            _render_pipeline_block(summary, user)
+        prose(t("mp.idle_heading", count=len(idle)), key="mp_idle_note")
 
 
 # ── Bagian: Riwayat versi ───────────────────────────────────────────────
@@ -494,7 +750,21 @@ def _render_diff(diff_rows: list[dict], left_label: str,
 
 
 def render_history() -> None:
-    """Bagian "Riwayat versi" — tabel, atau tampilan perbandingan."""
+    """Bagian "Riwayat versi": riwayat VERSI, lalu riwayat TINJAUAN.
+
+    Keduanya menjawab pertanyaan yang sama — "apa yang sudah terjadi" — jadi
+    keduanya tinggal di sini. Sebelumnya riwayat tinjauan terdampar di ujung
+    tab "Menunggu tinjauan", yaitu tempat orang datang untuk MEMUTUSKAN; yang
+    sudah diputuskan justru mengganggu di sana dan hilang dari tempat orang
+    benar-benar mencarinya.
+    """
+    if _render_version_history():       # perbandingan MENGGANTIKAN bagian ini
+        return
+    _render_review_history()
+
+
+def _render_version_history() -> bool:
+    """Riwayat versi. True bila tampilan perbandingan mengambil alih bagian."""
     render_section("Riwayat versi",
                    help=t("ap.help_history_columns"))
 
@@ -504,7 +774,7 @@ def render_history() -> None:
         name = names[0] if names else None
     if not name:
         prose(t(rv.EMPTY_STATE_KEY), key="hist_empty")
-        return
+        return False
 
     if len(names) > 1:
         _drop_stale(_HISTORY_PICK_KEY, names)
@@ -515,14 +785,15 @@ def render_history() -> None:
     versions = version_history(name)
     if not versions:
         prose(t("mp.history_empty", pipeline=name), key="hist_none")
-        return
+        return False
 
     rows = rv.history_rows(versions, experiment_counts())
 
-    # Perbandingan MENGGANTIKAN isi bagian ini, bukan disisipkan di tengahnya.
+    # Perbandingan MENGGANTIKAN isi bagian ini, bukan disisipkan di tengahnya
+    # — termasuk riwayat tinjauan di bawahnya.
     if st.session_state.get(_COMPARE_KEY):
         _render_compare(rows, name)
-        return
+        return True
 
     render_facts([
         ("Pipeline", name),
@@ -539,6 +810,41 @@ def render_history() -> None:
                  help=t("ap.help_show_diff")):
         st.session_state[_COMPARE_KEY] = True
         st.rerun()
+    return False
+
+
+def _render_review_history() -> None:
+    """Riwayat TINJAUAN: pengajuan yang sudah diputuskan.
+
+    TABEL, bukan daftar markdown datar. Tiga hal yang SUDAH tersimpan tetapi
+    tidak pernah tampil kini ada: kapan diputuskan, siapa yang mengajukan, dan
+    bagaimana hasil uji cobanya — justru itu yang dicari saat membaca riwayat,
+    dan sebelumnya harus dibuka satu per satu untuk menemukannya.
+
+    Batas 15 DIPERTAHANKAN, bukan diganti paginasi: riwayat dibaca sebagai "apa
+    yang terjadi belakangan ini", bukan ditelusuri seperti antrean. Yang lebih
+    lama tetap ada di basis data dan tidak dihapus apa pun.
+    """
+    from database.models import SUBMISSION_PENDING
+    from orchestrator.submission_service import list_submissions
+    from ui.components import submission_review as sr
+    from ui.components import tables as tbl
+
+    st.divider()
+    try:
+        decided = [s for s in list_submissions()
+                   if s["status"] != SUBMISSION_PENDING]
+    except Exception:                       # pragma: no cover - defensive
+        logger.warning("Riwayat tinjauan tidak terbaca", exc_info=True)
+        return
+
+    st.markdown(t("ap.review_history_heading")
+                + ("" if decided else t("ap.review_history_empty")))
+    if decided:
+        tbl.render_table(sr.HISTORY_COLUMNS,
+                         sr.history_rows(decided[:15],
+                                         status_label=sr.status_label),
+                         empty=t("ap.review_history_empty"))
 
 
 # ── Penyunting berkas ─────────────────────────────────────────────────────

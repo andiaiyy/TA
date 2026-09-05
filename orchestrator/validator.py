@@ -26,7 +26,8 @@ class ValidationResult:
     errors: list[str] = field(default_factory=list)
 
 
-def validate_dataset(df: pd.DataFrame, dataset_type: str) -> ValidationResult:
+def validate_dataset(df: pd.DataFrame, dataset_type: str, *,
+                     schema: dict | None = None) -> ValidationResult:
     """
     Validate a DataFrame against a dataset schema.
 
@@ -42,11 +43,20 @@ def validate_dataset(df: pd.DataFrame, dataset_type: str) -> ValidationResult:
     Args:
         df: Parsed DataFrame (headers already stripped).
         dataset_type: e.g. "HIKARI2021".
+        schema: OPSIONAL. Skema yang sudah diselesaikan pemanggil.
+            Modul ini tidak boleh mengimpor ``database/`` (lihat batasan
+            impor di atas), sementara skema research pipeline TERUNGGAH
+            hanya ada di basis data. Jadi pemanggil yang memang boleh
+            membacanya (``orchestrator/validation_service.py``) yang
+            menyodorkannya ke sini. Tanpa itu, pencarian statis dipakai
+            seperti sebelumnya — perilaku pemanggil lama tidak berubah
+            sama sekali.
 
     Returns:
         ValidationResult with all fields populated.
     """
-    schema = get_schema(dataset_type)
+    if schema is None:
+        schema = get_schema(dataset_type)
 
     if schema is None:
         return ValidationResult(

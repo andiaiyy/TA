@@ -16,7 +16,7 @@ from config.research_attribution import (
 )
 from contracts.dataset_schemas import supported_datasets
 from ui.views.contribute import (
-    DATASET_EXTENSIONS, _algorithms_for, _dataset_label, safe_dataset_name,
+    DATASET_EXTENSIONS, _algorithms_for, safe_dataset_name,
 )
 
 
@@ -47,11 +47,22 @@ def test_short_label_falls_back_for_an_unknown_type():
     assert get_research_short_label("NOT_A_TYPE") == "NOT_A_TYPE"
 
 
-def test_dataset_label_maps_types_and_passes_through_the_other_option():
-    from ui.views.contribute import _OTHER_DATASET_OPTION
+def test_the_upload_form_no_longer_offers_a_research_pipeline_to_join():
+    """Label dropdown itu ADA karena dahulu ada dropdownnya. Pertanyaan "ikut
+    research pipeline mana" sudah dibuang — setiap unggahan berdiri sendiri —
+    jadi penolongnya ikut dibuang, bukan ditinggal sebagai kode mati.
 
-    assert _dataset_label("HIKARI2021") == get_research_short_label("HIKARI2021")
-    assert _dataset_label(_OTHER_DATASET_OPTION) == _OTHER_DATASET_OPTION
+    Label beratribusi ringkas sendiri TETAP dipakai di tempat lain; yang hilang
+    hanyalah pemilihnya.
+    """
+    from pathlib import Path as _P
+
+    src = (_P(__file__).resolve().parents[1] / "ui" / "views"
+           / "contribute.py").read_text(encoding="utf-8")
+    for gone in ("_dataset_label", "_OTHER_DATASET_OPTION",
+                 "ap.lbl_research_pipeline", "ap.lbl_target_dataset"):
+        assert gone not in src, gone
+    assert "get_research_short_label(" in src
 
 
 # ── dataset_type → algorithms, straight from the registry ─────────────────

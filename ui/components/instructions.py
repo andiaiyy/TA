@@ -699,8 +699,12 @@ def render_dataset_instructions() -> None:
     Panel persyaratan LENGKAP milik halaman Run Experiment tetap dipakai apa
     adanya di dalam expander — satu sumber, dua tempat, tanpa duplikasi teks.
     """
-    from contracts.dataset_schemas import supported_datasets
-    from config.research_attribution import get_research_short_label
+    from orchestrator.research_registry import (
+        all_dataset_types as supported_datasets,
+    )
+    from orchestrator.research_registry import (
+        short_label_for as get_research_short_label,
+    )
     from ui.views.run_experiment import _render_dataset_requirements
 
     from ui.i18n import t

@@ -132,12 +132,18 @@ def test_mandatory_notes_keep_their_meaning_in_both_languages(key, id_ideas,
         assert idea.lower() in en_text, (key, "en", idea)
 
 
-def test_the_two_platform_wide_honesty_notes_survive():
-    """Dua kejujuran yang harus tetap terbaca: statis, dan versi baru."""
-    assert "statis" in mp.STATIC_CHECK_NOTE
-    assert "bukan jaminan mutlak" in mp.STATIC_CHECK_NOTE
+def test_the_honesty_note_survives_where_it_is_decided():
+    """Kejujuran tidak dihapus — ia DIPINDAH ke tempat keputusannya diambil.
+
+    Dahulu dua kalimat berdiri berdampingan di kepala setiap tampilan
+    peninjauan, terbaca sebelum pembacanya tahu ia sedang melihat apa. Yang
+    tentang pemeriksaan statis dibuang; yang tentang versi baru bertahan, dan
+    tempatnya kini tepat sebelum tombol Simpan pada penyunting — di situlah
+    "menyunting membuat versi baru" benar-benar menjadi keputusan.
+    """
     assert "versi baru" in mp.NEW_VERSION_NOTE
     assert "tidak berubah" in mp.NEW_VERSION_NOTE
+    assert not hasattr(mp, "STATIC_CHECK_NOTE")
 
 
 # ── Pengenal TIDAK ikut diterjemahkan ────────────────────────────────────

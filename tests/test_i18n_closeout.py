@@ -194,8 +194,6 @@ MANDATORY = [
     ("ins.anti_leak_note", ["split", "data latih"], ["split", "training data"]),
     ("ins.forbidden_frame", ["dikendalikan pengguna", "dapat diulang"],
      ["user-controlled", "reproduced"]),
-    ("mp.static_check_note", ["statis", "tidak dijalankan"],
-     ["static", "not executed"]),
     ("rpt.note_antileak_hikari", ["hanya", "data latih"],
      ["training data only"]),
     ("rpt.note_label_origin_eve", ["bukan kebenaran lapangan eksternal"],

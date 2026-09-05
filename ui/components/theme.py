@@ -831,6 +831,87 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
 /* Bagian tak berubah: tenang, supaya perubahan yang menonjol. */
 .ids-diff-equal {{ opacity: .72; }}
 
+/* ── Halaman peninjauan satu pengajuan ───────────────────────────────────
+   Warna di sini MENANDAI KEADAAN, tidak menghias — aturan yang sama yang
+   sudah berlaku pada chip katalog (`ids-cat-chip-broken/-warn`) dan pada
+   diff versi. Tiga keadaan, dan bedanya berakibat nyata bagi peninjau:
+   lolos, lolos dengan peringatan, dan ada masalah.
+
+   Ronanya `rgba` beralfa rendah, jadi ia menjadi pastel di tema terang dan
+   rona tipis di tema gelap tanpa perlu dua definisi. Warna TIDAK PERNAH
+   menjadi satu-satunya pembawa keterangan: tiap blok tetap memuat kalimat
+   keadaannya, sehingga tetap terbaca tanpa melihat warna sama sekali. */
+.ids-rv-head {{
+    border-left: .22rem solid var(--ids-rv-line, rgba(127,127,127,.5));
+    background: var(--ids-rv-tint, rgba(127,127,127,.06));
+    border-radius: .35rem;
+    padding: .6rem .85rem;
+    margin: .15rem 0 .75rem;
+}}
+.ids-rv-name {{
+    font-size: {FONT_SECTION};
+    font-weight: {WEIGHT_STRONG};
+    line-height: 1.3;
+}}
+.ids-rv-verdict {{
+    font-size: {FONT_BODY};
+    font-weight: {WEIGHT_STRONG};
+    color: var(--ids-rv-line, inherit);
+    margin-top: .1rem;
+}}
+.ids-rv-meta {{
+    font-size: {FONT_CAPTION};
+    opacity: .72;
+    margin-top: .15rem;
+}}
+
+/* Kepala satu berkas paket — menggantikan label expander yang dibuang. */
+.ids-rv-file {{
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .5rem;
+    border-left: .18rem solid var(--ids-rv-line, rgba(127,127,127,.45));
+    padding: .3rem .6rem;
+    margin: .9rem 0 .4rem;
+    background: var(--ids-rv-tint, rgba(127,127,127,.05));
+    border-radius: .25rem;
+}}
+.ids-rv-fname {{ font-weight: {WEIGHT_STRONG}; }}
+.ids-rv-ftail {{ font-size: {FONT_CAPTION}; opacity: .72; }}
+
+/* Ketiga keadaan. Hijau/kuning/merah yang SAMA dengan yang sudah dipakai
+   di tempat lain, supaya "merah" berarti hal yang sama di seluruh aplikasi. */
+.ids-rv-ok {{
+    --ids-rv-line: rgba(46,160,67,.9);
+    --ids-rv-tint: rgba(46,160,67,.10);
+}}
+.ids-rv-warn {{
+    --ids-rv-line: rgba(200,150,60,.95);
+    --ids-rv-tint: rgba(200,150,60,.12);
+}}
+.ids-rv-bad {{
+    --ids-rv-line: rgba(200,70,70,.9);
+    --ids-rv-tint: rgba(200,70,70,.12);
+}}
+
+/* Dua zona. Bedanya BUKAN selera tata letak: keliru mengira zona kerja
+   sebagai zona baca berarti menekan tombol yang mengubah keadaan sambil
+   mengira sedang membaca. Zona baca tenang; zona kerja ditandai. */
+.ids-zone {{
+    font-size: {FONT_CAPTION};
+    font-weight: {WEIGHT_STRONG};
+    letter-spacing: .05em;
+    padding: .1rem 0 .45rem;
+    margin-bottom: .35rem;
+    border-bottom: 1px solid rgba(127,127,127,.22);
+}}
+.ids-zone-read {{ opacity: .62; }}
+.ids-zone-work {{
+    color: rgb(59,130,246);
+    border-bottom-color: rgba(59,130,246,.45);
+}}
+
 @media (prefers-reduced-motion: reduce) {{
     .stButton > button, .stDownloadButton > button,
     [data-testid="stPopover"] > button, .ids-clickable,

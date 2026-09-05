@@ -135,6 +135,45 @@ class DatasetSample:
 
 # ── Structured-source helpers (lazy + defensive: never break the UI) ───────
 
+# ── Sumber skema: DISUNTIKKAN, bukan diimpor ──────────────────────────────
+# Modul ini tidak boleh mengimpor ``database/`` (lihat batasan impor di atas),
+# sementara skema research pipeline TERUNGGAH hanya ada di basis data. Jadi
+# pemanggil yang memang boleh membacanya menyodorkan pembacanya lewat
+# :func:`use_schema_source`; tanpa itu, sumber STATIS dipakai persis seperti
+# sebelumnya. Aturan diagnosa sendiri tidak berubah sama sekali — yang berubah
+# hanya dari mana skemanya datang.
+_SCHEMA_READER = None
+_TYPES_READER = None
+
+
+def use_schema_source(schema_reader=None, types_reader=None) -> None:
+    """Pasang sumber skema & daftar jenis. ``None`` mengembalikan ke statis."""
+    global _SCHEMA_READER, _TYPES_READER
+    _SCHEMA_READER = schema_reader
+    _TYPES_READER = types_reader
+
+
+def _schema(dataset_type):
+    """Skema satu jenis, dari sumber yang terpasang. Tidak pernah melempar."""
+    if _SCHEMA_READER is not None:
+        try:
+            return _SCHEMA_READER(dataset_type)
+        except Exception:               # pragma: no cover - defensif
+            logger.warning("Sumber skema tersuntik gagal untuk %s",
+                           dataset_type, exc_info=True)
+    return get_schema(dataset_type)
+
+
+def _known_types():
+    """Daftar jenis, dari sumber yang terpasang. Tidak pernah melempar."""
+    if _TYPES_READER is not None:
+        try:
+            return list(_TYPES_READER())
+        except Exception:               # pragma: no cover - defensif
+            logger.warning("Sumber daftar jenis tersuntik gagal", exc_info=True)
+    return list(supported_datasets())
+
+
 def _hikari_drop_cols() -> list[str]:
     """Non-feature columns HIKARI preprocessing drops (uid, IPs, traffic_category,
     index artifacts). Read from the pipeline itself so the dtype check does not
@@ -163,7 +202,7 @@ def required_format(dataset_type: str) -> str:
     """"csv" or "ndjson", derived from the schema exactly as the UI's type icon
     does: a schema that declares expected_top_level_keys is a per-line JSON
     format; anything else is tabular CSV."""
-    schema = get_schema(dataset_type) or {}
+    schema = _schema(dataset_type) or {}
     if schema.get("expected_top_level_keys") or schema.get("file_format") in ("json", "json_or_csv"):
         return "ndjson"
     return "csv"
@@ -370,7 +409,7 @@ def diagnose_dataset(dataset_path: str, dataset_type: str,
     if sample is None:
         sample = read_dataset_sample(dataset_path)
 
-    schema = get_schema(dataset_type)
+    schema = _schema(dataset_type)
     base = {
         "dataset_type": dataset_type,
         "rows_read": sample.rows_read,
@@ -700,8 +739,8 @@ def build_profile(sample: DatasetSample) -> dict:
 
     # Kolom label = kolom label skema mana pun yang benar-benar ADA di berkas.
     present = set(sample.columns)
-    for dtype in supported_datasets():
-        label_col = (get_schema(dtype) or {}).get("label_column")
+    for dtype in _known_types():
+        label_col = (_schema(dtype) or {}).get("label_column")
         if label_col and label_col in present:
             profile["label_column"] = label_col
             break
@@ -735,7 +774,7 @@ def diagnose_all(dataset_path: str, max_rows: int = SAMPLE_ROWS) -> dict:
     """
     sample = read_dataset_sample(dataset_path, max_rows=max_rows)
     results = {dt: diagnose_dataset(dataset_path, dt, sample=sample)
-               for dt in supported_datasets()}
+               for dt in _known_types()}
     # Profil deskriptif disusun dari sampel yang SAMA (tanpa pembacaan baru),
     # selagi frame-nya masih ada. Murni tambahan untuk tampilan — tidak dipakai
     # oleh pemeriksaan mana pun, jadi tidak ada verdict yang berubah.

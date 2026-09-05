@@ -357,13 +357,62 @@ def test_the_history_table_right_aligns_the_numbers_and_keeps_full_hashes(env):
         assert f'title="{row["hash"]}"' in table        # penuh di tooltip
 
 
+def _code_only(source: str, *names: str) -> str:
+    """Kode fungsi-fungsi itu TANPA docstring dan komentar.
+
+    Yang dijaga di bawah adalah tidak adanya AKSI yang mengubah versi. Memindai
+    teks mentah menyamakan `delete_version(...)` dengan kalimat "tidak dihapus
+    apa pun" di dalam docstring — larangan yang menangkap penjelasan, bukan
+    perbuatan, dan akan memaksa penulisnya berputar-putar menghindari kata.
+    """
+    import ast
+
+    tree = ast.parse(source)
+    wanted = {n: None for n in names}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in wanted:
+            wanted[node.name] = node
+    missing = [n for n, v in wanted.items() if v is None]
+    assert not missing, f"fungsi tidak ditemukan: {missing}"
+
+    out = []
+    for node in wanted.values():
+        stripped = ast.parse(ast.unparse(node)).body[0]
+        for inner in ast.walk(stripped):
+            body = getattr(inner, "body", None)
+            if (isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                   ast.ClassDef, ast.Module))
+                    and body and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
+                    and isinstance(body[0].value.value, str)):
+                inner.body = body[1:] or [ast.Pass()]
+        out.append(ast.unparse(stripped))
+    return chr(10).join(out)
+
+
 def test_the_history_offers_no_way_to_change_a_version():
-    body = PAGE_SRC.split("def render_history(")[1].split(chr(10) + "def ")[0]
+    # Seluruh isi tab diperiksa — riwayat versi MAUPUN riwayat tinjauan yang
+    # kini menyusul di bawahnya.
+    body = _code_only(PAGE_SRC, "_render_version_history",
+                      "_render_review_history")
     for forbidden in ("save_new_version", "set_pipeline_active", "delete",
                       "hapus", "rollback", "putar balik"):
         assert forbidden not in body, forbidden
     assert "READ_ONLY_NOTE" in body
     assert "RETENTION_NOTE" in body
+
+
+def test_the_forbidden_word_scan_would_actually_catch_something():
+    """Penjaga anti-hampa: pemindaian yang membuang docstring tidak boleh ikut
+    membuang kodenya."""
+    src = chr(10).join([
+        "def f():",
+        '    """hapus tidak pernah terjadi di sini."""',
+        "    return delete_version(1)",
+    ])
+    body = _code_only(src, "f")
+    assert "hapus" not in body           # docstring dibuang…
+    assert "delete_version" in body      # …kodenya TIDAK
 
 
 def test_the_read_only_note_points_at_the_right_path():
@@ -521,7 +570,8 @@ render()
 '''
 
 
-def _run(tmp_path, *, seed: bool, section: str = "Aktif"):
+def _run(tmp_path, *, seed: bool, section: str = "Aktif",
+         open_pipeline: str | None = None):
     """Jalankan halaman pada SATU bagian, lalu KEMBALIKAN state global.
 
     ``section`` wajib dipilih sejak dulu bagian-bagiannya benar-benar saling
@@ -552,6 +602,8 @@ def _run(tmp_path, *, seed: bool, section: str = "Aktif"):
         at.session_state[login.SESSION_USER_KEY] = ADMIN
         at.session_state[mp.SECTION_KEY] = section
         at.session_state["_mp_section_last"] = section
+        if open_pipeline:
+            at.session_state["_mp_open_pipeline"] = open_pipeline
         at.run()
         assert at.exception is None or not at.exception, at.exception
         return at
@@ -568,12 +620,27 @@ def test_both_sections_render_for_a_research_admin(tmp_path):
     bagian dipilih secara eksplisit, sehingga test ini membuktikan penyajinya
     benar-benar bekerja alih-alih menumpang kebocoran.
     """
+    # Daftar "Aktif" kini berupa SATU tabel yang barisnya dapat dipilih:
+    # namanya hidup di dalam tabel, dan tombol aksinya pindah ke halaman
+    # pipeline yang terbuka setelah sebuah baris dipilih.
+    import grid_probe
+
     active = _run(tmp_path, seed=True, section="Aktif")
-    text = " ".join(m.value for m in active.markdown)
-    assert "contoh" in text                             # bagian Aktif
-    assert "eksperimen" in text
-    labels = {b.label for b in active.button}
-    assert {"Sunting", "Nonaktifkan", "Riwayat"} <= labels
+    assert grid_probe.count(active) == 1, "daftar aktif bukan satu tabel"
+    names = [r.get("Pipeline") for r in grid_probe.rows(active)]
+    assert any("contoh" in (n or "") for n in names), names
+    # Aksinya TIDAK lagi menumpuk di daftar.
+    listed = {b.label for b in active.button}
+    assert "Nonaktifkan" not in listed
+
+    # …dan benar-benar ada di halaman pipeline-nya.
+    page = _run(tmp_path, seed=True, section="Aktif",
+                open_pipeline="uploaded.contoh@v2")
+    ptext = " ".join(m.value for m in page.markdown)
+    assert "contoh" in ptext
+    assert "eksperimen" in ptext
+    plabels = {b.label for b in page.button}
+    assert {"Sunting", "Nonaktifkan", "Riwayat"} <= plabels
 
     # Riwayat versi tampil sebagai tabel, dengan versi aktif tertandai.
     history = _run(tmp_path, seed=True, section="Riwayat versi")
@@ -601,9 +668,15 @@ def test_each_section_leaves_the_other_out(tmp_path):
 
 
 def test_the_empty_state_renders(tmp_path):
-    """Keadaan kosong ada DI DALAM tabel — bukan tabel kosong tanpa penjelasan."""
+    """Keadaan kosong DIKATAKAN, dan tabelnya tidak digambar sama sekali.
+
+    Sebuah tabel berjudul kolom tanpa satu pun baris terbaca seperti kegagalan
+    memuat, bukan seperti "memang belum ada": pembacanya tidak dapat
+    membedakan keduanya. Karena itu keadaan kosongnya berupa kalimat.
+    """
+    import grid_probe
+
     at = _run(tmp_path, seed=False, section="Aktif")
-    tables = [e.proto.body for e in at.get("html") if "ids-tbl" in e.proto.body]
-    assert tables, "tabel tetap digambar meski tanpa isi"
-    assert any(rv.EMPTY_STATE in t for t in tables)
-    assert any("ids-tbl-empty" in t for t in tables)
+    assert grid_probe.count(at) == 0, "tabel kosong tetap digambar"
+    text = " ".join(m.value for m in at.markdown)
+    assert rv.EMPTY_STATE in text, text

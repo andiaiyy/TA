@@ -193,6 +193,100 @@ def set_pipeline_active(pipeline_id: str, active: bool, *, actor: dict | None,
     return get_registered(pipeline_id, db_path)
 
 
+# ── Research pipeline sebagai SATU kesatuan ───────────────────────────────
+#
+# Sebuah research pipeline terunggah memuat beberapa algoritma; tiap algoritma
+# adalah satu baris `registered_pipelines` dengan `dataset_type` yang sama.
+# Sampai di sini, satu-satunya kendali yang ada bekerja per baris — padahal
+# yang paling sering dimaksud adalah "matikan research pipeline ini", dan
+# melakukannya satu per satu berarti keadaan setengah jalan setiap kali ada
+# yang terlewat.
+
+
+def research_algorithms(dataset_type: str,
+                        db_path: str | None = None) -> list[dict]:
+    """Seluruh algoritma sebuah research pipeline — aktif maupun tidak.
+
+    Diurutkan seperti `list_registered`: nama lalu versi, sehingga daftarnya
+    stabil antar penggambaran.
+    """
+    wanted = str(dataset_type or "")
+    if not wanted:
+        return []
+    return [row for row in list_registered(db_path=db_path)
+            if row.get("dataset_type") == wanted]
+
+
+def research_active_count(dataset_type: str,
+                          db_path: str | None = None) -> tuple[int, int]:
+    """(berapa yang aktif, berapa seluruhnya) pada satu research pipeline."""
+    rows = research_algorithms(dataset_type, db_path)
+    return sum(1 for r in rows if r.get("active")), len(rows)
+
+
+def set_research_active(dataset_type: str, active: bool, *, actor: dict | None,
+                        db_path: str | None = None) -> list[dict]:
+    """Aktifkan/nonaktifkan SELURUH algoritma satu research pipeline.
+
+    Hanya Research Admin, dan hanya research pipeline TERUNGGAH: keluarga
+    bawaan (`hikari2021.*`, `eve_cbr.*`) adalah pembanding tetap skripsi ini —
+    kodenya tidak disunting dan ketersediaannya tidak dimatikan dari sini.
+
+    Satu transaksi: kalau salah satu baris gagal ditulis, tidak ada satu pun
+    yang berubah. Keadaan setengah jalan — sebagian algoritma hidup, sebagian
+    mati, tanpa ada yang menghendakinya — justru yang paling membingungkan.
+    """
+    from database.models import is_uploaded_research
+    from orchestrator.auth_service import require_approve   # hindari impor siklik
+
+    require_approve(actor, db_path)
+    if not is_uploaded_research(dataset_type):
+        raise DynamicRegistryError(
+            f"Research pipeline bawaan tidak dapat diubah dari sini: "
+            f"{dataset_type}",
+            key="err.research_builtin_readonly",
+            values={"research": str(dataset_type)})
+
+    rows = research_algorithms(dataset_type, db_path)
+    if not rows:
+        raise DynamicRegistryError(
+            f"Research pipeline tidak ditemukan: {dataset_type}",
+            key="err.research_not_found",
+            values={"research": str(dataset_type)})
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute("UPDATE registered_pipelines SET active = ? "
+                     "WHERE dataset_type = ?",
+                     (1 if active else 0, dataset_type))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("Research pipeline %s di-%s (%s algoritma) oleh %s",
+                dataset_type, "aktifkan" if active else "nonaktifkan",
+                len(rows), (actor or {}).get("username"))
+    return research_algorithms(dataset_type, db_path)
+
+
+def last_active_algorithm_blocker(pipeline_id: str,
+                                  db_path: str | None = None) -> str:
+    """Alasan algoritma ini tidak boleh dinonaktifkan sendirian; "" bila boleh.
+
+    Mematikan algoritma terakhir yang masih hidup membuat research pipeline-nya
+    lenyap dari halaman Jalankan Eksperimen tanpa pernah dikatakan "research
+    pipeline ini dimatikan". Yang dimaksud pada keadaan itu hampir selalu
+    "matikan seluruhnya" — jadi itulah yang ditawarkan, bukan hasil yang sama
+    yang dicapai diam-diam.
+    """
+    row = get_registered(pipeline_id, db_path)
+    if row is None:
+        return "err.pipeline_not_registered"
+    if not row.get("active"):
+        return ""                                  # sudah nonaktif
+    live, _total = research_active_count(row.get("dataset_type"), db_path)
+    return "mp.blocked_last_algorithm" if live <= 1 else ""
+
+
 # ── Pemuatan kelas (dengan verifikasi hash) ───────────────────────────────
 
 def load_pipeline_class(entry_file: str | Path, entry_class: str,

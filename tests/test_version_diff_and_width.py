@@ -257,9 +257,15 @@ def test_the_editor_and_the_comparison_replace_their_section():
     assert "render_editor(user)" in active
     assert active.index("render_editor(user)") < active.index("render_section(")
 
-    history = PAGE_SRC.split("def render_history(")[1].split(chr(10) + "def ")[0]
+    history = (PAGE_SRC.split("def _render_version_history(")[1]
+               .split(chr(10) + "def ")[0])
     assert "_render_compare(rows, name)" in history
-    assert "return" in history.split("_render_compare(rows, name)")[1][:40]
+    assert "return True" in history.split("_render_compare(rows, name)")[1][:40]
+    # …dan "return True" itu benar-benar MENGHENTIKAN bagiannya, termasuk
+    # riwayat tinjauan yang biasanya menyusul.
+    dispatch = PAGE_SRC.split("def render_history(")[1].split(chr(10) + "def ")[0]
+    assert "if _render_version_history():" in dispatch
+    assert dispatch.index("return") < dispatch.index("_render_review_history()")
 
     assert '"← Kembali ke daftar aktif"' in PAGE_SRC
     assert 't("ap.btn_back_history")' in PAGE_SRC

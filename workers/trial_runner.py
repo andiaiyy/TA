@@ -78,7 +78,10 @@ def run_trial_pipeline(instance, df, dataset_type: str, *,
     from contracts.pipeline_contracts import PipelineInput
     from workers.local_worker import run_pipeline
 
-    schema = get_schema(dataset_type)
+    # Bawaan + research pipeline terunggah.
+    from orchestrator.research_registry import schema_for
+
+    schema = schema_for(dataset_type)
     if schema is None:
         raise ValueError(f"Dataset schema not found: {dataset_type}")
 
