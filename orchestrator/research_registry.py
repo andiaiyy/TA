@@ -44,9 +44,14 @@ from contracts.dataset_schemas import supported_datasets as _static_types
 from config.research_attribution import get_research_attribution as _static_attribution
 from database.db import get_connection
 from database.models import is_uploaded_research
+from orchestrator.user_errors import UserFacingMixin
 from utils.timestamps import now_iso
 
 logger = logging.getLogger(__name__)
+
+
+class ResearchRegistryError(UserFacingMixin, RuntimeError):
+    """Identitas research tidak dapat dicatat."""
 
 #: Bidang skema yang BENAR-BENAR dibaca platform — dihitung dari seluruh
 #: pembacaan ``schema[...]`` di validator, diagnosa, eksekusi, dan tampilan
@@ -123,6 +128,16 @@ def register_research(*, dataset_type: str, name: str, schema: dict,
             f"{dataset_type!r}")
     if dataset_type in DATASET_SCHEMAS:     # tidak mungkin; dijaga eksplisit
         raise ValueError(f"{dataset_type} bertabrakan dengan research bawaan")
+
+    # `dataset_type` UNIK di level skema, jadi nama yang sudah terpakai membuat
+    # INSERT di bawah gagal sebagai `IntegrityError` — kalimat basis data, di
+    # tangan PENINJAU, saat menekan Setujui, jauh dari sebabnya. Ditolak di
+    # sini sebagai kalimat yang dapat dibaca dan diterjemahkan.
+    if get_research(dataset_type, db_path) is not None:
+        raise ResearchRegistryError(
+            f"Nama research \"{name}\" sudah dipakai research pipeline lain.",
+            key="err.research_name_taken",
+            values={"name": name, "research": dataset_type})
 
     with get_connection(db_path) as conn:
         conn.execute(
@@ -241,9 +256,12 @@ def dataset_files_for(dataset_type: str, db_path: str | None = None) -> list[str
     path = info.get("stored_path")
     if not path:
         return []
-    from pathlib import Path
+    # Impor di dalam fungsi: `submission_service` mengimpor modul ini, jadi
+    # impor tingkat-modul akan melingkar.
+    from orchestrator.submission_service import stored_location
 
-    return [str(path)] if Path(path).is_file() else []
+    resolved = stored_location(path)
+    return [str(resolved)] if resolved.is_file() else []
 
 
 def display_name_for(dataset_type: str, db_path: str | None = None) -> str:

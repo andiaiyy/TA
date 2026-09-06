@@ -150,8 +150,41 @@ def _render_algorithm(row: dict, user: dict | None) -> None:
         st.session_state[_CONFIRM_KEY] = pipeline_id
         st.rerun()
 
+    _render_info_refresh(row, user)
+
     if st.session_state.get(_CONFIRM_KEY) == pipeline_id:
         _render_delete_confirm(row, user, delete_version)
+
+
+def _render_info_refresh(row: dict, user: dict | None) -> None:
+    """Tawaran mengambil potret keterangan — HANYA bila memang belum ada.
+
+    Baris yang terdaftar sebelum platform menyimpan potret `get_info()` tidak
+    dapat menjelaskan dirinya di katalog. Ia tidak diperbaiki diam-diam saat
+    halaman digambar: memuat kode kontribusi adalah tindakan, jadi ia diminta
+    sebagai tindakan.
+    """
+    from orchestrator import dynamic_registry as dr
+
+    if str(row.get("info_json") or "").strip():
+        return
+
+    pipeline_id = row["pipeline_id"]
+    note, act = st.columns([6, 2])
+    note.markdown(t("re.lbl_info_missing"))
+    if not act.button(t("re.btn_refresh_info"),
+                      key=f"re_algo_info_{pipeline_id}",
+                      use_container_width=True):
+        return
+    try:
+        dr.refresh_info(pipeline_id, actor=user)
+    except Exception as e:
+        st.error(_message(e))
+        return
+    st.success(t("re.msg_info_refreshed",
+                 algorithm=row.get("algorithm") or row.get("name")
+                 or pipeline_id))
+    st.rerun()
 
 
 def _render_delete_confirm(row: dict, user: dict | None, delete_version) -> None:

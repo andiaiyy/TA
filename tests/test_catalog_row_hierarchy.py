@@ -323,8 +323,16 @@ def test_the_buttons_still_drive_the_same_callbacks(tmp_path):
         def __exit__(self, *a): return False
 
     class _Col:
+        """Kolom palsu. Selain tombol, katalog kini menggambar kotak cari dan
+        pemilih kategori di dalam kolom — keduanya menjawab "belum diisi"
+        supaya yang diuji tetap perilaku TOMBOLNYA."""
+
         def __init__(self, fire): self._fire = fire
         def button(self, label, **kw): return self._fire(label)
+        def text_input(self, label, **kw): return ""
+        def selectbox(self, label, options, **kw): return None
+        def checkbox(self, label, **kw): return False
+        def markdown(self, *a, **k): return None
 
     from ui.i18n.core import lookup
 

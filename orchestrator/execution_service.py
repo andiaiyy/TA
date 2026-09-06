@@ -9,7 +9,8 @@ import pandas as pd
 from contracts.pipeline_contracts import PipelineInput, PipelineResult
 from orchestrator.research_registry import schema_for
 from orchestrator.dynamic_registry import (
-    DynamicRegistryError, get_pipeline_instance_merged,
+    UPLOADED_PREFIX, DynamicRegistryError, get_all_pipelines,
+    get_pipeline_instance_merged,
 )
 from workers.local_worker import run_pipeline
 
@@ -85,10 +86,27 @@ def execute_pipeline(
 def get_pipeline_info(pipeline_id: str) -> dict | None:
     """Get pipeline metadata for UI display. Returns None if not found.
 
-    Untuk pipeline terunggah, memanggil ini MEMUAT berkasnya (dengan verifikasi
-    hash). Kegagalan dikembalikan sebagai None + log, bukan exception, supaya
-    satu pipeline bermasalah tidak merusak halaman.
+    Pipeline TERUNGGAH dijawab dari POTRET ``get_info()`` yang diambil saat
+    pendaftaran. Sebelumnya fungsi ini memuat dan menginstansiasi berkasnya —
+    dua pembacaan basis data dan dua pembukaan berkas untuk setiap pipeline,
+    pada SETIAP penggambaran ulang halaman riwayat, dan biaya itu tumbuh
+    seiring bertambahnya pipeline kontribusi. Menampilkan riwayat juga menjadi
+    tempat kode kontribusi ikut dieksekusi, padahal tidak ada yang dijalankan.
+
+    Potret kosong (pipeline yang terdaftar sebelum kolomnya ada) dijawab None —
+    "tidak diketahui", sama seperti pipeline yang tidak ditemukan. Ia TIDAK
+    diam-diam jatuh kembali ke memuat berkasnya: itu akan mengembalikan biaya
+    yang baru saja dihapus, justru pada baris yang paling lama.
     """
+    if str(pipeline_id or "").startswith(UPLOADED_PREFIX):
+        try:
+            entry = get_all_pipelines().get(pipeline_id) or {}
+        except Exception:                    # pragma: no cover - defensif
+            logger.warning("Registry terunggah tidak terbaca untuk %s",
+                           pipeline_id, exc_info=True)
+            return None
+        return entry.get("info") or None
+
     try:
         instance = get_pipeline_instance_merged(pipeline_id)
     except DynamicRegistryError:

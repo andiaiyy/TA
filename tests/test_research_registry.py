@@ -510,8 +510,16 @@ def test_the_approval_flow_creates_the_identity_before_registering(db):
     row = rr.get_research(dtype, db)
     assert row["submission_id"] == 7
     assert rr.schema_for(dtype, db)["label_column"] == "attack"
-    # Atribusinya menyebut bahwa ini kontribusi.
-    assert "kontribusi" in rr.display_name_for(dtype, db).lower()
+
+    # Nama tampilnya mengikuti pola atribusi BAWAAN: "<kredit> — <nama>".
+    # Bentuk lamanya, "<nama> (kontribusi)", tidak punya tanda hubung — dan
+    # `short_label_for` yang mengambil bagian sebelum "—" sebagai kredit lalu
+    # memakai seluruh kalimat itu, menghasilkan nama yang mengulang dirinya.
+    # Pengajuan ini tidak menyebut penelitinya, jadi yang tersisa hanya
+    # namanya: mengarang kredit yang tidak pernah disebut siapa pun lebih
+    # buruk daripada nama tanpa kredit.
+    assert rr.display_name_for(dtype, db) == "Jaringan Kampus"
+    assert rr.short_label_for(dtype, db) == "Jaringan Kampus"
 
 
 def test_a_failed_approval_leaves_no_research_identity(db):

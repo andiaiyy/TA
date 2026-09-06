@@ -243,19 +243,31 @@ def test_the_failure_is_not_a_database_error(db, tmp_path, monkeypatch):
 
 # ── Cacat 2: pasangan jalur/jenis ────────────────────────────────────────
 
+def _known_dataset_types() -> set:
+    """Jenis dataset yang DIKENAL platform: bawaan ∪ registry riset.
+
+    `supported_datasets()` hanya menyebut yang bawaan. Sejak sebuah research
+    pipeline kontribusi membawa jenis datasetnya SENDIRI, daftar itu berhenti
+    menjadi jawaban lengkap — memakainya sebagai definisi akan menyatakan
+    berkas yang sah sebagai berkas asing.
+    """
+    from orchestrator.research_registry import all_dataset_types
+
+    return set(all_dataset_types())
+
+
 def test_the_option_pair_is_not_swapped(platform_csv):
     """PENJAGA cacat 2 — tertukar tidak terlihat sampai dijalankan.
 
     Yang dikunci: elemen pertama adalah JALUR berkas yang benar-benar ada,
     elemen kedua adalah JENIS dataset yang dikenal platform.
     """
-    from orchestrator.dataset_diagnostics import supported_datasets
     from ui.views.contribute import _trial_dataset_options
 
     options = _trial_dataset_options()
     assert options, "tidak ada dataset platform untuk diuji"
 
-    known = set(supported_datasets())
+    known = _known_dataset_types()
     for path, dtype in options:
         assert Path(path).is_file(), f"elemen pertama bukan berkas: {path!r}"
         assert dtype in known, f"elemen kedua bukan jenis dataset: {dtype!r}"
@@ -264,11 +276,10 @@ def test_the_option_pair_is_not_swapped(platform_csv):
 def test_the_upstream_reader_keeps_the_same_order(platform_csv):
     """Pasangan dari pembacanya sendiri berbentuk (jalur, jenis)."""
     from config.settings import DATASETS_DIR
-    from orchestrator.dataset_diagnostics import supported_datasets
     from ui.views.run_experiment import _dataset_options_cached
 
     options, _sizes = _dataset_options_cached(0, str(DATASETS_DIR))
-    known = set(supported_datasets())
+    known = _known_dataset_types()
     for path, dtype in options:
         assert Path(path).is_file(), path
         assert dtype in known, dtype

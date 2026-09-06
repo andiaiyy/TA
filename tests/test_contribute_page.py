@@ -306,18 +306,57 @@ def _page_source() -> str:
     return Path(contrib.__file__).read_text(encoding="utf-8")
 
 
+def _plain_word_constants(tree) -> set:
+    """Konstanta tingkat-modul yang isinya sudah berupa KATA, bukan ID.
+
+    Pengecualian di bawah hanya sah bila pilihannya memang sudah terbaca apa
+    adanya — jadi bentuknya diperiksa di sini, bukan namanya. Begitu seseorang
+    memasukkan ID ke dalam salah satu konstanta itu, ia berhenti dikecualikan
+    dan wajib punya ``format_func`` seperti yang lain.
+    """
+    import ast
+
+    names = set()
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not isinstance(node.value, (ast.Tuple, ast.List)) or not node.value.elts:
+            continue
+        values = [e.value for e in node.value.elts
+                  if isinstance(e, ast.Constant) and isinstance(e.value, str)]
+        if len(values) != len(node.value.elts):
+            continue
+        if any(v[:1].islower() or ":" in v or "_" in v for v in values):
+            continue                    # ini ID, bukan kata yang siap dibaca
+        names.update(t.id for t in node.targets if isinstance(t, ast.Name))
+    return names
+
+
 def test_every_dataset_type_selectbox_shows_attributed_labels():
-    """Dropdown tidak boleh menampilkan ID mentah: setiap selectbox atas
-    dataset_type wajib memakai format_func."""
+    """Dropdown tidak boleh menampilkan ID mentah: setiap selectbox yang
+    pilihannya berupa ID wajib memakai ``format_func``.
+
+    Yang dikecualikan hanyalah pilihan yang MEMANG sudah berupa kata — daftar
+    tertutup seperti jenis penelitian ("Skripsi", "Tesis", …), yang nilai
+    simpannya sama persis dengan yang dibaca pengguna. Memasang
+    ``format_func`` di sana tidak menambah apa pun; ia hanya memenuhi huruf
+    aturan sambil menghilangkan maksudnya.
+    """
     import ast
 
     tree = ast.parse(_page_source())
+    exempt = _plain_word_constants(tree)
+    assert "SOURCE_TYPES" in exempt, exempt
     boxes = [n for n in ast.walk(tree)
              if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
              and n.func.attr == "selectbox"]
     assert boxes, "tidak ada selectbox terdeteksi — pemindaian salah"
     for call in boxes:
         kwargs = {kw.arg for kw in call.keywords}
+        options = call.args[1] if len(call.args) > 1 else next(
+            (kw.value for kw in call.keywords if kw.arg == "options"), None)
+        if isinstance(options, ast.Name) and options.id in exempt:
+            continue
         assert "format_func" in kwargs, ast.dump(call)[:120]
 
 

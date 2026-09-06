@@ -185,6 +185,21 @@ def _pipeline_params() -> dict:
     return out
 
 
+@st.cache_data(show_spinner=False)
+def _locked_params_of(pipeline_id: str) -> dict:
+    """``fixed_params`` sebuah pipeline — dijawab SEKALI per pipeline_id.
+
+    Dipanggil untuk setiap eksperimen yang dibuka, dan untuk pipeline
+    kontribusi jawabannya datang dari registry: tanpa cache, satu kueri per
+    baris pada setiap penggambaran ulang.
+
+    Aman di-cache karena jawabannya TETAP: menyunting sebuah pipeline tidak
+    mengubah baris ini, ia melahirkan versi baru dengan ``pipeline_id`` baru —
+    kunci cache yang berbeda.
+    """
+    return rm.locked_params(pipeline_id)
+
+
 def _build_rows(experiments: list[dict], *, with_roc: bool = True) -> list[dict]:
     """Baris tabel — memakai penyusun MURNI, pembaca artefak disuntikkan.
 
@@ -785,22 +800,30 @@ def _cached_pdf(experiment_id: str, completed_at, _payload: dict) -> bytes:
     itulah rasa tersendatnya. Eksperimen yang sudah FINISHED bersifat tetap,
     sehingga hasilnya aman di-cache; kuncinya menyertakan completed_at supaya
     re-run menghasilkan berkas baru. Jalur generatornya sendiri tidak diubah.
+
+    Keterangan pipeline dibaca DI SINI, bukan oleh pemanggilnya. Ia hanya
+    dipakai laporan, sedangkan pemanggilnya berjalan untuk SETIAP baris
+    riwayat yang selesai — sehingga membacanya di sana berarti satu kueri
+    registry per baris, pada setiap penggambaran ulang, demi berkas yang
+    mungkin tidak pernah diminta siapa pun.
     """
+    from orchestrator.execution_service import get_pipeline_info
     from utils.report_generator import generate_report
-    return generate_report(**_payload)
+
+    payload = dict(_payload)
+    payload["pipeline_info"] = get_pipeline_info(payload["pipeline_id"]) or {}
+    return generate_report(**payload)
 
 
 def _pdf_download_button(exp: dict, metrics: dict, metadata: dict, key: str) -> None:
     """PDF download for a FINISHED experiment (unchanged generator path)."""
     try:
-        from orchestrator.execution_service import get_pipeline_info
         pdf_bytes = _cached_pdf(exp["id"], exp.get("completed_at"), dict(
             experiment_id=exp["id"],
             dataset_type=exp["dataset_type"],
             dataset_path=exp["dataset_path"],
             dataset_hash=exp.get("dataset_hash", "N/A"),
             pipeline_id=exp["pipeline_id"],
-            pipeline_info=get_pipeline_info(exp["pipeline_id"]) or {},
             metrics=metrics,
             metadata=metadata,
             label_mapping=(metadata or {}).get("label_mapping"),
@@ -855,7 +878,7 @@ def _render_mode_details(exp: dict) -> None:
     """
     mode = rm.mode_of(exp)
     used = rm.params_of(exp)
-    locked = rm.locked_params(exp.get("pipeline_id") or "")
+    locked = _locked_params_of(exp.get("pipeline_id") or "")
 
     if rm.is_exploration(mode):
         st.warning(rm.EXPLORATION_WARNING)
@@ -1028,7 +1051,9 @@ def _render_history(experiments: list[dict], all_rows: list[dict]) -> None:
 
     with bar[3]:
         st.download_button(
-            t("ps.btn_csv"), data=et.to_csv(rows, columns).encode("utf-8"),
+            t("ps.btn_csv"),
+            data=et.to_csv(rows, columns,
+                           locked_reader=_locked_params_of).encode("utf-8"),
             file_name=et.csv_filename(), mime="text/csv",
             use_container_width=True, key="_hist_csv",
             # Jumlah baris yang sedang tampil menempel di sini karena tombol

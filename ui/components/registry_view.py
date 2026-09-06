@@ -154,8 +154,12 @@ def version_state(row: dict, *, hash_reader=None) -> tuple[str, str]:
         from orchestrator.dynamic_registry import file_sha256
 
         def hash_reader(path):
-            from pathlib import Path
-            target = Path(path)
+            # Ditambatkan ke `storage/` yang berlaku: tanpa itu sebuah versi
+            # yang berkasnya utuh tampil sebagai "hilang" hanya karena
+            # jalurnya dicatat dari lingkungan yang lain.
+            from orchestrator.submission_service import stored_location
+
+            target = stored_location(path)
             return file_sha256(target) if target.is_file() else ""
 
     try:
@@ -175,16 +179,32 @@ def version_state(row: dict, *, hash_reader=None) -> tuple[str, str]:
 
 def pipeline_summary(name: str, versions, counts: dict, *,
                      running: dict | None = None,
-                     hash_reader=None) -> dict:
+                     hash_reader=None, dataset_reader=None) -> dict:
     """Identitas + ketertelusuran satu pipeline kontribusi.
 
     ``counts`` adalah {pipeline_id: jumlah eksperimen} — sudah per VERSI karena
     nomor versi melekat pada pipeline_id.
+
+    ``dataset_reader(dataset_type) -> bool`` menjawab "adakah dataset yang
+    dapat dipakainya". Ia DISUNTIKKAN, dan bawaannya membaca sumber yang sama
+    dengan katalog. Tanpa jawaban itu, halaman ini menyebut sebuah pipeline
+    "aktif" sementara halaman Jalankan Eksperimen menyebutnya belum dapat
+    dijalankan — dua halaman, dua kebenaran, dan pembacanya menyimpulkan
+    sistemnya tidak sinkron. Ia memang tidak sinkron.
     """
     versions = list(versions or [])
     running = running or {}
     current = active_version(versions) or newest_version(versions) or {}
     state, reason = version_state(current, hash_reader=hash_reader)
+
+    if dataset_reader is None:
+        from ui.components.pipeline_catalog import has_dataset_for
+
+        dataset_reader = has_dataset_for
+    try:
+        runnable = bool(dataset_reader(current.get("dataset_type") or ""))
+    except Exception:                       # pragma: no cover - defensif
+        runnable = True                     # ragu = jangan menuduh
 
     per_version = [
         {"version": row.get("version"),
@@ -210,6 +230,11 @@ def pipeline_summary(name: str, versions, counts: dict, *,
         "edited_at": (current.get("edited_at") or "")[:19],
         "change_note": current.get("change_note") or "",
         "is_active": bool(current.get("active")),
+        # Dari pengajuan yang mana ia lahir — riwayat hidupnya dapat ditelusuri
+        # balik tanpa menebak dari nama.
+        "submission_id": current.get("submission_id"),
+        # Aktif BELUM berarti dapat dijalankan: datasetnya harus ada.
+        "runnable": runnable,
         "state": state,
         "state_reason": reason,
         "versions": per_version,
@@ -342,6 +367,11 @@ def active_table_rows(summaries) -> list[dict]:
                    else "rv.status_inactive")
         if summary["state"] != STATE_OK:
             status = f"{status} · {state_short(summary['state'])}"
+        # Aktif tetapi tanpa dataset: keadaan yang PALING membingungkan bila
+        # tidak dikatakan — halaman ini bilang aktif, halaman Jalankan
+        # Eksperimen bilang belum dapat dijalankan.
+        elif summary["is_active"] and not summary.get("runnable", True):
+            status = f"{status} · {t('rv.status_no_dataset')}"
         rows.append(dict(summary, status_text=status,
                          _highlight=summary["is_active"]))
     return rows

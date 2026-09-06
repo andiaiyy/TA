@@ -29,6 +29,7 @@ from pathlib import Path
 from database.db import get_connection
 from orchestrator.submission_service import (
     DATASET_SUFFIXES, PIPELINE_ROOT, StoredFile, SubmissionError, _sanitize,
+    stored_location,
     _unique_target, _write_stream,
 )
 
@@ -158,7 +159,7 @@ def verify_attachment(item: dict) -> str:
             "Pengajuan ini tidak melampirkan dataset uji.",
             key="td.err_no_attachment")
 
-    path = Path(info["stored_path"])
+    path = stored_location(info["stored_path"])
     if not path.is_file():
         raise TrialDatasetError(
             f"Berkas dataset lampiran tidak ditemukan: {path.name}",
@@ -208,7 +209,7 @@ def discard_attachment(item: dict, db_path: str | None = None) -> bool:
     if not info:
         return False
 
-    path = Path(info.get("stored_path") or "")
+    path = stored_location(info.get("stored_path"))
     folder = path.parent
     path.unlink(missing_ok=True)
     # Folder pengajuan ini ikut dibuang bila sudah kosong — jangan tinggalkan

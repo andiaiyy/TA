@@ -256,6 +256,42 @@ MIGRATIONS = [
         "sql": "ALTER TABLE research_pipelines ADD COLUMN dataset_json TEXT",
         "add_column": ("research_pipelines", "dataset_json"),
     },
+    {
+        # Fase progres sebuah pipeline terunggah, dibaca STATIS dari panggilan
+        # `_emit_progress()` pada kodenya saat diunggah. Pipeline bawaan
+        # menyimpannya di `config/pipeline_registry.py`; yang terunggah tidak
+        # punya tempat itu, sehingga bar progresnya berjalan tanpa nama fase
+        # sementara pipelinenya SUDAH memancarkan fase itu saat berjalan.
+        #
+        # Kolom NULLABLE: paket yang tidak memanggil `_emit_progress` memang
+        # tidak punya fase, dan itu keadaan yang sah — bukan isian terlewat.
+        # Baris yang sudah ada tetap NULL dan berperilaku persis seperti
+        # sebelumnya.
+        "version": 28,
+        "description": "Add nullable stages_json to registered_pipelines (progress phases)",
+        "sql": "ALTER TABLE registered_pipelines ADD COLUMN stages_json TEXT",
+        "add_column": ("registered_pipelines", "stages_json"),
+    },    {
+        # POTRET `get_info()`, diambil sekali saat pengajuannya disetujui.
+        #
+        # Tanpa ini, satu-satunya cara mengetahui hyperparameter, langkah
+        # preprocessing, atau kebijakan metrik sebuah pipeline terunggah adalah
+        # MEMUAT DAN MENGINSTANSIASI kodenya. Katalog menolak melakukannya —
+        # menampilkan daftar tidak boleh mengeksekusi kode unggahan — sehingga
+        # kartunya tampil kosong; halaman riwayat justru melakukannya, dua
+        # pembacaan DB dan dua pembukaan berkas per pipeline pada SETIAP
+        # penggambaran ulang.
+        #
+        # Potret juga lebih jujur secara waktu: ia menyatakan apa yang
+        # dijanjikan kode SAAT DITINJAU, bukan apa yang dikatakannya hari ini.
+        #
+        # Kolom NULLABLE: pipeline yang terdaftar sebelum migrasi ini tidak
+        # punya potret, dan kekosongan itu dinyatakan apa adanya.
+        "version": 29,
+        "description": "Add nullable info_json to registered_pipelines (get_info snapshot)",
+        "sql": "ALTER TABLE registered_pipelines ADD COLUMN info_json TEXT",
+        "add_column": ("registered_pipelines", "info_json"),
+    },
 ]
 
 CREATE_SCHEMA_VERSION_TABLE = """

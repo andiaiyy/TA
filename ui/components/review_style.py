@@ -22,12 +22,13 @@ from html import escape
 
 import streamlit as st
 
-#: Dua zona halaman peninjauan. Nilainya PENGENAL, bukan kalimat — judulnya
+#: Tiga zona halaman peninjauan. Nilainya PENGENAL, bukan kalimat — judulnya
 #: disodorkan pemanggil supaya tetap berbahasa aktif.
 ZONE_READ = "read"
+ZONE_TEST = "test"
 ZONE_WORK = "work"
 
-ZONES = (ZONE_READ, ZONE_WORK)
+ZONES = (ZONE_READ, ZONE_TEST, ZONE_WORK)
 
 
 #: Hasil periksa → nama keadaan yang dipakai gaya. Sengaja DIPETAKAN, bukan

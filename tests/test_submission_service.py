@@ -388,7 +388,18 @@ def test_existing_datasets_need_no_submission_record(env, monkeypatch):
     (env["datasets"] / "eve_sample.jsonl").write_bytes(b"{}")
     monkeypatch.setattr(rx, "DATASETS_DIR", str(env["datasets"]))
 
-    names = {Path(p).name for p, _dtype in rx._all_dataset_options()}
-    assert names == {"ALLFLOWMETER_HIKARI2021.csv", "eve_sample.jsonl"}
+    from database.models import is_uploaded_research
+
+    options = rx._all_dataset_options()
+    builtin = {Path(p).name for p, dtype in options
+               if not is_uploaded_research(dtype)}
+    assert builtin == {"ALLFLOWMETER_HIKARI2021.csv", "eve_sample.jsonl"}
+    # Selebihnya — bila ada — adalah dataset MILIK research pipeline
+    # kontribusi. Dataset seperti itu memang tidak pernah tinggal di
+    # `storage/datasets/`, jadi ia tidak dapat dituntut ada di folder ini;
+    # yang dijaga di sini adalah dataset bawaan tetap terpilih tanpa antrean.
+    for path, dtype in options:
+        if Path(path).name not in builtin:
+            assert is_uploaded_research(dtype), (path, dtype)
     # …dan tidak ada satu pun record submissions untuk keduanya.
     assert list_submissions(db_path=env["db"]) == []

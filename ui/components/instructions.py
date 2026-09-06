@@ -668,10 +668,15 @@ DATASET_FLOW_ALT = ("Alur: unggah berkas, diperiksa kecocokannya dengan tiap "
 def dataset_contract_rows(dataset_type: str) -> list[tuple[str, str]]:
     """(aspek, ketentuan) untuk sebuah dataset_type — seluruhnya dari skema &
     dict persyaratan terpusat, tidak ada yang diketik ulang."""
-    from contracts.dataset_schemas import get_schema
-    from ui.views.run_experiment import _DATASET_REQUIREMENTS, _dataset_extensions
+    from ui.views.run_experiment import (
+        _DATASET_REQUIREMENTS, _dataset_extensions, _schema_of,
+    )
 
-    schema = get_schema(dataset_type) or {}
+    # Skema GABUNGAN. `contracts.get_schema` hanya mengenal jenis bawaan, jadi
+    # research pipeline kontribusi dahulu digambarkan sebagai kontrak yang
+    # tidak diketahui — "Kolom label: `?`" — padahal kontraknya DIDEKLARASIKAN
+    # saat pengunggahan dan tersimpan utuh.
+    schema = _schema_of(dataset_type)
     req = _DATASET_REQUIREMENTS.get(dataset_type, {})
     exts = " / ".join(f"`{e}`" for e in _dataset_extensions(dataset_type))
     label_col = schema.get("label_column", "?")
@@ -680,17 +685,34 @@ def dataset_contract_rows(dataset_type: str) -> list[tuple[str, str]]:
 
     if schema.get("expected_top_level_keys"):
         label_meaning = t("ins.dslabel_from_suricata", column=label_col)
-    else:
+    elif req:
         label_meaning = t("ins.dslabel_binary", column=label_col)
+    else:
+        # Kontrak kontribusi menyatakan NAMA kolomnya, bukan arti nilainya.
+        # Menyalin "`0` = benign, `1` = malicious" ke sini akan mengarang
+        # semantik yang tidak pernah dinyatakan siapa pun.
+        label_meaning = t("ins.dslabel_declared", column=label_col)
 
-    return [
-        (t("ins.dsrow_format"),
-         f"{exts} — {dataset_requirement_text(dataset_type, 'row_unit')}"),
-        (t("ins.dsrow_label_column"), label_meaning),
-        (t("ins.dsrow_feature_nature"),
-         dataset_requirement_text(dataset_type, "summary_line")),
-        (t("ins.dsrow_class_count"), t("ins.dsval_two_classes")),
-    ]
+    if req:
+        return [
+            (t("ins.dsrow_format"),
+             f"{exts} — {dataset_requirement_text(dataset_type, 'row_unit')}"),
+            (t("ins.dsrow_label_column"), label_meaning),
+            (t("ins.dsrow_feature_nature"),
+             dataset_requirement_text(dataset_type, "summary_line")),
+            (t("ins.dsrow_class_count"), t("ins.dsval_two_classes")),
+        ]
+
+    # Jenis kontribusi: hanya yang benar-benar dinyatakan kontraknya. Baris
+    # "sifat fitur" dan "jumlah kelas" tidak ada di sana, dan baris kosong
+    # bertanda "—" terbaca sebagai platform yang tidak mengenal datasetnya.
+    rows = [(t("ins.dsrow_format"), exts),
+            (t("ins.dsrow_label_column"), label_meaning)]
+    columns = schema.get("expected_columns") or []
+    if columns:
+        rows.append((t("ins.dsrow_required_columns"),
+                     t("ins.dsval_declared_columns", count=len(columns))))
+    return rows
 
 
 def render_dataset_instructions() -> None:
@@ -712,20 +734,38 @@ def render_dataset_instructions() -> None:
     inject_css()
     render_flow(dataset_flow_display(), alt=t("ins.flow_dataset_alt"))
 
-    tabs = st.tabs([get_research_short_label(dt) for dt in supported_datasets()])
-    for tab, dtype in zip(tabs, supported_datasets()):
-        with tab:
-            rows = dataset_contract_rows(dtype)
-            st.markdown(
-                f"| {t('ins.col_aspect')} | {t('ins.col_rule')} |\n"
-                "| --- | --- |\n"
-                + "\n".join(f"| {aspect} | {rule} |" for aspect, rule in rows)
-            )
-            sample = dataset_sample_snippet(dtype)
-            if sample:
-                st.code(sample, language=None)
-            st.markdown("\n".join(f"- ✔ {item}"
-                                  for item in dataset_checklist(dtype)))
+    # SATU pemilih, bukan sederet tab. Tab tumbuh ke samping: setiap research
+    # pipeline kontribusi yang disetujui menambah satu, dan pada research
+    # keenam judulnya sudah terpotong atau membungkus ke baris kedua. Sebuah
+    # pemilih tidak berubah tingginya berapa pun panjang daftarnya, dan
+    # namanya tampil utuh — termasuk nama beratribusi yang panjang seperti
+    # "Contoh Kontributor (2026), Universitas Hasanuddin — Deteksi Trafik
+    # Kampus".
+    #
+    # Yang ditampilkan hanyalah research yang DIPILIH. Sebelumnya expander
+    # persyaratan di bawah menggambar SELURUHNYA sekaligus, jadi halaman ini
+    # memuat keterangan lengkap untuk research yang tidak sedang dibaca
+    # siapa pun.
+    types = list(supported_datasets())
+    labels = {dt: get_research_short_label(dt) for dt in types}
+    dtype = st.selectbox(t("ins.lbl_research_pipeline"), types,
+                         format_func=lambda key: labels.get(key, key),
+                         key="ins_dataset_research")
+    if not dtype:
+        return
+
+    with st.container():
+        rows = dataset_contract_rows(dtype)
+        st.markdown(
+            f"| {t('ins.col_aspect')} | {t('ins.col_rule')} |\n"
+            "| --- | --- |\n"
+            + "\n".join(f"| {aspect} | {rule} |" for aspect, rule in rows)
+        )
+        sample = dataset_sample_snippet(dtype)
+        if sample:
+            st.code(sample, language=None)
+        st.markdown("\n".join(f"- ✔ {item}"
+                              for item in dataset_checklist(dtype)))
 
     render_note(t("ins.dataset_sample_note"))
 
@@ -733,10 +773,8 @@ def render_dataset_instructions() -> None:
                     title=t("ins.mistakes_dataset_title"))
 
     with st.expander(t("ins.exp_dataset_requirements"), expanded=False):
-        for dtype in supported_datasets():
-            st.markdown(f"**{get_research_short_label(dtype)}**")
-            _render_dataset_requirements(dtype)
-            st.divider()
+        st.markdown(f"**{labels.get(dtype, dtype)}**")
+        _render_dataset_requirements(dtype)
 
 
 def dataset_sample_snippet(dataset_type: str) -> str:

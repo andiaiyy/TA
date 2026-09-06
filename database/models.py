@@ -199,6 +199,16 @@ CREATE TABLE IF NOT EXISTS registered_pipelines (
     edited_by      TEXT,
     edited_at      TEXT,
     change_note    TEXT,
+    -- Fase progres, dibaca STATIS dari panggilan `_emit_progress()` pada kode
+    -- paketnya saat diunggah. Pipeline bawaan menyimpannya di
+    -- `config/pipeline_registry.py`; yang terunggah tidak punya tempat itu.
+    -- NULLABLE: paket yang tidak memancarkan fase memang tidak punya, dan bar
+    -- progresnya berjalan tanpa nama fase — keadaan yang sah.
+    stages_json    TEXT,
+    -- Potret `get_info()` saat persetujuan. Dipakai katalog dan halaman
+    -- riwayat untuk MENJELASKAN pipeline ini tanpa memuat kodenya. NULLABLE:
+    -- pipeline yang terdaftar sebelum kolom ini ada tidak punya potret.
+    info_json      TEXT,
     UNIQUE (name, version)
 );
 """

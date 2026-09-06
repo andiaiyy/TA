@@ -66,23 +66,34 @@ def read_trial_dataset(dataset_path: str, max_rows: int):
 
 
 def run_trial_pipeline(instance, df, dataset_type: str, *,
-                       dataset_path: str = "", progress=None):
+                       dataset_path: str = "", progress=None,
+                       schema: dict | None = None):
     """Jalankan pipeline lewat runner yang SAMA dengan eksperimen biasa.
 
     ``PipelineInput`` dibangun dengan bentuk yang sama seperti pada
     ``orchestrator.execution_service.execute_pipeline`` pada jalur run RESMI:
     tanpa ``param_overrides`` dan tanpa ``random_state`` — pipeline memakai
     nilai terkuncinya, persis seperti saat dijalankan sungguhan.
+
+    ``schema`` OPSIONAL: kontrak dataset yang sudah dipegang pemanggil. Ia ada
+    karena research pipeline yang berdiri sendiri BELUM terdaftar saat diuji —
+    skemanya masih berupa deklarasi pada pengajuannya, dan mencarinya di tabel
+    `research_pipelines` akan selalu gagal. Bila tidak diberikan, jenisnya
+    dicari seperti sebelumnya, jadi pemanggil lama tidak berubah perilakunya.
+
+    Sebuah DICT polos, bukan objek atau callable: fungsi ini berjalan di proses
+    anak yang di-`spawn`, sehingga apa pun yang menyeberang harus picklable.
     """
     from contracts.dataset_schemas import get_schema
     from contracts.pipeline_contracts import PipelineInput
     from workers.local_worker import run_pipeline
 
-    # Bawaan + research pipeline terunggah.
-    from orchestrator.research_registry import schema_for
+    if not schema:
+        # Bawaan + research pipeline terunggah yang SUDAH terdaftar.
+        from orchestrator.research_registry import schema_for
 
-    schema = schema_for(dataset_type)
-    if schema is None:
+        schema = schema_for(dataset_type)
+    if not schema:
         raise ValueError(f"Dataset schema not found: {dataset_type}")
 
     pipeline_input = PipelineInput(
@@ -111,7 +122,7 @@ def _summarise(result) -> dict:
 
 
 def _child(entry_file, entry_class, entry_hash, dataset_type, dataset_path,
-           max_rows, out_queue):
+           max_rows, out_queue, schema=None):
     """Badan proses anak: muat → baca → jalankan, lalu kirim hasilnya.
 
     Kegagalan dikirim beserta TAHAP dan JENIS-nya; proses induk tidak pernah
@@ -131,7 +142,7 @@ def _child(entry_file, entry_class, entry_hash, dataset_type, dataset_path,
 
         stage = STAGE_RUN
         result = run_trial_pipeline(instance, df, dataset_type,
-                                    dataset_path=dataset_path)
+                                    dataset_path=dataset_path, schema=schema)
         out_queue.put({"ok": True, "metrics": _summarise(result),
                        "rows_used": rows_used})
     except BaseException as exc:             # noqa: BLE001 — dilaporkan utuh
@@ -142,7 +153,7 @@ def _child(entry_file, entry_class, entry_hash, dataset_type, dataset_path,
 
 def run_bounded(*, entry_file: str, entry_class: str, entry_hash: str,
                 dataset_type: str, dataset_path: str, max_rows: int,
-                max_seconds: int) -> dict:
+                max_seconds: int, schema: dict | None = None) -> dict:
     """Jalankan uji coba dengan tenggat waktu yang benar-benar ditegakkan.
 
     Dijalankan di proses anak supaya tenggatnya dapat DIPAKSA: pipeline yang
@@ -157,7 +168,8 @@ def run_bounded(*, entry_file: str, entry_class: str, entry_hash: str,
     proc = ctx.Process(
         target=_child,
         args=(str(entry_file), entry_class, entry_hash, dataset_type,
-              dataset_path, int(max_rows), out_queue),
+              dataset_path, int(max_rows), out_queue,
+              dict(schema) if schema else None),
         daemon=True)
     proc.start()
     proc.join(timeout=max_seconds)

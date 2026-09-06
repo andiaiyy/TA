@@ -895,9 +895,18 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     --ids-rv-tint: rgba(200,70,70,.12);
 }}
 
-/* Dua zona. Bedanya BUKAN selera tata letak: keliru mengira zona kerja
+/* Tiga zona. Bedanya BUKAN selera tata letak: keliru mengira zona kerja
    sebagai zona baca berarti menekan tombol yang mengubah keadaan sambil
-   mengira sedang membaca. Zona baca tenang; zona kerja ditandai. */
+   mengira sedang membaca.
+
+   Yang membedakan ketiganya adalah AKIBATNYA, dan gayanya mengikuti itu:
+
+     baca      — tidak mengubah apa pun. Tenang.
+     pengujian — mengubah sesuatu, tetapi DAPAT DIULANG.
+     keputusan — TIDAK dapat diulang.
+
+   Karena itu zona keputusan bergaris lebih tebal: ia satu-satunya yang
+   akibatnya tidak dapat ditarik kembali. */
 .ids-zone {{
     font-size: {FONT_CAPTION};
     font-weight: {WEIGHT_STRONG};
@@ -907,9 +916,14 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
     border-bottom: 1px solid rgba(127,127,127,.22);
 }}
 .ids-zone-read {{ opacity: .62; }}
+.ids-zone-test {{
+    color: rgb(59,130,246);
+    border-bottom-color: rgba(59,130,246,.30);
+}}
 .ids-zone-work {{
     color: rgb(59,130,246);
-    border-bottom-color: rgba(59,130,246,.45);
+    border-bottom-width: 2px;
+    border-bottom-color: rgba(59,130,246,.65);
 }}
 
 @media (prefers-reduced-motion: reduce) {{

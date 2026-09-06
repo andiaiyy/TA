@@ -378,8 +378,12 @@ def test_version_files_live_outside_the_import_path(env):
         assert "sys.path.insert" not in src
 
 
+@pytest.mark.real_storage
 def test_the_real_versions_root_is_under_storage_not_pipelines():
-    """Berkas kontribusi tidak boleh mendarat di paket `pipelines/`."""
+    """Berkas kontribusi tidak boleh mendarat di paket `pipelines/`.
+
+    Ditandai `real_storage`: subjeknya adalah LETAK sungguhan, jadi ia menolak
+    pengalihan ke tmp yang dipasang conftest untuk tes lain."""
     root = Path(pv.VERSIONS_ROOT).resolve()
     assert (REPO_ROOT / "storage").resolve() in root.parents
     assert (REPO_ROOT / "pipelines").resolve() not in root.parents
