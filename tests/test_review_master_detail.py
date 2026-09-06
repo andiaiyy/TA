@@ -253,8 +253,15 @@ def test_the_table_shows_the_queue_columns_and_hides_the_raw_id(tmp_path):
 
     shown, _, options = _grid(at)
     assert shown == [sr.tbl._label(c) for c in sr.PENDING_COLUMNS]
-    hidden = [c["field"] for c in options["columnDefs"] if c.get("hide")]
-    assert hidden == ["_full_id"]
+
+    # Dua kolom dibawa tanpa ditampilkan, masing-masing dengan alasannya:
+    # nomor pengajuan dibaca saat baris dipilih, dan KEADAAN hasil periksa
+    # dibaca gaya selnya. Yang kedua dipisah dari kalimat yang tampil karena
+    # ia pengenal — mewarnai berdasarkan kalimatnya akan berhenti bekerja
+    # begitu bahasanya berganti.
+    hidden = {c["field"] for c in options["columnDefs"] if c.get("hide")}
+    assert hidden == {"_full_id",
+                      sr.tbl._label(sr.PENDING_COLUMNS[1]) + "__state"}
 
 
 def test_opening_one_submission_replaces_the_list(tmp_path):
@@ -264,8 +271,13 @@ def test_opening_one_submission_replaces_the_list(tmp_path):
     assert at.get("code"), "kode berkas tidak tergambar pada detail"
     labels = {b.label for b in at.button}
     assert "Setujui" in labels and "Tolak" in labels
-    # …dan daftarnya TIDAK.
-    assert not at.get("component_instance"),         "tabel antrean masih tergambar di tampilan detail"
+    # …dan daftar ANTREAN-nya TIDAK. Tabel yang ada di sini adalah daftar
+    # BERKAS paket, yang memang milik tampilan detail — keduanya dibedakan
+    # lewat kunci widgetnya, bukan lewat jumlah tabel.
+    keys = [json.loads(e.proto.json_args).get("key")
+            for e in at.get("component_instance")]
+    assert not [k for k in keys if str(k).startswith("review_queue_grid")], keys
+    assert [k for k in keys if str(k).startswith("review_files_")], keys
 
 
 def test_the_detail_offers_a_way_back_to_the_queue(tmp_path):
@@ -302,5 +314,8 @@ def test_the_consequence_of_approving_is_stated_where_it_is_decided(tmp_path):
     assert "langsung dapat" in text
 
     # …dan tidak ikut tergambar pada DAFTAR, tempat belum ada yang diputuskan.
-    listed = " ".join(m.value for m in _render(tmp_path, 3).markdown)
+    # Blok <style> DILEWATI: ia memuat komentar CSS, dan memindainya menyamakan
+    # kalimat yang dijelaskan dengan kalimat yang ditampilkan.
+    listed = " ".join(m.value for m in _render(tmp_path, 3).markdown
+                      if not m.value.lstrip().startswith("<style"))
     assert "langsung dapat" not in listed

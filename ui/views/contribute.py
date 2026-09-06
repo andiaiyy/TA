@@ -27,6 +27,7 @@ Run Experiment.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -76,6 +77,7 @@ from ui.components.pipeline_upload import (
 from ui.components.instructions import (
     render_dataset_instructions, render_pipeline_instructions,
 )
+from orchestrator.submission_service import research_credit
 from ui.components import grid
 from ui.components import review_style as rp
 from ui.components import submission_review as sr
@@ -290,8 +292,15 @@ def _render_queue_grid(rows: list[dict]) -> None:
     keterangan yang hilang saat bentuknya berubah.
     """
     nonce = st.session_state.get(_GRID_NONCE_KEY, 0)
+    # Kolom "Hasil periksa" DIWARNAI menurut hasilnya — hijau/kuning/merah yang
+    # sama dengan halaman detailnya, diff versi, dan chip katalog. Peninjau
+    # melihat mana yang perlu dibuka lebih dulu tanpa membaca satu per satu,
+    # dan teksnya tetap menyebut hasilnya: warna bukan satu-satunya pembawa
+    # keterangan.
     chosen = grid.render(sr.PENDING_COLUMNS, rows, id_key="id",
-                         key=f"review_queue_grid_{nonce}", cast=int)
+                         key=f"review_queue_grid_{nonce}", cast=int,
+                         state_column="verdict_text",
+                         state_of=sr.verdict_state)
     if chosen is not None:
         _open_submission(chosen)
         st.rerun()
@@ -436,10 +445,26 @@ def _reviewed_package(submission_id: int, file_hash: str, _item: dict) -> dict:
 
 
 def _render_check_groups(entry: dict) -> None:
-    """Rincian pemeriksaan satu berkas, dikelompokkan Struktur & Keamanan."""
-    groups = entry.get("groups") or {}
-    _render_group(GROUP_STRUCTURE, groups.get(GROUP_STRUCTURE) or [])
-    _render_group(GROUP_SECURITY, groups.get(GROUP_SECURITY) or [])
+    """Ringkasan pemeriksaan satu berkas, lalu HANYA yang tidak lolos.
+
+    Sebelumnya seluruh pemeriksaan dicetak sebagai bulir — terukur enam per
+    berkas, lima di antaranya mengatakan "tidak ada yang salah". Sepuluh berkas
+    berarti lima puluh baris yang tidak menolong siapa pun menemukan masalah.
+
+    Jumlahnya tetap DISEBUT: peninjau harus tahu pemeriksaannya benar-benar
+    berjalan dan berapa banyak. Yang dibuang hanya perincian yang lolos.
+    """
+    tally = sr.check_tally(entry)
+    if tally["total"]:
+        st.markdown(t("sr.checks_tally", total=tally["total"],
+                      passed=tally["passed"]))
+    notable = sr.notable_checks(entry)
+    if not notable:
+        return
+    for check in notable:
+        icon = _STATUS_ICON.get(check["status"], "·")
+        line = f" _(baris {check['line']})_" if check.get("line") else ""
+        st.markdown(f"- {icon} **{check['name']}** — {check_message(check)}{line}")
 
 
 # ── Langkah UJI COBA (sebelum keputusan) ──────────────────────────────────
@@ -570,9 +595,20 @@ def _render_trial_step(item: dict, user: dict | None,
 
     # Sumber dataset. Lampiran hanya ditawarkan bila memang ada — pengajuan
     # tanpa lampiran tetap dapat diuji lewat dataset platform (Tahap 1).
-    sources = [trial_service.SOURCE_PLATFORM]
+    #
+    # KECUALI research pipeline yang berdiri sendiri: ia hanya boleh diuji
+    # dengan datasetnya sendiri, karena setelah disetujui ia terikat ke dataset
+    # itu. Meluluskannya atas dataset platform akan membuat "sudah diuji"
+    # berbicara tentang data yang tidak akan pernah ia pakai. Aturan yang sama
+    # ditegakkan lagi di `_resolve_dataset`, jadi menyembunyikan pilihan bukan
+    # satu-satunya penghalang.
+    standalone = bool(trial_service.planned_dataset_type(item))
+    sources = [] if standalone else [trial_service.SOURCE_PLATFORM]
     if attachment:
         sources.append(trial_service.SOURCE_ATTACHED)
+    if not sources:
+        prose(t("td.err_standalone_needs_own_dataset"), key="td_needs_own")
+        return
     source_labels = {
         trial_service.SOURCE_PLATFORM: t("td.source_platform"),
         trial_service.SOURCE_ATTACHED: t("td.source_attached"),
@@ -706,6 +742,50 @@ def _render_review_header(row: dict) -> None:
                      when=row["submitted_at"])
 
 
+#: Jenis penelitian sumber. Nilainya PENGENAL yang tampil apa adanya pada
+#: baris "Jenis" — dikunci ke daftar supaya seragam di seluruh katalog, persis
+#: seperti atribusi bawaan yang memakai satu kata baku.
+SOURCE_TYPES = ("Skripsi", "Tesis", "Disertasi", "Jurnal", "Laporan",
+                "Lainnya")
+
+
+#: Berkas paket yang sedang dibaca, per pengajuan. Berawalan `_contrib` supaya
+#: `page_flags.VIEW_STATE_PREFIXES` sudah membuangnya saat pengguna berpindah
+#: halaman — tidak perlu mekanisme baru.
+_OPEN_FILE_KEY = "_contrib_open_file"
+
+
+def _render_file_table(item: dict, files: list[dict]) -> None:
+    """Daftar berkas paket sebagai TABEL, lalu SATU berkas dibaca di bawahnya.
+
+    Bentuk master-detail yang sama dengan antrean peninjauan dan daftar
+    pipeline terdaftar — lihat `ui.components.grid`.
+
+    Ini BUKAN expander yang dahulu dibuang. Expander menyembunyikan hasil
+    periksa sampai tiap berkas dibuka satu per satu; tabel justru menampilkan
+    hasil SELURUH berkas sekaligus dalam satu kolom berwarna, sehingga peninjau
+    langsung melihat berkas mana yang bermasalah lalu membuka yang itu.
+    """
+    if not files:
+        return
+
+    rows = sr.file_table_rows(files, size_text=format_size)
+    opened = st.session_state.get(_OPEN_FILE_KEY, {}).get(str(item["id"]))
+    chosen = grid.render(sr.FILE_COLUMNS, rows, id_key="filename",
+                         key=f"review_files_{item['id']}",
+                         state_column="check_text", state_of=sr.file_state)
+    if chosen is not None and chosen != opened:
+        st.session_state.setdefault(_OPEN_FILE_KEY, {})[str(item["id"])] = chosen
+        st.rerun()
+
+    # Titik masuk dibaca lebih dulu bila belum ada yang dipilih: itulah berkas
+    # yang paling menentukan, dan halaman tanpa isi apa pun di bawah tabelnya
+    # terbaca seperti sesuatu yang gagal dimuat.
+    current = next((r for r in rows if r["filename"] == opened), rows[0])
+    st.divider()
+    _render_file_review(current)
+
+
 def _render_file_review(row: dict) -> None:
     """Satu berkas paket: peran, ukuran, penjelasan pengunggah, temuan, kode.
 
@@ -835,15 +915,16 @@ def _render_submission_review_card(item: dict, user: dict,
     jadi wadah yang harus diklik untuk melihat isinya hanya menambah satu
     langkah tanpa menyembunyikan apa pun.
 
-    Halamannya dibagi DUA ZONA yang dibedakan secara visual, karena keduanya
+    Halamannya dibagi TIGA ZONA yang dibedakan secara visual, karena ketiganya
     dibaca dengan sikap yang berbeda:
 
-    * **yang diperiksa** — identitas, berkas, temuan, kode. Dibaca.
-    * **keputusan** — dataset uji, catatan, setujui/tolak/hapus. Dikerjakan.
+    * **yang diperiksa** — identitas, daftar berkas, temuan, kode. Dibaca.
+    * **pengujian** — menjalankan uji coba dan membaca hasilnya.
+    * **keputusan** — catatan, setujui/tolak/hapus. Di sinilah keadaan berubah.
 
-    Sebelumnya keduanya berselang-seling di dalam satu expander bersama dua
-    paragraf peringatan, sehingga tidak ada tempat yang jelas untuk memulai
-    maupun mengakhiri.
+    Uji coba sempat tinggal di dalam zona "keputusan", padahal menjalankan uji
+    dan memutuskan adalah dua pekerjaan berbeda — dan judul zonanya hanya
+    menyebut yang kedua.
     """
     reviewed = _reviewed_package(item["id"], item.get("file_hash") or "", item)
     row = sr.summary_row(item, reviewed)
@@ -856,23 +937,29 @@ def _render_submission_review_card(item: dict, user: dict,
         # 1. Identitas & metadata — pasangan label–nilai ringkas.
         render_facts(sr.metadata_rows(item))
 
-        # 2 & 3. Berkas paket: SELURUHNYA, titik masuk lebih dulu.
+        # 2 & 3. Berkas paket sebagai TABEL, lalu SATU berkas dibaca.
+        #
+        # Sebelumnya seluruh berkas digambar berurutan: tiap berkas menambah
+        # sembilan blok teks dan satu blok kode setinggi 320px, jadi sepuluh
+        # berkas berarti seratus blok dan ~3.200px kode di satu halaman.
+        # Pertumbuhannya kini datar — satu BARIS per berkas — dan hasil
+        # periksa seluruh berkas tetap terbaca sekaligus lewat kolom berwarna,
+        # yang justru tidak dapat dilakukan expander.
         files = sr.file_rows(item, reviewed)
         st.markdown(f"**Berkas paket** — {len(files)}, "
                     f"{row['verdict_text']}.")
-        for file_row in files:
-            _render_file_review(file_row)
+        _render_file_table(item, files)
 
         warnings = sr.warning_checks(reviewed)
         if warnings:
             st.warning(t(sr.WARNING_REMINDER_KEY))
 
     with st.container(border=True):
-        rp.zone_heading(rp.ZONE_WORK, t("ap.zone_decision"))
-
-        # 4. Uji coba — SEBELUM keputusan, karena ia syarat persetujuan.
+        rp.zone_heading(rp.ZONE_TEST, t("ap.zone_testing"))
         _render_trial_step(item, user, latest)
-        st.divider()
+
+    with st.container(border=True):
+        rp.zone_heading(rp.ZONE_WORK, t("ap.zone_decision"))
 
         # Pertanyaan "ini ikut research pipeline mana" hanya bermakna bagi
         # pengajuan yang MENUMPANG keluarga bawaan. Sebuah research pipeline
@@ -959,11 +1046,9 @@ def _render_submission_review_card(item: dict, user: dict,
                     item["id"])
                 st.error(t("ap.err_unexpected", kind=type(e).__name__))
             else:
-                registered = _latest_registration(item)
                 st.success(
-                    f"Disetujui. {registered}"
-                    f" Ditinjau {user['username']} pada "
-                    f"{now_iso()[:19]}."
+                    _latest_registration(item)
+                    + f" Ditinjau {user['username']} pada {now_iso()[:19]}."
                     + (f" Catatan: {note}" if note.strip() else ""))
                 st.rerun()
         _render_delete_submission(item, user)
@@ -993,7 +1078,20 @@ def _render_submission_review_card(item: dict, user: dict,
 
 
 def _latest_registration(item: dict) -> str:
-    """Kalimat konfirmasi: identitas & hash versi yang barusan terdaftar."""
+    """Kalimat konfirmasi persetujuan — dan ke MANA hasilnya pergi.
+
+    Sebelumnya ia hanya menyebut pengenal mesin dan hash berkas. Keduanya
+    benar dan keduanya tidak menjawab pertanyaan yang sebenarnya ada di kepala
+    peninjau setelah menekan Setujui: berhasil, lalu ada di mana?
+
+    Maka yang disebut sekarang: NAMA research pipeline-nya sebagaimana pengguna
+    lain akan melihatnya, berapa algoritma yang ikut, dan halaman tempatnya
+    muncul. Bila datasetnya justru tidak ditemukan, itu dikatakan di sini juga
+    — bukan ditemukan sendiri nanti di halaman lain.
+    """
+    from orchestrator.submission_service import research_name_of
+    from ui.components.pipeline_catalog import has_dataset_for
+
     try:
         from orchestrator.dynamic_registry import list_registered
         rows = [r for r in list_registered()
@@ -1001,10 +1099,19 @@ def _latest_registration(item: dict) -> str:
     except Exception:                       # pragma: no cover - defensif
         rows = []
     if not rows:
-        return "Pipeline terdaftar dan langsung dapat dijalankan."
-    newest = max(rows, key=lambda r: r["version"])
-    return (f"`{newest['pipeline_id']}` aktif sebagai versi {newest['version']} "
-            f"(hash `{(newest['file_hash'] or '')[:12]}…`).")
+        return t("ap.msg_approved_live", research=research_name_of(item) or "—",
+                 count=0)
+
+    dataset_type = rows[0].get("dataset_type") or ""
+    try:
+        from orchestrator.research_registry import display_name_for
+
+        research = display_name_for(dataset_type) or dataset_type
+    except Exception:                       # pragma: no cover - defensif
+        research = dataset_type
+    key = ("ap.msg_approved_live" if has_dataset_for(dataset_type)
+           else "ap.msg_approved_no_dataset")
+    return t(key, research=research, count=len(rows))
 
 
 # ── Kelola pengguna (Research Admin) ──────────────────────────────────────
@@ -1304,10 +1411,130 @@ def _submission_metadata(form: dict) -> dict:
     return kept
 
 
+#: Kunci ``get_info()`` → kunci kalimat yang menyebut apa yang HILANG bila ia
+#: kosong. Bukan daftar hiasan: tiap akibat di bawah punya pembaca nyata di
+#: kode ini, dan sebuah test menahan daftar ini tetap selengkap
+#: ``EXPECTED_INFO_KEYS`` — kunci yang tidak punya kalimat akan lolos tanpa
+#: menyebut akibatnya sama sekali.
+_INFO_KEY_COST = {
+    "paper": "ap.cost_paper",
+    "algorithm": "ap.cost_algorithm",
+    "preprocessing_steps": "ap.cost_preprocessing",
+    "feature_selection": "ap.cost_feature_selection",
+    "fixed_params": "ap.cost_fixed_params",
+    "train_test_split": "ap.cost_train_test_split",
+}
+
+# Kunci OPSIONAL — apa yang DIDAPAT bila diisi. Dipisah dari `_INFO_KEY_COST`
+# karena keduanya berbeda jenis: yang satu kerugian, yang satu tawaran.
+_INFO_KEY_GAIN = {
+    "app": "ap.gain_app",
+    "anti_leakage": "ap.gain_anti_leakage",
+    "metrics_policy": "ap.gain_metrics_policy",
+}
+
+
+def _info_keys_of(entry: dict) -> tuple[list, list]:
+    """(kunci metadata yang ADA, yang BELUM) sebuah berkas — dari pemeriksaan
+    yang SUDAH dihitung.
+
+    Tidak mem-parse apa pun. Source yang sedang divalidasi hanya boleh disentuh
+    SATU ``ast.parse``: satu pohon, satu himpunan aturan, tidak ada jalur kedua
+    yang bisa memperlakukannya berbeda. Sebuah test menjaga jumlah itu tetap
+    satu, dan jawaban di sini memang sudah dihitung ``_check_get_info``.
+    """
+    for check in (entry.get("report") or {}).get("checks") or []:
+        values = check.get("values") or {}
+        if "present_keys" in values or "missing_keys" in values:
+            return (list(values.get("present_keys") or []),
+                    list(values.get("missing_keys") or []))
+    return [], []
+
+
+def _optional_keys_of(entry: dict) -> list:
+    """Kunci opsional yang BELUM ada pada sebuah berkas.
+
+    Dibaca dari pemeriksaan yang sama seperti :func:`_info_keys_of` — tidak ada
+    ``ast.parse`` kedua atas source yang sedang divalidasi.
+    """
+    from orchestrator.pipeline_validator import OPTIONAL_INFO_KEYS
+
+    for check in (entry.get("report") or {}).get("checks") or []:
+        values = check.get("values") or {}
+        if "optional_keys" in values:
+            have = set(values.get("optional_keys") or [])
+            return [k for k in OPTIONAL_INFO_KEYS if k not in have]
+    return []
+
+
+def _name_taken_warning(name: str) -> str:
+    """Peringatan bila nama research ini sudah dipakai; "" bila bebas.
+
+    Pengenal sebuah research pipeline dibentuk dari NAMANYA, dan pengenal itu
+    unik. Tanpa pemeriksaan di sini, benturan nama baru terbongkar jauh di
+    hilir — saat PENINJAU menekan Setujui — sebagai kegagalan yang bukan
+    miliknya dan tidak dapat diperbaikinya. Yang tahu namanya adalah orang yang
+    sedang mengetiknya, sekarang.
+    """
+    from database.models import build_research_dataset_type
+
+    dataset_type = build_research_dataset_type((name or "").strip())
+    if not dataset_type:
+        return ""
+    try:
+        from orchestrator.research_registry import get_research
+
+        taken = get_research(dataset_type) is not None
+    except Exception:                       # registry tak terbaca: jangan
+        return ""                           # menghalangi atas dasar tidak tahu
+    return t("err.research_name_taken", name=name) if taken else ""
+
+
+def _render_info_completeness(result: dict) -> None:
+    """Kelengkapan ``get_info()`` tiap entry point — dan APA YANG HILANG.
+
+    Ditampilkan, tidak ditanyakan. Nilai-nilai ini adalah sifat KODE yang akan
+    dijalankan; menyediakan isian formulir untuknya akan melahirkan sumber
+    kebenaran kedua yang dapat berbeda dari kodenya, lalu tersimpan sebagai
+    fakta. Yang ditawarkan di sini adalah pengetahuan, bukan tempat mengarang.
+
+    MEMPERINGATKAN, bukan menghalangi: ``get_info()`` yang tidak lengkap tidak
+    membuat pipelinenya salah — ia hanya membuatnya kurang terbaca. Yang harus
+    diperbaiki adalah kodenya, dan kalimatnya menunjuk ke sana.
+    """
+    entries = [f for f in result["files"] if f["role"] == ROLE_ENTRY]
+    missing_any = False
+    for entry in entries:
+        present, missing = _info_keys_of(entry)
+        if not present and not missing:
+            continue                    # dibangun dinamis: tidak dapat dibaca
+        if not missing:
+            continue
+        missing_any = True
+        st.markdown(t("ap.info_incomplete", filename=entry["filename"],
+                      have=len(present), total=len(present) + len(missing)))
+        for key in missing:
+            st.markdown(f"- `{key}` — {t(_INFO_KEY_COST[key])}")
+    if missing_any:
+        prose(t("ap.info_incomplete_note"), key="info_incomplete")
+
+    # Tawaran, bukan tuntutan: tiga kunci ini tidak ada di kontrak, jadi tidak
+    # pernah menjadi peringatan — tetapi panel membacanya, dan kontributor
+    # tidak punya cara lain mengetahui tempatnya ada.
+    for entry in entries:
+        absent = _optional_keys_of(entry)
+        if not absent:
+            continue
+        st.markdown(t("ap.info_optional", filename=entry["filename"]))
+        for key in absent:
+            st.markdown(f"- `{key}` — {t(_INFO_KEY_GAIN[key])}")
+
+
 def _render_valid_followup(result: dict, form: dict) -> None:
     """Unduh + cuplikan registry terisi metadata + panduan aktivasi manual."""
     st.divider()
     st.info(t("ap.msg_valid_not_active"))
+    _render_info_completeness(result)
 
     st.markdown("Unduh berkas tervalidasi")
     cols = st.columns(min(3, len(result["files"])) or 1)
@@ -1350,6 +1577,11 @@ def _render_valid_followup(result: dict, form: dict) -> None:
                     "filename": entry["filename"],
                     "class_name": found.get("class_name"),
                     "algorithm": found.get("algorithm"),
+                    # Fase progres, dibaca statis dari `_emit_progress()` pada
+                    # berkas ini. Sudah terlanjur dihitung di atas; membuangnya
+                    # berarti bar progresnya berjalan tanpa nama fase padahal
+                    # pipelinenya memang memancarkannya saat berjalan.
+                    "stages": list(found.get("stages") or []),
                 })
             static_meta = extract_registry_metadata(entry_item["source"],
                                                     entry_item["filename"])
@@ -1388,6 +1620,117 @@ def _render_valid_followup(result: dict, form: dict) -> None:
 
 # ── Jalur pipeline ────────────────────────────────────────────────────────
 
+#: Kunci widget dataset lampiran. Nilainya dibaca DI SINI walau widgetnya
+#: digambar jauh di bawah: Streamlit menyimpan nilai widget ber-key di
+#: `session_state`, jadi pada penggambaran BERIKUTNYA berkasnya sudah ada
+#: ketika bagian skema dirender. Itulah yang membuat daftar kolomnya terisi.
+_TRIAL_DATASET_KEY = "contrib_trial_dataset"
+
+
+def _real_column_names(names) -> list[str]:
+    """Nama kolom yang benar-benar NAMA — kosong dan "Unnamed: N" dibuang.
+
+    Berkas tanpa baris judul tetap terbaca pandas; kolomnya diberi nama
+    pengganti "Unnamed: 0". Menawarkannya sebagai pilihan berarti menawarkan
+    sesuatu yang bukan nama kolom, dan yang dipilih akan masuk ke kontrak
+    dataset sebagai fakta.
+    """
+    # `names or []` TIDAK dapat dipakai: pandas Index melempar pada uji
+    # kebenaran ("The truth value of a Index is ambiguous"), dan kegagalannya
+    # akan tertelan penangkap galat pemanggil sebagai "tidak terbaca".
+    out = []
+    for name in (names if names is not None else []):
+        text = str(name).strip()
+        if text and not text.startswith("Unnamed:"):
+            out.append(text)
+    return out
+
+
+def _attached_dataset_columns() -> list[str]:
+    """Nama kolom dataset yang dilampirkan; [] bila belum ada atau tak terbaca.
+
+    Hanya BARIS JUDULNYA yang dibaca (``nrows=0`` untuk CSV, satu record untuk
+    NDJSON) — dataset kontribusi dapat berukuran besar, dan yang dibutuhkan di
+    sini cuma nama kolomnya.
+
+    Kegagalan membaca berarti daftar pilihan kosong, BUKAN halaman yang jatuh:
+    berkas yang belum lengkap terunggah atau formatnya tidak terduga tetap
+    boleh terjadi, dan pengunggah tetap dapat mengetik sendiri.
+    """
+    picked = st.session_state.get(_TRIAL_DATASET_KEY)
+    if picked is None:
+        return []
+    try:
+        import io
+
+        import pandas as pd
+
+        raw = picked.getvalue()
+        name = str(getattr(picked, "name", "")).lower()
+        if name.endswith((".ndjson", ".jsonl")):
+            first = raw.split(b"\n", 1)[0].decode("utf-8", errors="replace")
+            record = json.loads(first)
+            return [str(k) for k in record] if isinstance(record, dict) else []
+        if name.endswith(".json"):
+            record = json.loads(raw.decode("utf-8", errors="replace"))
+            if isinstance(record, list) and record:
+                record = record[0]
+            return [str(k) for k in record] if isinstance(record, dict) else []
+        header = pd.read_csv(io.BytesIO(raw), nrows=0)
+        return _real_column_names(header.columns)
+    except Exception:                       # pragma: no cover - defensif
+        logger.debug("Header dataset lampiran tidak terbaca", exc_info=True)
+        return []
+
+
+def _detected_algorithms(uploaded_files) -> list[str]:
+    """Nama algoritma yang TERBACA dari berkas terunggah, tanpa duplikat.
+
+    Satu paket boleh membawa beberapa entry point, dan tiap entry point adalah
+    satu algoritma — itulah sebabnya isian ini jamak.
+    """
+    found: list[str] = []
+    for item in uploaded_files or []:
+        try:
+            source = item.getvalue().decode("utf-8", errors="replace")
+            name = (extract_registry_metadata(source, item.name)
+                    or {}).get("algorithm")
+        except Exception:                   # pragma: no cover - defensif
+            continue
+        text = str(name or "").strip()
+        if text and text not in found:
+            found.append(text)
+    return found
+
+
+def _render_detected_stages(box, uploaded_file) -> None:
+    """Fase progres yang TERBACA dari sebuah berkas — untuk diperiksa.
+
+    Ditampilkan, bukan ditanyakan: urutannya sudah ada di dalam kode, jadi
+    meminta pengunggah mengetiknya ulang akan melahirkan sumber kebenaran kedua
+    yang dapat berbeda dari kode yang benar-benar berjalan.
+
+    Yang terbaca adalah urutan KEMUNCULAN di berkas, dan itu belum tentu urutan
+    saat berjalan — fase di dalam percabangan atau perulangan dapat menipu.
+    Karena itu ia disodorkan untuk diperiksa, bukan dinyatakan sebagai fakta.
+
+    Berkas yang tidak memanggil ``_emit_progress`` tidak menghasilkan apa pun,
+    dan itu keadaan yang sah: bar progresnya berjalan tanpa nama fase.
+    """
+    try:
+        source = uploaded_file.getvalue().decode("utf-8", errors="replace")
+        stages = (extract_registry_metadata(source, uploaded_file.name)
+                  or {}).get("stages") or []
+    except Exception:                       # pragma: no cover - defensif
+        logger.debug("Fase tidak terbaca dari %s", uploaded_file.name,
+                     exc_info=True)
+        return
+    if not stages:
+        return
+    box.markdown(t("ap.detected_stages",
+                   stages=" → ".join(f"**{s}**" for s in stages)))
+
+
 def _render_pipeline_flow() -> None:
     st.subheader(t("ap.sec_upload_pipeline"))
     _render_pipeline_requirements()
@@ -1421,6 +1764,7 @@ def _render_pipeline_flow() -> None:
                 placeholder="mis. entry point / helper preprocessing",
                 help=t("ap.help_file_role"),
             )
+            _render_detected_stages(box, f)
 
     st.divider()
     st.markdown(t("ap.note_metadata"))
@@ -1432,10 +1776,68 @@ def _render_pipeline_flow() -> None:
     # lebih dari satu — dan kontrak datasetnya sendiri. Menanyakan induk kepada
     # sesuatu yang berdiri sendiri adalah pertanyaan tanpa jawaban yang benar,
     # dan jawabannya dahulu menentukan `dataset_type` yang keliru.
-    paper = c2.text_input(t("ap.lbl_paper"), key="contrib_meta_paper",
-                          placeholder="mis. Rayyan (2024), Universitas Hasanuddin")
-    algorithm = c1.text_input("Algoritma", key="contrib_meta_algo",
-                              placeholder="mis. Random Forest")
+    # JAMAK: satu paket boleh membawa beberapa entry point, dan tiap entry
+    # point adalah satu algoritma. Pilihannya diisi dari yang terbaca di
+    # berkas terunggah; `accept_new_options` menjaga yang tidak terbaca statis
+    # tetap dapat disebut.
+    algorithms_picked = c2.multiselect(
+        "Algoritma", _detected_algorithms(uploaded),
+        default=_detected_algorithms(uploaded), accept_new_options=True,
+        key="contrib_meta_algo", placeholder="mis. Random Forest")
+    # Disimpan sebagai SATU kalimat: nilai ini hanya cadangan bagi entri
+    # registry ketika kode paketnya sendiri tidak menyebut algoritmanya.
+    algorithm = ", ".join(str(a).strip() for a in algorithms_picked
+                          if str(a).strip())
+
+    # Kredit penelitian TERSTRUKTUR, bukan satu kolom teks bebas. Nama tampil
+    # research pipeline ini disusun dari ketiganya sebagai "<kredit> — <nama>",
+    # pola yang sama dengan atribusi bawaan — dan itu yang membuat labelnya
+    # tidak lagi mengulang namanya sendiri. Satu kolom bebas tidak dapat
+    # dipisah kembali menjadi bagian-bagiannya tanpa menebak.
+    # LIMA bidang, bukan tiga: panel "Tentang Research Pipeline" menggambar
+    # jenis, penulis, judul, institusi, dan tahun sebagai baris TERPISAH. Tiga
+    # bidang gabungan tidak dapat dipecah kembali menjadi lima tanpa menebak,
+    # dan menebak berarti barisnya diisi keterangan yang salah.
+    st.markdown(f"**{t('ap.sec_credit')}**")
+    k1, k2, k3 = st.columns([2, 3, 1])
+    source_type = k1.selectbox(
+        t("ap.lbl_source_type"), SOURCE_TYPES, index=None,
+        key="contrib_meta_source_type", placeholder=t("ap.ph_source_type"))
+    researcher = k2.text_input(t("ap.lbl_researcher"),
+                               key="contrib_meta_researcher",
+                               placeholder="mis. A. Muh. Rayyan Eka Putra")
+    year = k3.text_input(t("ap.lbl_year"), key="contrib_meta_year",
+                         placeholder="2026", max_chars=4)
+    k4, k5 = st.columns(2)
+    title = k4.text_input(t("ap.lbl_title"), key="contrib_meta_title",
+                          placeholder="mis. Klasifikasi Trafik Terenkripsi")
+    institution = k5.text_input(t("ap.lbl_institution"),
+                                key="contrib_meta_institution",
+                                placeholder="mis. Universitas Hasanuddin")
+    scope = st.text_input(t("ap.lbl_scope"), key="contrib_meta_scope",
+                          placeholder="mis. Perbandingan Random Forest dan "
+                                      "Decision Tree pada trafik kampus")
+    paper = research_credit(researcher, year, institution)
+    if paper:
+        prose(t("ap.credit_preview", credit=paper, name=(name or "…").strip()),
+              key="credit_preview")
+
+    # ── Sumber DATASET ───────────────────────────────────────────────────
+    # Dari mana datanya berasal, dan milik siapa. Pipeline bawaan menyebutnya
+    # ("HIKARI2021 (varian ALLFLOWMETER) — Ferriyan (2022)"); tanpa ini, baris
+    # "Sumber dataset" pada panel unggahan kosong, dan pembacanya tidak punya
+    # cara mengetahui data itu datang dari mana.
+    st.markdown(f"**{t('ap.sec_dataset_source')}**")
+    s1, s2 = st.columns(2)
+    dataset_name = s1.text_input(t("ap.lbl_dataset_name"),
+                                 key="contrib_meta_dataset_name",
+                                 placeholder="mis. Trafik Kampus 2026")
+    dataset_attribution = s2.text_input(
+        t("ap.lbl_dataset_attribution"), key="contrib_meta_dataset_attr",
+        placeholder="mis. Tim Jaringan UNHAS (2026)")
+    dataset_note = st.text_input(t("ap.lbl_dataset_note"),
+                                 key="contrib_meta_dataset_note",
+                                 placeholder=t("ap.ph_dataset_note"))
     notes = st.text_area(t("ap.lbl_note"), key="contrib_meta_notes", height=80,
                          help=t("ap.help_optional_report"))
 
@@ -1454,25 +1856,34 @@ def _render_pipeline_flow() -> None:
     # `prose`, bukan `caption`: ini kalimat penjelasan setara bagian
     # lain di halaman ini, dan kuota teks kecil per halaman = 3.
     prose(t("ap.help_declare_schema"), key="declare_schema")
+
+    # Nama kolom DIPILIH dari dataset yang dilampirkan, bukan diketik. Salah
+    # ketik satu huruf membuat kontrak ini tidak cocok dengan datasetnya, dan
+    # tidak ada yang memberi tahu sampai uji coba dijalankan. Selama datasetnya
+    # belum dilampirkan daftarnya kosong dan pengunggah tetap dapat mengetik
+    # sendiri — tanpa dataset, memang tidak ada yang dapat ditawarkan.
+    known = _attached_dataset_columns()
+    if known:
+        prose(t("ap.columns_from_dataset", count=len(known)),
+              key="columns_from_dataset")
+
     d1, d2 = st.columns(2)
-    label_column = d1.text_input(
-        t("ap.lbl_label_column"), key="contrib_schema_label",
+    label_pick = d1.multiselect(
+        t("ap.lbl_label_column"), known, max_selections=1,
+        accept_new_options=True, key="contrib_schema_label",
         placeholder="mis. attack")
+    label_column = label_pick[0] if label_pick else ""
     file_format = d2.selectbox(
         t("ap.lbl_file_format"), ["csv", "ndjson"], index=0,
         format_func=lambda value: value.upper(),
         key="contrib_schema_format")
-    required_raw = st.text_area(
-        t("ap.lbl_required_columns"), key="contrib_schema_cols", height=80,
-        placeholder="flow_duration, src_port, attack",
+    columns = st.multiselect(
+        t("ap.lbl_required_columns"), known, accept_new_options=True,
+        key="contrib_schema_cols", placeholder="flow_duration, src_port, attack",
         help=t("ap.help_required_columns"))
-    # Koma ATAU baris baru — pengunggah tidak perlu menebak pemisahnya.
-    columns = [c.strip()
-               for c in (required_raw or "").replace("\n", ",").split(",")
-               if c.strip()]
     declared_schema = {
         "label_column": (label_column or "").strip(),
-        "expected_columns": columns,
+        "expected_columns": [str(c).strip() for c in columns if str(c).strip()],
         "file_format": file_format,
     }
     if file_format == "ndjson":
@@ -1499,7 +1910,23 @@ def _render_pipeline_flow() -> None:
         # dibentuk dari NAMA research pipeline ini saat pengajuan disetujui.
         "dataset_type": DATASET_TYPE_UNREGISTERED,
         "algorithm": algorithm,
+        # Kalimat kreditnya — dipakai apa adanya oleh entri registry dan
+        # laporan, persis seperti sebelumnya.
         "paper": paper,
+        # …dan bagian-bagiannya, yang tidak dapat dipisah kembali dari
+        # kalimat itu tanpa menebak. Kelimanya menjadi baris TERPISAH pada
+        # panel "Tentang Research Pipeline".
+        "source_type": source_type,
+        "researcher": researcher,
+        "title": title,
+        "institution": institution,
+        "year": year,
+        # Dari mana datanya berasal, dan milik siapa.
+        "dataset_name": dataset_name,
+        "dataset_attribution": dataset_attribution,
+        "dataset_note": dataset_note,
+        # Apa yang dibandingkan/dicakup penelitian ini.
+        "scope": scope,
         "notes": notes,
     }
 
@@ -1508,7 +1935,7 @@ def _render_pipeline_flow() -> None:
     # nonaktif SELALU menempel pada tombolnya — tombol mati tanpa keterangan
     # membuat pengunggah menebak apa yang kurang.
     blocked = (t("ap.err_schema_incomplete", fields=", ".join(missing))
-               if missing else "")
+               if missing else "") or _name_taken_warning(name)
     if st.button(t("ap.btn_upload_validate"), type="primary", key="contrib_validate",
                  disabled=not may_upload or bool(blocked),
                  help=blocked or None):
@@ -1860,6 +2287,40 @@ def _sample_note(profile: dict) -> str:
     return f"Berdasarkan seluruh {n} baris berkas ini."
 
 
+#: Sebanyak ini kelas ditulis utuh pada baris profil; sisanya diringkas.
+#: Dataset penelitian di sini biner, tetapi berkas kontribusi boleh membawa
+#: berapa pun kelas — dan satu baris kartu tidak boleh tumbuh tanpa batas.
+_PROFILE_MAX_CLASSES = 6
+
+
+def _class_distribution_text(profile: dict) -> str:
+    """Distribusi kelas sebagai SATU nilai, siap menjadi baris profil.
+
+    Angkanya persis seperti sebelumnya — jumlah dan persentase per kelas, dari
+    sampel yang sama. Yang berubah hanya bentuknya: satu nilai yang dapat
+    berdiri sejajar dengan "Baris" dan "Tipe data", bukan daftar tersendiri
+    yang melayang di luar kartu.
+
+    Berkas NDJSON tidak punya kolom label; untuk itu yang dilaporkan adalah
+    indikasi kelasnya — dan itu dinyatakan sebagai indikasi, bukan distribusi.
+    """
+    counts = profile.get("class_counts") or {}
+    if counts:
+        total = sum(counts.values()) or 1
+        bagian = [f"`{nilai}` {n:,} ({n / total * 100:.1f}%)"
+                  for nilai, n in list(counts.items())[:_PROFILE_MAX_CLASSES]]
+        sisa = len(counts) - len(bagian)
+        if sisa > 0:
+            bagian.append(f"… (+{sisa} kelas lain)")
+        return " · ".join(bagian)
+
+    if profile.get("detected_format") == "ndjson":
+        return (f"Event TLS {profile.get('tls_rows', 0):,} · "
+                f"beralert (calon kelas attack) "
+                f"{profile.get('alert_rows', 0):,}")
+    return ""
+
+
 def _render_dataset_profile(profile: dict, filename: str, size_bytes: int) -> None:
     """Profil deskriptif berkas — SEMUA dari sampel yang sudah dibaca diagnosa.
     Tidak ada pembacaan berkas tambahan di sini."""
@@ -1892,6 +2353,15 @@ def _render_dataset_profile(profile: dict, filename: str, size_bytes: int) -> No
     if profile.get("malformed_lines"):
         pairs.append(("Baris gagal diparse", f"{profile['malformed_lines']:,} (diabaikan)"))
 
+    # Distribusi kelas adalah FAKTA PROFIL, sejenis dengan jumlah baris dan
+    # tipe data — jadi tempatnya di dalam kartu, bukan melayang di bawahnya.
+    # Sebelumnya ia digambar di luar dan karena itu tidak terbaca sebagai
+    # bagian profil sama sekali.
+    distribusi = _class_distribution_text(profile)
+    if distribusi:
+        pairs.append(("Distribusi kelas" if profile.get("class_counts")
+                      else "Indikasi kelas", distribusi))
+
     with st.container(border=True):
         for label, value in pairs:
             cols = st.columns([1, 2])
@@ -1910,18 +2380,6 @@ def _render_dataset_profile(profile: dict, filename: str, size_bytes: int) -> No
         with st.expander(f"Semua {len(columns)} {unit.lower()}", expanded=False):
             st.code("\n".join(str(c) for c in columns), language=None)
 
-    # Distribusi kelas dari sampel — selalu dengan keterangan sampel.
-    counts = profile.get("class_counts") or {}
-    if counts:
-        total = sum(counts.values()) or 1
-        st.markdown("Distribusi kelas")
-        for value, n in counts.items():
-            st.markdown(f"- `{value}` — {n:,} ({n / total * 100:.1f}%)")
-    elif is_json:
-        st.markdown("Indikasi kelas")
-        st.markdown(f"- Event TLS — {profile.get('tls_rows', 0):,}")
-        st.markdown(f"- Event beralert (calon kelas attack) — "
-                    f"{profile.get('alert_rows', 0):,}")
     st.markdown(_sample_note(profile))
 
 

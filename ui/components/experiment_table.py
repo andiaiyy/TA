@@ -776,19 +776,25 @@ def csv_semantics_text(family) -> str:
     return f"{FAMILY_LABELS[family]}: {semantics}"
 
 
-def row_params_text(row) -> str:
-    """Parameter satu baris sebagai teks, dengan nilai bawaan bila berbeda."""
+def row_params_text(row, locked_reader=None) -> str:
+    """Parameter satu baris sebagai teks, dengan nilai bawaan bila berbeda.
+
+    ``locked_reader`` boleh disuntikkan. Untuk pipeline kontribusi jawabannya
+    datang dari registry — satu kueri per baris — sedangkan CSV ini disusun
+    ulang pada SETIAP penggambaran, demi berkas yang mungkin tidak pernah
+    diunduh. Pemanggil yang punya pembaca ber-cache memberikannya di sini.
+    """
     used = row.get("_params_used") or {}
     if not used:
         return ""
     try:
-        locked = locked_params(row.get("pipeline") or "")
+        locked = (locked_reader or locked_params)(row.get("pipeline") or "")
     except Exception:                   # pragma: no cover - defensif
         locked = {}
     return format_params(used, locked)
 
 
-def to_csv(rows, columns) -> str:
+def to_csv(rows, columns, locked_reader=None) -> str:
     """CSV yang MENGIKUTI kolom & filter aktif, bukan dump basis data.
 
     Tiga kolom SELALU ikut, apa pun pilihan kolom pengguna: semantik metrik,
@@ -814,7 +820,7 @@ def to_csv(rows, columns) -> str:
         note = csv_semantics_text(fam)
         writer.writerow([cell_text(row, c) for c in columns]
                         + [note, run_mode_badge_text(row.get("_mode")),
-                           row_params_text(row)])
+                           row_params_text(row, locked_reader)])
     return buffer.getvalue()
 
 

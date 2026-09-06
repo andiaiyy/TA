@@ -162,10 +162,17 @@ def test_the_real_catalog_still_contains_every_built_in():
 
 
 def test_the_real_titles_come_from_the_attribution_source():
-    from config.research_attribution import get_research_display_name
+    """Sumbernya `research_registry`, bukan `config.research_attribution`.
+
+    Yang statis hanya mengenal jenis BAWAAN; sebuah research pipeline
+    kontribusi menjadi dikenal justru lewat registry. Membandingkan judul
+    katalog dengannya akan menuntut katalog melupakan yang terunggah — persis
+    kebalikan dari yang seharusnya dijaga.
+    """
+    from orchestrator.research_registry import display_name_for
 
     for group in pc.build_catalog():
-        assert group["title"] == get_research_display_name(group["dataset_type"])
+        assert group["title"] == display_name_for(group["dataset_type"])
         assert group["title"] != group["dataset_type"]      # benar-benar beratribusi
 
 

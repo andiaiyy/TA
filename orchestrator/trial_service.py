@@ -281,11 +281,22 @@ def resolve_dataset_type(item: dict, source: str,
     2. **deklarasi pipeline** (dibaca statis dari sumbernya) — pernyataan
        penulis pipeline tentang data yang ia harapkan;
     3. **metadata pengajuan** — isian kontributor pada formulir, yang paling
-       mudah terlewat dan karena itu paling akhir.
+       mudah terlewat dan karena itu paling akhir;
+    4. **identitas yang AKAN dimilikinya** bila disetujui — hanya untuk
+       pengajuan yang berdiri sendiri.
 
     Untuk dataset LAMPIRAN, langkah 1 dilewati: lampiran tidak punya jenis
     sendiri — ia disediakan UNTUK pipeline ini, jadi jenisnya adalah jenis
     yang pipeline itu deklarasikan (dengan cadangan metadata pengajuan).
+
+    Langkah 4 ada karena tanpa itu jawabannya MELINGKAR. Identitas sebuah
+    research pipeline berdiri sendiri (`uploaded:<nama>`) baru dibuat saat
+    pengajuannya disetujui; persetujuan menuntut uji coba yang lulus; dan uji
+    coba menuntut jenis dataset. Tidak satu pun unggahan berdiri sendiri
+    pernah dapat melewati ketiganya. Yang dipakai di sini DIHITUNG dari
+    pengajuan itu sendiri — namanya membentuk pengenalnya — bukan dibaca dari
+    tabel yang memang belum terisi, dan tidak ada baris yang didaftarkan lebih
+    awal karenanya.
 
     Mengembalikan "" bila tidak ada satu pun sumber menghasilkan jenis yang
     dapat dipakai. Pemanggil WAJIB berhenti pada keadaan itu — lihat
@@ -300,7 +311,46 @@ def resolve_dataset_type(item: dict, source: str,
     if found:
         return found
 
-    return _usable_type((item.get("metadata") or {}).get("dataset_type"))
+    found = _usable_type((item.get("metadata") or {}).get("dataset_type"))
+    if found:
+        return found
+
+    return planned_dataset_type(item)
+
+
+def planned_dataset_type(item: dict) -> str:
+    """Pengenal yang AKAN dimiliki pengajuan berdiri sendiri; "" bila bukan.
+
+    Dipisah sebagai fungsi tersendiri supaya "jenis apa yang dipakai menguji"
+    dan "skema mana yang dipakai membacanya" dijawab dari SATU sumber — lihat
+    :func:`planned_schema`.
+    """
+    dataset_type, _schema = _planned_identity(item)
+    return dataset_type
+
+
+def planned_schema(item: dict) -> dict:
+    """Kontrak dataset yang dideklarasikan pengajuan berdiri sendiri; {} bila
+    bukan.
+
+    Inilah yang DISODORKAN ke pelaksana uji coba. Tanpa itu ia akan mencari
+    skemanya di tabel `research_pipelines`, yang baru terisi setelah pengajuan
+    disetujui — kunci kedua pada kebuntuan yang sama.
+    """
+    _dataset_type, schema = _planned_identity(item)
+    return schema
+
+
+def _planned_identity(item: dict) -> tuple[str, dict]:
+    """(pengenal, skema) terencana — atau ``("", {})``. Tidak pernah melempar."""
+    from orchestrator.submission_service import planned_research_identity
+
+    try:
+        return planned_research_identity(item)
+    except Exception:                        # pragma: no cover - defensif
+        logger.exception("Identitas terencana tidak terbaca untuk #%s",
+                         (item or {}).get("id"))
+        return "", {}
 
 
 def dataset_type_blocker(item: dict, source: str,
@@ -326,6 +376,7 @@ def dataset_type_blocker(item: dict, source: str,
 def _entry_from_submission(item: dict) -> tuple[Path, str, str]:
     """(berkas titik masuk, nama kelas, sha256 berkas) sebuah pengajuan."""
     from orchestrator.dynamic_registry import file_sha256
+    from orchestrator.submission_service import stored_location
 
     metadata = item.get("metadata") or {}
     if isinstance(metadata, str):
@@ -335,7 +386,7 @@ def _entry_from_submission(item: dict) -> tuple[Path, str, str]:
             metadata = {}
     entry_file = metadata.get("entry_filename") or metadata.get("entry_file")
     entry_class = metadata.get("class_name") or metadata.get("entry_class")
-    folder = Path(item["stored_path"])
+    folder = stored_location(item["stored_path"])
     if not entry_file or not entry_class:
         raise TrialError(
             "Pengajuan ini tidak mencatat titik masuk & nama kelasnya, "
@@ -424,10 +475,16 @@ def run_trial(submission_id: int, *, dataset_type: str | None = None,
         dataset_path=dataset_path, started_by=actor["username"],
         started_at=started.isoformat(timespec="seconds"), db_path=db_path)
 
+    # Skema DISODORKAN, bukan dicari pelaksananya. Research pipeline yang
+    # berdiri sendiri belum terdaftar saat diuji, jadi mencarinya di tabel
+    # `research_pipelines` akan selalu gagal — kunci kedua pada kebuntuan yang
+    # sama. Untuk pengajuan yang menumpang jenis bawaan nilainya {} dan
+    # pelaksananya mencari seperti sebelumnya.
     outcome = _execute_trial(
         trial_id=trial_id, entry_path=entry_path, entry_class=entry_class,
         entry_hash=entry_hash, dataset_type=dataset_type,
-        dataset_path=dataset_path, started=started, db_path=db_path)
+        dataset_path=dataset_path, started=started, db_path=db_path,
+        schema=planned_schema(item))
     _record_trail(submission_id, db_path=db_path, source=source,
                   dataset_label=dataset_label)
     return outcome
@@ -449,6 +506,19 @@ def _resolve_dataset(item: dict, source: str,
         # Verifikasi hash: berkas yang berubah setelah diajukan ditolak.
         return verify_attachment(item), info.get("filename") or "—"
 
+    # Research pipeline yang BERDIRI SENDIRI hanya boleh diuji dengan
+    # datasetnya sendiri. Menguji dengan dataset platform akan meluluskannya
+    # atas data yang tidak akan pernah ia pakai: setelah disetujui, ia terikat
+    # ke dataset kontributor, sehingga sertifikat "sudah diuji" berbicara
+    # tentang data yang salah. Itu lebih berbahaya daripada tidak diuji sama
+    # sekali, karena ia terbaca sebagai bukti.
+    if planned_dataset_type(item):
+        raise TrialError(
+            "Research pipeline ini berdiri sendiri, jadi ia hanya dapat diuji "
+            "dengan dataset yang dilampirkan pengunggahnya — bukan dataset "
+            "platform.",
+            key="td.err_standalone_needs_own_dataset")
+
     if not dataset_path:
         raise TrialError(
             "Pilih dataset lebih dulu sebelum menjalankan uji coba.",
@@ -457,7 +527,8 @@ def _resolve_dataset(item: dict, source: str,
 
 
 def _execute_trial(*, trial_id, entry_path, entry_class, entry_hash,
-                   dataset_type, dataset_path, started, db_path, runner=None):
+                   dataset_type, dataset_path, started, db_path, runner=None,
+                   schema=None):
     """Jalankan satu uji coba dan catat hasilnya.
 
     Setiap kegagalan dicatat dengan TAHAP tempatnya terjadi. Itulah nilai
@@ -475,7 +546,7 @@ def _execute_trial(*, trial_id, entry_path, entry_class, entry_hash,
             entry_file=str(entry_path), entry_class=entry_class,
             entry_hash=entry_hash, dataset_type=dataset_type,
             dataset_path=dataset_path, max_rows=TRIAL_LIMITS["max_rows"],
-            max_seconds=TRIAL_LIMITS["max_seconds"])
+            max_seconds=TRIAL_LIMITS["max_seconds"], schema=schema or None)
     except Exception as exc:
         # Pelaksana berbatas menjadikan kegagalan PIPELINE sebagai hasil, bukan
         # lemparan — tetapi ia masih dapat gagal karena sebab LINGKUNGAN

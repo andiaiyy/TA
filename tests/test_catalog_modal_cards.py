@@ -117,6 +117,17 @@ def test_the_chips_escape_their_content():
     assert "&lt;img" in html
 
 
+def _has_snapshot(group: dict) -> bool:
+    """Apakah keterangan grup ini memang sudah pernah dipotret.
+
+    Sebuah pipeline kontribusi yang terdaftar SEBELUM platform menyimpan potret
+    `get_info()` tidak punya keterangan untuk ditampilkan. Menuntut bagian
+    lipatan darinya berarti menuntut katalog mengarang isi — yang benar adalah
+    ia mengatakan keadaannya, dan itu diuji tersendiri di bawah.
+    """
+    return all(algo.get("info") for algo in group["algorithms"])
+
+
 def test_every_real_group_produces_a_usable_modal():
     for group in pc.build_catalog():
         rows = pc.modal_rows(group)
@@ -124,12 +135,24 @@ def test_every_real_group_produces_a_usable_modal():
         labels = [label for _i, label, _v in rows]
         assert any(l.startswith("Algoritma (") for l in labels)
         assert "Paper" in labels
-        assert pc.modal_sections(group)          # minimal satu bagian dilipat
+        if _has_snapshot(group):
+            assert pc.modal_sections(group)      # minimal satu bagian dilipat
+
+
+def test_a_group_without_a_snapshot_says_so_instead_of_showing_nothing():
+    """Kekosongan yang DINYATAKAN, bukan modal yang diam."""
+    for group in pc.build_catalog():
+        if _has_snapshot(group):
+            continue
+        blob = repr(pc.modal_rows(group)) + repr(pc.modal_sections(group))
+        assert pc.uploaded_notice()[:40] in blob, group["dataset_type"]
 
 
 def test_nothing_that_left_the_block_is_lost():
     """Setiap keterangan yang dulu tampil di blok kini ada di modal."""
     for group in pc.build_catalog():
+        if not _has_snapshot(group):
+            continue
         blob = (repr(pc.modal_rows(group)) + repr(pc.modal_sections(group))).lower()
         for moved in ("feature selection", "hyperparameter", "preprocessing",
                       "paper"):

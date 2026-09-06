@@ -244,17 +244,37 @@ def uploaded_notice() -> str:
     return t(UPLOADED_NOTICE_KEY)
 
 
-def research_scope(dataset_type: str) -> str:
-    """Penjelasan singkat satu kalimat, dari bidang `scope` sumber atribusi."""
+def research_facts(dataset_type: str) -> dict:
+    """Cakupan + institusi + tahun sebuah research, dari SATU pembacaan.
+
+    Ketiganya tinggal di sumber atribusi yang sama. Membacanya sekali per grup
+    membuat penyaring kategori tidak menambah satu pun kueri: katalog memang
+    sudah membaca atribusi itu untuk kalimat penjelasannya.
+
+    Kosong bukan kesalahan. Atribusi tersimpan adalah POTRET saat persetujuan,
+    dan pengajuan yang disetujui sebelum formulirnya diperluas tidak membawa
+    institusi maupun tahun sama sekali.
+    """
     try:
         from orchestrator.research_registry import (
             attribution_for as get_research_attribution,
         )
         attribution = get_research_attribution(dataset_type) or {}
-        key = attribution.get("scope_key")
-        return t(key) if key else attribution.get("scope", "")
     except Exception:                       # pragma: no cover - defensif
-        return ""
+        return {"scope": "", "institution": "", "year": ""}
+
+    key = attribution.get("scope_key")
+    source = attribution.get("pipeline_source") or {}
+    return {
+        "scope": t(key) if key else attribution.get("scope", ""),
+        "institution": str(source.get("institution") or "").strip(),
+        "year": str(source.get("year") or "").strip(),
+    }
+
+
+def research_scope(dataset_type: str) -> str:
+    """Penjelasan singkat satu kalimat, dari bidang `scope` sumber atribusi."""
+    return research_facts(dataset_type)["scope"]
 
 
 def dataset_lines(dataset_type: str) -> list[str]:
@@ -322,24 +342,42 @@ def entry_state(pipeline_id: str, entry: dict) -> tuple[str, str]:
     except Exception:                       # pragma: no cover - defensif
         pass
 
-    if not _has_dataset_for(entry.get("dataset_type")):
-        return STATE_NO_DATASET, t("re.cat_no_dataset_reason")
+    dataset_type = entry.get("dataset_type")
+    if not has_dataset_for(dataset_type):
+        # Dua sebab yang berbeda, dan karena itu dua jalan keluar yang berbeda.
+        # Research pipeline KONTRIBUSI hanya boleh memakai dataset yang terikat
+        # padanya; mengunggah berkas ke `storage/datasets/` tidak akan pernah
+        # menolongnya. Kalimat lama menyuruh tepat itu — sebuah instruksi yang
+        # tidak mungkin berhasil.
+        from database.models import is_uploaded_research
+
+        return STATE_NO_DATASET, t(
+            "re.cat_no_dataset_reason_uploaded"
+            if is_uploaded_research(dataset_type or "")
+            else "re.cat_no_dataset_reason")
     return STATE_OK, ""
 
 
-def _has_dataset_for(dataset_type: str | None) -> bool:
-    """Adakah dataset platform berjenis ini? Tidak pernah melempar."""
+def has_dataset_for(dataset_type: str | None) -> bool:
+    """Adakah dataset yang dapat dipakai jenis ini? Tidak pernah melempar.
+
+    Publik karena halaman "Aktif" membacanya juga: tanpa itu tabel di sana
+    menyebut sebuah pipeline "aktif" sementara halaman Jalankan Eksperimen
+    menyebutnya belum dapat dijalankan — dua halaman, dua kebenaran.
+    """
     if not dataset_type:
         return False
     try:
-        from contracts.dataset_schemas import get_schema
+        from ui.views.run_experiment import _list_dataset_files, _schema_of
 
-        if get_schema(dataset_type) is None:
-            # Jenis dataset yang skemanya tidak dikenal platform: tidak ada
-            # berkas yang dapat dicocokkan dengannya.
-            return False
-        from ui.views.run_experiment import _list_dataset_files
-
+        # Skema GABUNGAN: bawaan + kontrak yang dideklarasikan kontributor.
+        # Sebelumnya di sini terpasang `contracts.get_schema`, yang hanya
+        # mengenal jenis bawaan — sehingga SETIAP research pipeline kontribusi
+        # dinyatakan "belum ada datasetnya", tanpa pertanyaan itu pernah sampai
+        # ke `_list_dataset_files`, satu-satunya yang tahu bahwa paket
+        # kontribusi membawa datasetnya sendiri.
+        if not _schema_of(dataset_type):
+            return False                     # jenis yang benar-benar asing
         return bool(_list_dataset_files(dataset_type))
     except Exception:                       # pragma: no cover - defensif
         return True                          # jangan menuduh saat ragu
@@ -381,26 +419,40 @@ def build_catalog(*, registry_reader=None, info_reader=None,
         dataset_type = (entry or {}).get("dataset_type")
         if not dataset_type:
             continue
+        if dataset_type not in groups:
+            facts = research_facts(dataset_type)
         group = groups.setdefault(dataset_type, {
             "dataset_type": dataset_type,
             "title": group_title(dataset_type, name_reader),
             # Penjelasan SINGKAT satu kalimat — bukan karangan: `scope` memang
             # ada sebagai bidang tersendiri di sumber atribusi.
-            "short": research_scope(dataset_type),
+            "short": facts["scope"],
+            # Dipakai penyaring kategori. Diambil dari pembacaan atribusi yang
+            # SAMA dengan kalimat di atas — bukan kueri tambahan per kategori.
+            "institution": facts["institution"],
+            "year": facts["year"],
             "dataset_lines": dataset_lines(dataset_type),
             "paper": "",
             "algorithms": [],
         })
-        info = {}
-        try:
-            info = info_reader(pipeline_id) or {}
-        except Exception:                   # pipeline rusak != katalog rusak
+        if entry.get("uploaded"):
+            # POTRET `get_info()`, diambil saat pipeline ini didaftarkan.
+            # Katalog tetap tidak pernah memuat kode kontribusi — sekarang ia
+            # tidak perlu, karena keterangannya sudah tersimpan bersama
+            # barisnya. Yang dulu kosong bukan karena tidak ada keterangan,
+            # melainkan karena tidak ada tempat menyimpannya.
+            info = dict(entry.get("info") or {})
+        else:
             info = {}
+            try:
+                info = info_reader(pipeline_id) or {}
+            except Exception:               # pipeline rusak != katalog rusak
+                info = {}
         state, reason = entry_state(pipeline_id, entry)
         summary = algorithm_summary(info)
         details = algorithm_details(info)
-        # Pipeline kontribusi tidak punya `get_info()` di sini — katalog
-        # sengaja tidak memuat kodenya. Kekosongan itu DINYATAKAN, bukan
+        # Potretnya kosong hanya bila pipeline ini terdaftar SEBELUM potret
+        # ada. Kekosongan itu DINYATAKAN beserta cara mengisinya, bukan
         # dibiarkan tampil sebagai bidang kosong tanpa penjelasan.
         if entry.get("uploaded") and not summary and not details:
             from ui.i18n import t
@@ -468,6 +520,188 @@ def group_problems(group: dict) -> list[str]:
             seen.add(line)
             out.append(line)
     return out
+
+
+# ── Cari & saring: fungsi MURNI, tampilan hanya merangkainya ──────────────
+# Pola yang sama dengan antrean peninjauan (`submission_review.search_text` →
+# `filter_pending` → `result_note`), supaya kedua daftar berperilaku sama dan
+# diuji dengan cara yang sama — tanpa Streamlit.
+
+#: Nilai untuk grup yang TIDAK menyebutkan kategori itu. Ia sebuah pilihan
+#: tersendiri, bukan ketiadaan: tanpa itu, menyaring institusi membuat setiap
+#: pipeline kontribusi lama lenyap tanpa sebab yang terbaca.
+UNSPECIFIED = "__unspecified__"
+
+CATEGORY_ORIGIN = "origin"
+CATEGORY_DATASET = "dataset_type"
+CATEGORY_FORMAT = "file_format"
+CATEGORY_ALGORITHM = "algorithm"
+CATEGORY_INSTITUTION = "institution"
+CATEGORY_YEAR = "year"
+
+
+def _origin_values(group: dict) -> list[str]:
+    uploaded = any(a.get("uploaded") for a in group.get("algorithms") or [])
+    return [t("re.cat_origin_uploaded" if uploaded else "re.cat_origin_builtin")]
+
+
+def _algorithm_values(group: dict) -> list[str]:
+    return sorted({str(a.get("algorithm") or "").strip()
+                   for a in group.get("algorithms") or []
+                   if str(a.get("algorithm") or "").strip()})
+
+
+def _format_values(group: dict) -> list[str]:
+    """Format berkas dari baris kontrak yang SUDAH disusun untuk grup ini."""
+    for line in group.get("dataset_lines") or []:
+        label, _, value = line.partition(": ")
+        if label.startswith("Format berkas"):
+            return [plain_text(value).split("—")[0].strip()]
+    return []
+
+
+#: (kunci, kunci label, pembaca nilai). Urutannya urutan tampil.
+CATEGORIES = (
+    (CATEGORY_ORIGIN, "re.cat_by_origin", _origin_values),
+    (CATEGORY_DATASET, "re.cat_by_dataset",
+     lambda g: [str(g.get("dataset_type") or "").strip()]),
+    (CATEGORY_FORMAT, "re.cat_by_format", _format_values),
+    (CATEGORY_ALGORITHM, "re.cat_by_algorithm", _algorithm_values),
+    (CATEGORY_INSTITUTION, "re.cat_by_institution",
+     lambda g: [institution_label(g.get("institution"))]),
+    (CATEGORY_YEAR, "re.cat_by_year",
+     lambda g: [str(g.get("year") or "").strip()]),
+)
+
+_READERS = {key: reader for key, _label, reader in CATEGORIES}
+
+
+def category_values(group: dict, category: str) -> list[str]:
+    """Nilai satu grup untuk sebuah kategori; ``UNSPECIFIED`` bila tidak ada."""
+    reader = _READERS.get(category)
+    if reader is None:
+        return [UNSPECIFIED]
+    try:
+        values = [v for v in (reader(group) or []) if v]
+    except Exception:                       # pragma: no cover - defensif
+        values = []
+    return values or [UNSPECIFIED]
+
+
+#: Kata yang MENANDAI sebuah lembaga di dalam alamat afiliasi yang panjang.
+#: Dipakai memilih ruas mana yang layak menjadi label kotak centang.
+_INSTITUTION_WORDS = ("universitas", "university", "institut", "institute",
+                      "politeknik", "polytechnic", "sekolah tinggi", "akademi",
+                      "college", "school")
+
+
+def institution_label(raw: str) -> str:
+    """Nama lembaga dari sebuah alamat afiliasi yang panjang.
+
+    Aturannya dinyatakan, bukan potong sembarang. Afiliasi ditulis dari yang
+    paling khusus ke paling umum dan sering berakhir pada KOTA:
+
+        "Program Studi …, Fakultas Teknik, Universitas Hasanuddin, Gowa"
+
+    Mengambil ruas terakhir menghasilkan "Gowa" — nama kota, bukan lembaga.
+    Jadi yang dicari adalah ruas yang MENYEBUT lembaganya; bila tidak ada satu
+    pun, barulah ruas terakhir dipakai. Nilai tanpa koma dibiarkan apa adanya.
+
+    Hasilnya menjadi NILAI fasetnya, bukan sekadar labelnya: dua afiliasi yang
+    berbeda kata demi kata tetapi menyebut lembaga yang sama harus menjadi SATU
+    kotak centang. Dua kotak berlabel "Universitas Hasanuddin" berdampingan
+    tidak dapat dibedakan oleh siapa pun yang membacanya.
+    """
+    parts = [p.strip() for p in str(raw or "").split(",") if p.strip()]
+    if not parts:
+        return ""
+    for part in parts:
+        if any(word in part.lower() for word in _INSTITUTION_WORDS):
+            # Keterangan dalam kurung ("(afiliasi penulis pertama)") adalah
+            # catatan, bukan bagian nama lembaganya.
+            return part.split("(")[0].strip() or part
+    return parts[-1]
+
+
+def value_label(value: str) -> str:
+    """Label sebuah nilai faset. Nilainya sudah siap baca; hanya penanda
+    "tidak disebutkan" yang perlu diterjemahkan."""
+    if value == UNSPECIFIED:
+        return t("re.cat_value_unspecified")
+    return str(value)
+
+
+def catalog_search_text(group: dict) -> str:
+    """Teks yang dicari untuk satu grup, huruf kecil.
+
+    Seluruhnya dari yang SUDAH ada di grup — tidak ada berkas yang dibuka dan
+    tidak ada kueri yang dijalankan untuk menyusunnya.
+    """
+    parts = [str(group.get("title") or ""), str(group.get("dataset_type") or ""),
+             str(group.get("short") or ""), str(group.get("paper") or ""),
+             str(group.get("institution") or ""), str(group.get("year") or "")]
+    parts += _algorithm_values(group)
+    return " ".join(p for p in parts if p).lower()
+
+
+def filter_catalog(catalog, query: str):
+    """Grup yang cocok dengan kata pencarian. Kosong = seluruhnya."""
+    text = str(query or "").strip().lower()
+    if not text:
+        return list(catalog or [])
+    return [g for g in catalog or [] if text in catalog_search_text(g)]
+
+
+def catalog_categories(catalog) -> list[dict]:
+    """Kategori yang LAYAK dipilih, beserta nilai & jumlahnya.
+
+    Sebuah kategori dibuang bila nilainya kurang dari dua: penyaring dengan
+    satu pilihan tidak menyaring apa pun, ia hanya memakan ruang. Inilah yang
+    membuat daftarnya mengikuti isi katalog, bukan daftar tetap yang lama-lama
+    menjadi bohong.
+    """
+    groups = list(catalog or [])
+    out = []
+    for key, label_key, _reader in CATEGORIES:
+        counts: dict[str, int] = {}
+        for group in groups:
+            for value in category_values(group, key):
+                counts[value] = counts.get(value, 0) + 1
+        if len(counts) < 2:
+            continue
+        values = sorted(counts.items(),
+                        key=lambda pair: (pair[0] == UNSPECIFIED,
+                                          value_label(pair[0]).lower()))
+        out.append({"key": key, "label": t(label_key), "values": values})
+    return out
+
+
+def apply_filters(catalog, selected: dict):
+    """DAN antar kategori, ATAU di dalam satu kategori."""
+    groups = list(catalog or [])
+    for category, wanted in (selected or {}).items():
+        chosen = set(wanted or ())
+        if not chosen:
+            continue
+        groups = [g for g in groups
+                  if chosen & set(category_values(g, category))]
+    return groups
+
+
+def active_filter_text(selected: dict) -> str:
+    """Kalimat "Aktif: …" — penyaring yang menyembunyikan baris harus TERBACA.
+
+    Penyaringan bertingkat aman hanya bila apa pun yang sedang menyaring tetap
+    tercetak meski kategorinya sedang tidak dibuka.
+    """
+    labels = {key: t(label_key) for key, label_key, _ in CATEGORIES}
+    parts = []
+    for key, _label_key, _reader in CATEGORIES:
+        chosen = sorted((selected or {}).get(key) or ())
+        if chosen:
+            parts.append(f"{labels[key]} = "
+                         + ", ".join(value_label(v) for v in chosen))
+    return " · ".join(parts)
 
 
 def catalog_counts(catalog) -> dict:
@@ -560,6 +794,18 @@ def modal_sections(group: dict) -> list[tuple[str, list[tuple[str, object]]]]:
                    if (algo.get("info") or {}).get(key)]
         if entries:
             sections.append((title, entries))
+
+    # Algoritma yang keterangannya belum pernah dipotret. Kartunya sudah
+    # mengatakannya; tanpa baris ini modalnya justru DIAM — dan modal yang
+    # terbuka lalu tidak menjelaskan apa pun lebih membingungkan daripada
+    # kartu yang menyatakan kekosongannya.
+    from ui.i18n import t
+
+    missing = [(algo["algorithm"], uploaded_notice())
+               for algo in group.get("algorithms") or []
+               if not (algo.get("info") or {})]
+    if missing:
+        sections.append((t(UPLOADED_NOTICE_LABEL_KEY), missing))
     return sections
 
 
@@ -893,6 +1139,80 @@ def rows_html(rows) -> str:
     return f'<div class="ids-cat-rows">{items}</div>'
 
 
+#: Kunci session_state penyaring katalog. Berawalan `_cat_` sehingga
+#: `page_flags.VIEW_STATE_PREFIXES` membuangnya saat pengguna pindah halaman.
+_QUERY_KEY = "_cat_query"
+_CATEGORY_KEY = "_cat_category"
+_SELECTED_KEY = "_cat_selected"
+
+
+def _selected_filters() -> dict:
+    return dict(st.session_state.get(_SELECTED_KEY) or {})
+
+
+def _render_search_and_filters(catalog):
+    """Kotak cari + kategori terpilih + nilainya. Mengembalikan grup yang tampil.
+
+    Kategori dipilih DULU, nilainya menyusul — daftar enam kelompok kotak
+    centang sekaligus akan menenggelamkan katalognya sendiri. Pilihan dari
+    kategori lain TETAP berlaku saat berpindah kategori, dan justru karena itu
+    seluruh penyaring aktif dicetak terus-menerus: penyaring yang menyembunyikan
+    baris tanpa terbaca adalah cara tercepat membuat sebuah daftar terasa rusak.
+    """
+    categories = catalog_categories(catalog)
+    cols = st.columns([3, 2])
+    query = cols[0].text_input(t("re.cat_search"), key=_QUERY_KEY,
+                               placeholder=t("re.cat_search_ph"))
+
+    chosen_category = None
+    if categories:
+        labels = {c["key"]: c["label"] for c in categories}
+        chosen_category = cols[1].selectbox(
+            t("re.cat_filter_by"), list(labels), index=None,
+            placeholder=t("re.cat_filter_none"), key=_CATEGORY_KEY,
+            format_func=lambda key: labels[key])
+
+    selected = _selected_filters()
+    if chosen_category:
+        current = set(selected.get(chosen_category) or ())
+        entry = next(c for c in categories if c["key"] == chosen_category)
+        boxes = st.columns(min(4, len(entry["values"])) or 1)
+        picked = set()
+        for i, (value, count) in enumerate(entry["values"]):
+            label = f"{value_label(value)} ({count})"
+            if boxes[i % len(boxes)].checkbox(
+                    label, value=value in current,
+                    key=f"_cat_v_{chosen_category}_{value}",
+                    help=value if value != UNSPECIFIED else None):
+                picked.add(value)
+        selected[chosen_category] = sorted(picked)
+        st.session_state[_SELECTED_KEY] = {k: v for k, v in selected.items() if v}
+        selected = _selected_filters()
+
+    visible = apply_filters(filter_catalog(catalog, query), selected)
+
+    active = active_filter_text(selected)
+    if active:
+        line, clear = st.columns([5, 1])
+        line.markdown(t("re.cat_active_filters", filters=active))
+        if clear.button(t("re.cat_clear_filters"), key="_cat_clear",
+                        use_container_width=True):
+            for key in list(st.session_state):
+                if str(key).startswith("_cat_"):
+                    del st.session_state[key]
+            st.rerun()
+
+    # Jumlah hasil SELALU dinyatakan: penyaring tidak boleh memendekkan daftar
+    # tanpa disadari.
+    if query or selected:
+        st.caption(t("re.cat_shown", shown=len(visible), total=len(catalog)))
+    if not visible and (query or selected):
+        from ui.components.sections import prose
+
+        prose(t("re.cat_empty_filtered"), key="cat_empty_filtered")
+    return visible
+
+
 def render_catalog(catalog=None, *, on_detail=None,
                    on_run=None) -> str | None:
     """Blok RINGKAS per research pipeline: nama, penjelasan singkat, algoritma.
@@ -915,9 +1235,10 @@ def render_catalog(catalog=None, *, on_detail=None,
     st.markdown(f'<span class="ids-cat-count">{escape(summary_text(counts))}'
                 f'</span>', unsafe_allow_html=True)
 
+    visible = _render_search_and_filters(catalog)
 
     requested = None
-    for group in catalog:
+    for group in visible:
         # BARIS, bukan kartu: container TANPA batas. Garis pemisah selebar
         # penuh, padding, dan efek sorot datang dari CSS terpusat lewat kelas
         # `st-key-<key>` yang muncul karena container ini berkunci.

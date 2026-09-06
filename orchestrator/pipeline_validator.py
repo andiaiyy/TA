@@ -48,6 +48,13 @@ EXPECTED_INFO_KEYS = (
     "feature_selection", "fixed_params", "train_test_split",
 )
 
+# Kunci yang TIDAK disebut docstring itu, tetapi dibaca panel "Tentang Research
+# Pipeline" bila ada — empat pipeline bawaan mengisinya. Ketiadaannya bukan
+# cacat dan tidak pernah menjadi WARN: barisnya sekadar tidak muncul. Didaftar
+# di sini supaya kontributor TAHU bahwa tempatnya ada, alih-alih menemukan
+# panelnya lebih pendek setelah pipelinenya disetujui.
+OPTIONAL_INFO_KEYS = ("app", "anti_leakage", "metrics_policy")
+
 # ── SATU daftar terpusat untuk aturan keamanan ────────────────────────────
 # Modul yang memberi akses ke proses, berkas, jaringan, atau pemuatan kode
 # arbitrer. Sebuah pipeline riset tidak pernah membutuhkannya.
@@ -359,6 +366,10 @@ def _check_get_info(fn: ast.AST) -> ValidationCheck:
     keys = {k.value for k in literal.keys
             if isinstance(k, ast.Constant) and isinstance(k.value, str)}
     missing = [k for k in EXPECTED_INFO_KEYS if k not in keys]
+    present = [k for k in EXPECTED_INFO_KEYS if k in keys]
+    # Terpisah dari `present`: yang wajib dan yang opsional dihitung berbeda,
+    # jadi menggabungkannya akan membuat "5 dari 6" berbohong.
+    optional = [k for k in OPTIONAL_INFO_KEYS if k in keys]
     if missing:
         return ValidationCheck(
             "get_info() mengembalikan dict", WARN,
@@ -366,12 +377,22 @@ def _check_get_info(fn: ast.AST) -> ValidationCheck:
             + ", ".join(f"`{k}`" for k in missing)
             + " (disarankan oleh `pipelines/base.py`).", literal.lineno,
             key="err.chk_get_info_missing",
+            # `missing` adalah KALIMAT yang sudah dirangkai; kedua daftar di
+            # bawahnya adalah bentuk yang dapat dibaca mesin. Halaman unggah
+            # memakainya untuk menyebut apa yang HILANG per kunci, tanpa perlu
+            # membongkar kalimat itu kembali — dan tanpa mem-parse ulang source
+            # yang sedang divalidasi, yang hanya boleh disentuh sekali.
             values={"missing": ", ".join(f"`{k}`" for k in missing),
+                    "missing_keys": list(missing),
+                    "present_keys": list(present),
+                    "optional_keys": list(optional),
                     "source": "pipelines/base.py"})
     return ValidationCheck(
         "get_info() mengembalikan dict", PASS,
         "`get_info()` mengembalikan dict dengan seluruh kunci metadata yang "
-        "disarankan.", literal.lineno, key="err.chk_get_info_complete")
+        "disarankan.", literal.lineno, key="err.chk_get_info_complete",
+        values={"missing_keys": [], "present_keys": list(present),
+                "optional_keys": list(optional)})
 
 
 # ── Pemeriksaan KEAMANAN ──────────────────────────────────────────────────

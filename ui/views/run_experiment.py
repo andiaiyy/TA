@@ -629,6 +629,28 @@ def research_about_groups(research: str, research_label: str, info: dict,
             if any(v not in (None, "") for _k, v in pairs)]
 
 
+def _schema_of(dataset_type: str) -> dict:
+    """Kontrak sebuah jenis dataset — bawaan ATAU kontribusi.
+
+    ``contracts.dataset_schemas`` hanya mengenal jenis bawaan; kontrak jenis
+    kontribusi dideklarasikan kontributor saat mengunggah dan tersimpan di
+    registry riset. Tanpa cadangan ini panel menampilkan kolom label bawaan
+    `label` untuk dataset yang kolom labelnya bernama lain — menyatakan sesuatu
+    yang tidak benar, bukan sekadar tidak lengkap.
+
+    Pembacaan saja: ``contracts/`` tidak disentuh.
+    """
+    from orchestrator.research_registry import schema_for
+
+    schema = get_schema(dataset_type)
+    if schema:
+        return dict(schema)
+    try:
+        return dict(schema_for(dataset_type) or {})
+    except Exception:               # registry belum siap: diam, jangan menebak
+        return {}
+
+
 def _dataset_info_lines(dataset_type: str) -> list[str]:
     """Structured dataset facts shown inside the 'Tentang Research Pipeline'
     expander (previously a separate blue st.info box, now consolidated here).
@@ -639,7 +661,7 @@ def _dataset_info_lines(dataset_type: str) -> list[str]:
     pipeline's registry entry, so there is no brittle pipeline->dataset
     hardcoding. Informational only; it does NOT replace dataset validation and
     does not touch any computation. Returns a list of markdown bullet strings."""
-    schema = get_schema(dataset_type) or {}
+    schema = _schema_of(dataset_type)
     label_col = schema.get("label_column") or "label"
     if dataset_type == "HIKARI2021":
         return [
@@ -657,8 +679,26 @@ def _dataset_info_lines(dataset_type: str) -> list[str]:
             "**Sifat fitur:** fitur aliran (*flow*) hasil pipeline cbr 14 fase; "
             "analisis difokuskan pada **trafik TLS**.",
         ]
-    # Unknown/future dataset type: stay honest and generic, still derived.
-    return [f"**Tipe dataset:** {dataset_type} (kolom label `{label_col}`)."]
+    # Jenis dataset kontribusi: tidak ada kalimat kurasi, tetapi kontraknya
+    # DIDEKLARASIKAN saat pengunggahan — jadi format berkas dan kolom labelnya
+    # sama-sama fakta, bukan tebakan, dan layak berdiri sebagai baris sendiri
+    # seperti pada dataset bawaan. "Sifat fitur" TIDAK dikarang: kalimat itu
+    # hanya ada bila seseorang menuliskannya.
+    if not schema:
+        # Tidak ada kontrak sama sekali: `label` di atas hanyalah nilai
+        # cadangan, bukan fakta, jadi ia tidak boleh berdiri sebagai baris
+        # yang terbaca sebagai pernyataan.
+        return [f"**Tipe dataset:** {dataset_type} (kolom label `{label_col}`)."]
+
+    fmt = str(schema.get("file_format") or "").strip()
+    lines = [f"**Format berkas:** {fmt.upper()}"] if fmt else []
+    lines.append(f"**Kolom label:** `{label_col}`")
+    columns = schema.get("expected_columns") or []
+    if columns:
+        lines.append(f"**Kolom wajib:** {len(columns)} kolom — "
+                     + ", ".join(f"`{c}`" for c in list(columns)[:6])
+                     + (" …" if len(columns) > 6 else ""))
+    return lines
 
 
 # ── "Persyaratan Dataset" (read-only sub-bagian di dalam expander) ─────────
@@ -740,9 +780,19 @@ def _requirement_text(dataset_type: str, field: str) -> str:
 def _dataset_extensions(dataset_type: str) -> tuple[str, ...]:
     """Ekstensi berkas yang diterima untuk sebuah dataset_type — dibaca dari
     _EXT_MAP, mekanisme yang SAMA dengan file picker, jadi panel persyaratan
-    tidak pernah berbeda dari daftar berkas yang benar-benar tampil."""
-    exts = _EXT_MAP.get(dataset_type, (".csv",))
-    return (exts,) if isinstance(exts, str) else tuple(exts)
+    tidak pernah berbeda dari daftar berkas yang benar-benar tampil.
+
+    Jenis dataset KONTRIBUSI tidak ada di peta itu; formatnya dideklarasikan
+    kontributor. Tanpa membacanya, sebuah paket NDJSON akan diumumkan menerima
+    `.csv` — pernyataan yang salah, bukan sekadar tidak lengkap."""
+    if dataset_type in _EXT_MAP:
+        exts = _EXT_MAP[dataset_type]
+        return (exts,) if isinstance(exts, str) else tuple(exts)
+
+    fmt = str(_schema_of(dataset_type).get("file_format") or "").strip().lower()
+    if fmt == "ndjson":
+        return (".json", ".jsonl", ".ndjson")
+    return (f".{fmt}",) if fmt else (".csv",)
 
 
 def _hikari_column_facts() -> tuple[list[str], list[str], list[str]]:
@@ -2507,9 +2557,12 @@ def _poll_experiment(experiment_id: str):
 
     if status in ("QUEUED", "RUNNING"):
         # Progress bar (UI-cosmetic only; nothing computed here is persisted).
-        # Stages list comes from config.pipeline_registry — UI may import config/.
-        from config.pipeline_registry import get_pipeline as _get_pipeline_entry
-        _reg_entry = _get_pipeline_entry(status_data.get("pipeline_id", "")) or {}
+        # Fase dibaca dari registry GABUNGAN: bawaan + terunggah. Registry
+        # statis saja akan selalu menjawab [] untuk pipeline terunggah, dan
+        # tampilan fase-nya hilang tanpa suara.
+        from orchestrator.dynamic_registry import get_all_pipelines
+        _reg_entry = get_all_pipelines().get(
+            status_data.get("pipeline_id", "")) or {}
         _stages_list = _reg_entry.get("stages", []) or []
         _pb = _compute_progress_state(status_data, _stages_list, st.session_state, experiment_id)
         # Single GLOBAL progress bar (monotonic 0→100, never reset per stage).

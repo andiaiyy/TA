@@ -246,7 +246,12 @@ def test_visitor_sees_disabled_upload_controls_and_a_sign_in_prompt(tmp_path, mo
     # Instruksi kini berupa diagram + tabel, bukan paragraf berjudul
     # "Persyaratan" — jadi yang diperiksa adalah ISI kontraknya.
     ("pipeline", ("BasePipeline", "run()", "get_info()")),
-    ("dataset", ("Label", "Target")),
+    # Halaman dataset menampilkan kontrak research yang SEDANG DIPILIH; dulu
+    # seluruh research digambar berdampingan sebagai tab, sehingga `Label`
+    # (HIKARI) dan `Target` (EVE) muncul bersamaan. Yang dijaga tetap sama —
+    # instruksinya tidak disembunyikan dari pengunjung — dan kelengkapan
+    # daftarnya diperiksa pada pemilihnya, di bawah.
+    ("dataset", ("Label",)),
 ])
 def test_visitor_still_sees_the_requirements(tmp_path, mode, must_show):
     """Halaman & instruksi TIDAK disembunyikan — hanya aksinya yang dimatikan."""
@@ -257,6 +262,24 @@ def test_visitor_still_sees_the_requirements(tmp_path, mode, must_show):
         assert token in text, token
     # Diagram alurnya pun ikut tampil bagi pengunjung.
     assert any("<svg" in m.value for m in at.markdown)
+
+
+def test_a_visitor_can_reach_every_research_pipeline(tmp_path):
+    """Menampilkan satu research pada satu waktu bukan menyembunyikan sisanya:
+    seluruhnya tetap ditawarkan pemilih, dan pengunjung boleh menggantinya."""
+    from orchestrator.research_registry import (
+        all_dataset_types, short_label_for,
+    )
+
+    at = _run_page(tmp_path, "dataset")
+    picker = at.selectbox(key="ins_dataset_research")
+
+    # `options` sudah melewati `format_func`, jadi yang dibandingkan adalah
+    # nama beratribusinya — dan itu memang yang dibaca pengunjung.
+    assert list(picker.options) == [short_label_for(dt)
+                                    for dt in all_dataset_types()]
+    assert len(picker.options) >= 2
+    assert not picker.proto.disabled
 
 
 @pytest.mark.parametrize("mode", ["dataset", "pipeline"])

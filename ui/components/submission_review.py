@@ -50,6 +50,24 @@ VERDICT_WARN = "peringatan"
 VERDICT_PROBLEM = "bermasalah"
 
 VERDICT_MARK = {VERDICT_CLEAN: "✔", VERDICT_WARN: "⚠", VERDICT_PROBLEM: "✖"}
+
+#: Hasil periksa → KEADAAN yang dipakai mewarnai selnya. Dipetakan, bukan
+#: dipakai apa adanya: nilai `verdict` adalah pengenal milik modul ini, dan
+#: penyaji tabel tidak boleh mengunci diri pada ejaannya.
+VERDICT_STATE = {VERDICT_CLEAN: "ok", VERDICT_WARN: "warn",
+                 VERDICT_PROBLEM: "bad"}
+
+
+def verdict_state(row: dict) -> str:
+    """Keadaan sebuah baris antrean: "ok", "warn", atau "bad".
+
+    Hasil yang tidak dikenal menjadi "warn", bukan "ok": menganggap yang tak
+    dikenal sebagai bersih adalah kesalahan yang menutupi masalah — aturan
+    yang sama dengan `review_style.verdict_state` pada halaman detailnya.
+    """
+    return VERDICT_STATE.get((row or {}).get("verdict"), "warn")
+
+
 VERDICT_LABEL = {
     VERDICT_CLEAN: "lolos tanpa catatan",
     VERDICT_WARN: "lolos dengan peringatan",
@@ -192,6 +210,41 @@ def review_stored_package(item: dict, *, source_reader=None) -> dict:
 
     payload = [(name, text.encode("utf-8")) for name, text in sources]
     return review_package(payload, descriptions=uploader_notes(item))
+
+
+def check_tally(entry: dict) -> dict:
+    """Hitungan pemeriksaan satu berkas: total, lolos, peringatan, gagal.
+
+    Dipakai menggantikan daftar bulir yang mencetak SETIAP pemeriksaan —
+    termasuk yang lolos. Terukur enam bulir per berkas, lima di antaranya
+    mengatakan "tidak ada yang salah", dan sepuluh berkas berarti lima puluh
+    baris yang tidak menolong siapa pun.
+
+    Jumlahnya tetap DISEBUT, bukan sekadar dihilangkan: peninjau harus tahu
+    pemeriksaannya benar-benar berjalan dan berapa banyak. Yang dibuang hanya
+    perinciannya.
+
+    Fungsi MURNI.
+    """
+    checks = (entry or {}).get("report") or {}
+    checks = checks.get("checks") or []
+    return {
+        "total": len(checks),
+        "passed": sum(1 for c in checks if c.get("status") not in (WARN, FAIL)),
+        "warned": sum(1 for c in checks if c.get("status") == WARN),
+        "failed": sum(1 for c in checks if c.get("status") == FAIL),
+    }
+
+
+def notable_checks(entry: dict) -> list[dict]:
+    """Pemeriksaan yang TIDAK lolos — gagal lebih dulu, lalu peringatan.
+
+    Inilah yang benar-benar dicari peninjau. Urutannya disengaja: kegagalan
+    menentukan boleh-tidaknya disetujui, peringatan hanya perlu dibaca.
+    """
+    checks = ((entry or {}).get("report") or {}).get("checks") or []
+    return ([c for c in checks if c.get("status") == FAIL]
+            + [c for c in checks if c.get("status") == WARN])
 
 
 def warning_checks(reviewed: dict) -> list[dict]:
@@ -512,6 +565,58 @@ def file_rows(item: dict, reviewed: dict) -> list[dict]:
         })
     rows.sort(key=lambda r: (r["role"] != "entry point", r["filename"].lower()))
     return rows
+
+
+#: Kolom tabel berkas paket. Nilainya SELURUHNYA dari :func:`file_rows` dan
+#: :func:`check_tally` — tabel ini menyusun berdampingan apa yang sudah
+#: dihitung, bukan menambah keterangan baru.
+FILE_COLUMNS = (
+    tbl.column("Berkas", "filename", kind=tbl.KIND_NAME,
+               label_key="sr.col_file"),
+    tbl.column("Peran", "role", kind=tbl.KIND_STATUS, label_key="sr.col_role"),
+    tbl.column("Hasil periksa", "check_text", kind=tbl.KIND_STATUS,
+               label_key="rv.col_check_result"),
+    tbl.column("Ukuran", "size_text", kind=tbl.KIND_STATUS,
+               label_key="sr.col_size"),
+)
+
+
+def file_state(row: dict) -> str:
+    """Keadaan sebuah baris berkas: "ok", "warn", atau "bad".
+
+    Aturan yang sama dengan hasil periksa paketnya: gagal mengalahkan
+    peringatan, dan yang tidak dikenal TIDAK dianggap bersih.
+    """
+    tally = row.get("tally") or {}
+    if tally.get("failed"):
+        return "bad"
+    if tally.get("warned"):
+        return "warn"
+    return "ok" if tally.get("total") else "warn"
+
+
+def file_table_rows(rows: list[dict], *, size_text) -> list[dict]:
+    """Baris tabel berkas — dari baris yang SUDAH disusun `file_rows`.
+
+    ``size_text`` menyuntikkan pemformat ukuran, sehingga lapis ini tetap
+    murni dan tidak perlu tahu bagaimana byte ditulis untuk dibaca manusia.
+    """
+    from ui.i18n import t
+
+    out = []
+    for row in rows or []:
+        tally = check_tally(row.get("entry") or {})
+        if tally["failed"]:
+            text = t("sr.checks_failed", total=tally["total"],
+                     count=tally["failed"])
+        elif tally["warned"]:
+            text = t("sr.checks_warned", total=tally["total"],
+                     count=tally["warned"])
+        else:
+            text = t("sr.checks_clean", total=tally["total"])
+        out.append({**row, "tally": tally, "check_text": text,
+                    "size_text": size_text(row.get("size") or 0)})
+    return out
 
 
 def numbered_source(text: str, *, start: int = 1) -> str:

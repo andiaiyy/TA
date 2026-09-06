@@ -30,6 +30,27 @@ ID_FIELD = "_full_id"
 #: pipeline dianggap rusak tidak boleh hilang hanya karena kolomnya sempit.
 TIP_SUFFIX = "__tip"
 
+#: Akhiran kolom penyimpan KEADAAN sebuah sel — dibawa apa adanya, tidak
+#: ditampilkan, dan dibaca gaya selnya. Dipisah dari nilai tampilnya karena
+#: keadaan adalah pengenal ("bersih"/"peringatan"/"bermasalah") sedangkan yang
+#: tampil adalah kalimat berbahasa: mewarnai berdasarkan kalimatnya akan
+#: berhenti bekerja begitu bahasanya berganti.
+STATE_SUFFIX = "__state"
+
+#: Keadaan → rona latar & warna teks. Hijau/kuning/merah yang SAMA dengan yang
+#: dipakai halaman peninjauan, diff versi, dan chip katalog — supaya "merah"
+#: berarti hal yang sama di seluruh aplikasi.
+#:
+#: `rgba` beralfa rendah, BUKAN heksa pekat: rona tipis menjadi pastel di tema
+#: terang dan rona gelap di tema gelap, sementara teksnya mengikuti
+#: `currentColor` sehingga tetap terbaca pada keduanya. Warna pekat pada latar
+#: yang tidak diketahui adalah cara membuat teks hilang.
+STATE_TINT = {
+    "ok": "rgba(46,160,67,.16)",
+    "warn": "rgba(200,150,60,.20)",
+    "bad": "rgba(200,70,70,.20)",
+}
+
 #: Tinggi maksimum tabel dalam piksel, dan tinggi satu baris.
 MAX_HEIGHT = 400
 ROW_HEIGHT = 32
@@ -41,16 +62,29 @@ def _tip_needed(col: dict) -> bool:
     return bool(col.get("title_key")) or col["kind"] == tbl.KIND_HASH
 
 
-def dataframe(columns, rows, *, id_key: str):
+def dataframe(columns, rows, *, id_key: str, state_of=None,
+              state_column: str = ""):
     """DataFrame siap-tampil: kolom bernama sesuai LABEL-nya pada bahasa aktif.
 
     ``id_key`` menyebut kolom baris mana yang menjadi identitas — id pengajuan,
     id pipeline, id eksperimen. Nilainya dibawa apa adanya di :data:`ID_FIELD`
     dan tidak pernah ditampilkan.
+
+    ``state_of`` OPSIONAL: fungsi baris → keadaan ("ok"/"warn"/"bad") yang
+    dipakai mewarnai sel pada ``state_column``. Keadaannya dibawa TERPISAH dari
+    nilai tampilnya karena ia pengenal, sedangkan yang tampil adalah kalimat
+    berbahasa — mewarnai berdasarkan kalimatnya akan berhenti bekerja begitu
+    bahasanya berganti.
+
+    Hanya SATU kolom keadaan yang ditulis, bukan satu per kolom: seluruh isi
+    DataFrame menyeberang ke browser sebagai Arrow, dan kolom yang tidak dibaca
+    siapa pun tetap menambah muatan tiap kali tabelnya digambar ulang.
     """
     import pandas as pd
 
     columns = list(columns or [])
+    state_field = next((tbl._label(c) + STATE_SUFFIX for c in columns
+                        if c["key"] == state_column), "") if state_column else ""
     data = []
     for row in rows or []:
         rec = {ID_FIELD: row.get(id_key)}
@@ -63,17 +97,43 @@ def dataframe(columns, rows, *, id_key: str):
                 else text
             if _tip_needed(col):
                 rec[label + TIP_SUFFIX] = full
+        if state_of is not None and state_field:
+            rec[state_field] = state_of(row)
         data.append(rec)
     return pd.DataFrame(data)
 
 
+def state_style(state_field: str):
+    """Gaya sel yang membaca KEADAAN dari kolom tersembunyi ``state_field``.
+
+    Keadaan yang tidak dikenal tidak diberi warna sama sekali — mewarnai
+    sesuatu yang tidak dipahami akan menyampaikan keterangan yang tidak dimiliki
+    siapa pun.
+    """
+    from st_aggrid import JsCode
+
+    import json as _json
+
+    tints = _json.dumps(STATE_TINT)
+    return JsCode(
+        "function(params){"
+        f" const tints = {tints};"
+        f" const state = params.data ? params.data['{state_field}'] : null;"
+        " const bg = tints[state];"
+        " return bg ? {'backgroundColor': bg, 'fontWeight': '600'} : null; }")
+
+
 def options(df, columns, *, selection_mode: str = "single",
-            use_checkbox: bool = False) -> dict:
+            use_checkbox: bool = False, state_column: str = "") -> dict:
     """Setelan grid: kolom dapat diurutkan, identitas & tooltip disembunyikan.
 
     ``selection_mode`` "single" untuk daftar yang membuka SATU hal — membuka
     dua pipeline sekaligus tidak berarti apa-apa — dan "multiple" untuk daftar
     yang memang membandingkan.
+
+    ``state_column`` menyebut kunci kolom yang selnya DIWARNAI menurut keadaan.
+    Warnanya menandai keadaan, tidak menghias, dan tidak pernah menjadi
+    satu-satunya pembawa keterangan: teks selnya tetap menyebut keadaannya.
     """
     from st_aggrid import GridOptionsBuilder
 
@@ -87,6 +147,11 @@ def options(df, columns, *, selection_mode: str = "single",
             label = tbl._label(col)
             gb.configure_column(label + TIP_SUFFIX, hide=True)
             gb.configure_column(label, tooltipField=label + TIP_SUFFIX)
+        if state_column and col["key"] == state_column:
+            label = tbl._label(col)
+            gb.configure_column(label + STATE_SUFFIX, hide=True)
+            gb.configure_column(label,
+                                cellStyle=state_style(label + STATE_SUFFIX))
 
     built = gb.build()
     built["suppressHorizontalScroll"] = False
@@ -131,7 +196,8 @@ def selected_id(response, *, cast=None):
 
 
 def render(columns, rows, *, id_key: str, key: str,
-           selection_mode: str = "single", cast=None):
+           selection_mode: str = "single", cast=None,
+           state_column: str = "", state_of=None):
     """Gambar tabelnya, kembalikan identitas baris terpilih (atau None).
 
     Seluruh pemanggil memakai jalur ini, sehingga mengubah perilaku tabel
@@ -142,10 +208,12 @@ def render(columns, rows, *, id_key: str, key: str,
 
     columns = list(columns or [])
     rows = list(rows or [])
-    df = dataframe(columns, rows, id_key=id_key)
+    df = dataframe(columns, rows, id_key=id_key, state_of=state_of,
+                   state_column=state_column)
     response = AgGrid(
         df,
-        gridOptions=options(df, columns, selection_mode=selection_mode),
+        gridOptions=options(df, columns, selection_mode=selection_mode,
+                            state_column=state_column),
         allow_unsafe_jscode=True,
         theme="streamlit",
         update_mode=GridUpdateMode.SELECTION_CHANGED,

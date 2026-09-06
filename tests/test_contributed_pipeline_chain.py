@@ -454,14 +454,18 @@ def test_the_trial_step_gates_the_rest_of_the_chain(db, package, small_csv,
     assert pid in _catalog_ids(db)[1]
 
 
-# ── Keterangan pipeline kontribusi: kosong TAPI dinyatakan ───────────────
-# Katalog sengaja tidak memuat kode pipeline kontribusi: memanggil `get_info()`
-# berarti meng-import modulnya, dan katalog dirender setiap kali halaman Run
-# Experiment dibuka. Akibatnya bidang keterangannya memang kosong — dan
-# kekosongan itu harus DINYATAKAN, bukan tampil sebagai bidang hampa.
+# ── Keterangan pipeline kontribusi: dipotret, bukan dimuat ───────────────
+# Katalog tetap TIDAK PERNAH memuat kode pipeline kontribusi: memanggil
+# `get_info()` berarti meng-import modulnya, dan katalog dirender setiap kali
+# halaman Run Experiment dibuka. Yang berubah adalah dari mana keterangannya
+# datang — sebuah POTRET `get_info()` yang diambil sekali saat pendaftaran.
+# Yang tersisa kosong hanyalah baris yang terdaftar SEBELUM potret itu ada, dan
+# kekosongan itu harus tetap DINYATAKAN, bukan tampil sebagai bidang hampa.
 
-def test_a_contributed_entry_explains_why_its_details_are_missing(
+def test_a_contributed_entry_carries_its_own_details(
         db, package, small_csv, monkeypatch):
+    """Yang dijanjikan `get_info()` paket ini muncul di katalog — tanpa
+    katalog pernah menyentuh kodenya."""
     from ui.components import pipeline_catalog as pc
 
     sid = _submit(db, package)
@@ -475,24 +479,42 @@ def test_a_contributed_entry_explains_why_its_details_are_missing(
 
     assert entry["summary"], "ringkasan dibiarkan kosong tanpa penjelasan"
     assert entry["details"], "detail dibiarkan kosong tanpa penjelasan"
-    # Kalimatnya menyebut SEBABnya, bukan sekadar "tidak ada".
-    assert entry["summary"] == pc.uploaded_notice()
+    assert entry["summary"] != pc.uploaded_notice(),         "keterangan nyata seharusnya menggantikan kalimat kekosongan"
+    assert entry["info"], "potret get_info() tidak sampai ke katalog"
 
 
-def test_the_notice_is_written_once_and_reused(db, package, small_csv,
-                                               monkeypatch):
-    """Alasannya hidup di SATU tempat — ringkasan dan detail memakai yang sama."""
+def test_a_row_registered_before_the_snapshot_says_so(
+        db, package, small_csv, monkeypatch):
+    """Baris LAMA tidak punya potret. Alasannya hidup di SATU tempat —
+    ringkasan dan detail memakai kalimat yang sama."""
+    from database.db import get_connection
     from ui.components import pipeline_catalog as pc
 
     sid = _submit(db, package)
     _pass_trial(db, sid, small_csv)
     pid = _approve_and_activate(db, sid, monkeypatch)
+    # Keadaan sebuah baris pra-migrasi 29, dibuat apa adanya.
+    with get_connection(db) as conn:
+        conn.execute("UPDATE registered_pipelines SET info_json = NULL "
+                     "WHERE pipeline_id = ?", (pid,))
+        conn.commit()
     monkeypatch.setattr("database.db.DB_PATH", db, raising=False)
 
     catalog, _ = _catalog_ids(db)
     entry = next(a for g in catalog for a in g["algorithms"]
                  if a["pipeline_id"] == pid)
+
+    assert entry["summary"] == pc.uploaded_notice()
     assert [value for _label, value in entry["details"]] == [pc.uploaded_notice()]
+
+
+def test_the_notice_says_how_to_fill_it_in(db):
+    """Menyatakan kekosongan tanpa jalan keluar hanya memindahkan kebingungan."""
+    from ui.i18n.core import lookup
+
+    for lang in ("id", "en"):
+        text = lookup("re.cat_uploaded_no_info", lang)
+        assert "Research Admin" in text, lang
 
 
 def test_a_built_in_entry_is_untouched_by_the_notice(db, monkeypatch):

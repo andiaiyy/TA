@@ -168,9 +168,20 @@ def test_the_row_content_did_not_grow():
 
 
 def test_the_summary_row_above_the_cards_survives():
+    """Baris ringkasan digambar SEBELUM perulangan barisnya.
+
+    Yang dikunci adalah urutannya, bukan nama variabel yang diulang: sejak
+    katalog dapat disaring, yang diulang bukan lagi `catalog` melainkan hasil
+    penyaringannya. Mengunci namanya menjadikan tes ini penjaga ejaan, bukan
+    penjaga tata letak.
+    """
+    import re
+
     body = CATALOG_SRC.split("def render_catalog(")[1].split("\ndef ")[0]
     assert "summary_text(counts)" in body
-    assert body.index("summary_text(counts)") < body.index("for group in catalog")
+    loop = re.search(r"for group in (\w+):", body)
+    assert loop, "perulangan baris katalog tidak ditemukan"
+    assert body.index("summary_text(counts)") < loop.start()
 
 
 # ── Expander "Tentang Research Pipeline" ─────────────────────────────────

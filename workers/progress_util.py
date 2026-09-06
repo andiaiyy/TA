@@ -27,10 +27,15 @@ PROGRESS_FIELDS = (
 
 
 def _stages_for(pipeline_id: str) -> list[str]:
-    """Ordered stage labels for a pipeline, from the registry. [] if unknown."""
+    """Ordered stage labels for a pipeline, from the registry. [] if unknown.
+
+    Registry GABUNGAN: bawaan + terunggah. Sebelumnya hanya registry statis
+    yang dibaca, sehingga pipeline terunggah selalu menjawab [] — bar progresnya
+    berjalan tanpa nama fase padahal pipelinenya memang memancarkan fase itu.
+    """
     try:
-        from config.pipeline_registry import get_pipeline
-        entry = get_pipeline(pipeline_id) or {}
+        from orchestrator.dynamic_registry import get_all_pipelines
+        entry = get_all_pipelines().get(pipeline_id) or {}
         stages = entry.get("stages") or []
         return list(stages) if isinstance(stages, (list, tuple)) else []
     except Exception:

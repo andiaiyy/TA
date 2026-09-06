@@ -498,16 +498,22 @@ def test_the_pending_section_renders_a_full_submission(tmp_path):
 
     text = " ".join(m.value for m in at.markdown)
     assert "RF Kontribusi" in text                      # nama pengajuan
-    assert "up.py" in text and "helper.py" in text      # kedua berkas
-    assert "entry point" in text and "pendukung" in text
     assert "kelas pipeline utama" in text               # penjelasan pengunggah
     assert "langsung dapat" in text                     # akibat menyetujui
 
-    # Kode kedua berkas tampil, bernomor.
+    # KEDUA berkas tetap ada — di tabelnya, lengkap dengan peran dan hasil
+    # periksa masing-masing, terbaca tanpa membuka apa pun.
+    import tests.grid_probe as grid_probe
+
+    rows = grid_probe.rows(at)
+    assert {r["Berkas"] for r in rows} == {"up.py", "helper.py"}
+    assert {r["Peran"] for r in rows} == {"entry point", "pendukung"}
+
+    # Kode berkas yang DIBACA tampil, bernomor. Satu, bukan dua: yang lain
+    # dicapai lewat tabelnya.
     blocks = [c.value for c in at.get("code")]
-    assert len(blocks) == 2
-    assert all(block.splitlines()[0].lstrip().startswith("1 |")
-               for block in blocks)
+    assert len(blocks) == 1
+    assert blocks[0].splitlines()[0].lstrip().startswith("1 |")
 
     assert {"Setujui", "Tolak"} <= {b.label for b in at.button}
 

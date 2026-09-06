@@ -161,10 +161,15 @@ def test_the_findings_are_visible_without_opening_anything(tmp_path):
     assert "Temuan ada di baris" in text
 
 
-def test_the_code_of_every_file_is_still_shown(tmp_path):
-    """Dua berkas diunggah; keduanya harus terbaca."""
+def test_the_code_of_the_opened_file_is_shown(tmp_path):
+    """SATU blok kode: milik berkas yang sedang dibaca.
+
+    Dahulu seluruh berkas digambar sekaligus — sepuluh berkas berarti sepuluh
+    blok kode setinggi 320px. Yang lain tetap dapat dicapai lewat tabel
+    berkasnya, dan hasil periksa mereka sudah terbaca di sana tanpa dibuka.
+    """
     at = _render(tmp_path)
-    assert len(at.get("code")) == 2
+    assert len(at.get("code")) == 1
 
 
 # ── Dua kalimat yang dibuang ─────────────────────────────────────────────
@@ -199,8 +204,22 @@ def test_the_decision_zone_holds_the_controls_that_change_things(tmp_path):
     at = _render(tmp_path)
     labels = {b.label for b in at.button}
     assert {"Setujui", "Tolak"} <= labels
-    assert at.selectbox                       # dataset uji
     assert at.text_input                      # catatan tinjauan
+
+
+def test_a_standalone_submission_without_its_own_dataset_says_so(tmp_path):
+    """Pengajuan ini berdiri sendiri dan BELUM melampirkan datasetnya, jadi
+    tidak ada yang dapat dipakai mengujinya.
+
+    Dahulu langkah uji coba tetap menawarkan dataset platform — dan
+    meluluskannya di sana membuat "sudah diuji" berbicara tentang data yang
+    tidak akan pernah ia pakai. Sekarang pilihan itu tidak ada, dan sebabnya
+    DIKATAKAN alih-alih meninggalkan bagian yang kosong tanpa penjelasan.
+    """
+    at = _render(tmp_path)
+    text = " ".join(m.value for m in at.markdown)
+    assert "hanya dapat diuji dengan dataset" in text, text[-400:]
+    assert not at.selectbox, "dataset platform masih ditawarkan"
 
 
 def test_an_unknown_zone_is_still_drawn():

@@ -362,6 +362,13 @@ CATALOG: dict[str, dict[str, str]] = {
     # ═══════════════════════════════════════════════════════════════════
 
     # ── Judul bagian ─────────────────────────────────────────────────────
+    # Konfirmasi persetujuan. Sebelumnya ia hanya menyebut pengenal mesin dan
+    # hash — benar, tetapi tidak menjawab pertanyaan peninjau: "berhasil, lalu
+    # ada di mana?"
+    "ap.msg_approved_live": {"id": "Disetujui. **{research}** kini aktif dan dapat dijalankan di halaman **Jalankan Eksperimen** ({count} algoritma).",
+                             "en": "Approved. **{research}** is now active and runnable on the **Run Experiment** page ({count} algorithms)."},
+    "ap.msg_approved_no_dataset": {"id": "Disetujui, tetapi **{research}** belum dapat dijalankan: dataset paketnya tidak ditemukan.",
+                                   "en": "Approved, but **{research}** cannot be run yet: its package dataset is missing."},
     "ap.sec_review": {"id": "Peninjauan Pengajuan", "en": "Submission Review"},
     "ap.sec_pending": {"id": "Menunggu tinjauan ({count})",
                        "en": "Awaiting review ({count})"},
@@ -383,9 +390,67 @@ CATALOG: dict[str, dict[str, str]] = {
                           "en": "Optional when approving; REQUIRED when rejecting."},
     "ap.lbl_role": {"id": "Peran", "en": "Role"},
     "ap.lbl_pipeline_files": {"id": "Berkas pipeline", "en": "Pipeline files"},
+    # Fase progres yang TERBACA dari kode berkas. Ditampilkan untuk
+    # diperiksa, bukan ditanyakan: urutannya sudah ada di dalam kode, dan
+    # pembacaan statis memberi urutan KEMUNCULAN — belum tentu urutan
+    # saat berjalan.
+    # Kelengkapan `get_info()`. Tiap kalimat menyebut apa yang HILANG bila
+    # kuncinya kosong — dan tiap akibat di bawah punya pembaca nyata di kode
+    # ini, bukan peringatan yang dikarang untuk menakut-nakuti.
+    "ap.info_incomplete": {"id": "`{filename}` — metadata `get_info()` terisi {have} dari {total}. Yang belum ada, dan akibatnya:",
+                           "en": "`{filename}` — `get_info()` metadata filled {have} of {total}. What is missing, and what it costs:"},
+    "ap.info_incomplete_note": {"id": "Kekurangan ini TIDAK menghalangi pengajuan: pipelinenya tetap berjalan. Yang hilang adalah keterbacaannya — dan yang perlu diperbaiki adalah `get_info()` pada kode Anda, bukan isian di halaman ini.",
+                                "en": "None of this blocks your submission: the pipeline still runs. What is lost is how well it reads — and the fix belongs in `get_info()` in your code, not in a field on this page."},
+    "ap.cost_paper": {"id": "kredit penelitian tidak muncul pada entri registry maupun laporan eksperimen.",
+                      "en": "the research credit will not appear in the registry entry or the experiment report."},
+    "ap.cost_algorithm": {"id": "nama algoritma jatuh ke nama paket pada pemilih dan tabel riwayat.",
+                          "en": "the algorithm name falls back to the package name in the picker and the history table."},
+    "ap.cost_preprocessing": {"id": "langkah preprocessing tidak terbaca di katalog maupun laporan.",
+                              "en": "the preprocessing steps will not be readable in the catalogue or the report."},
+    "ap.cost_feature_selection": {"id": "keterangan seleksi fitur tidak terbaca di katalog maupun laporan.",
+                                  "en": "the feature selection note will not be readable in the catalogue or the report."},
+    "ap.cost_fixed_params": {"id": "**tidak ada satu pun parameter yang tampil** — transparansi hyperparameter hilang, dan mode eksplorasi tidak dapat dipakai sama sekali.",
+                             "en": "**no parameter will be shown at all** — hyperparameter transparency is lost, and exploration mode cannot be used."},
+    "ap.cost_train_test_split": {"id": "pembagian train/test tidak terbaca di katalog maupun laporan.",
+                                 "en": "the train/test split will not be readable in the catalogue or the report."},
+    # Kunci OPSIONAL: ditawarkan, tidak dituntut. Kalimatnya menyebut apa yang
+    # DIDAPAT bila diisi — bukan apa yang hilang bila tidak.
+    "ap.info_optional": {"id": "`{filename}` — tiga kunci opsional ini tidak diminta kontrak, tetapi panel \"Tentang Research Pipeline\" menampilkannya bila ada:",
+                         "en": "`{filename}` — these three optional keys are not required by the contract, but the \"About Research Pipeline\" panel shows them when present:"},
+    "ap.gain_app": {"id": "fokus aplikasi/trafik yang dicakup pipeline ini.",
+                    "en": "the application/traffic focus this pipeline covers."},
+    "ap.gain_anti_leakage": {"id": "langkah yang Anda ambil supaya data uji tidak bocor ke pelatihan.",
+                             "en": "the steps you took to keep test data out of training."},
+    "ap.gain_metrics_policy": {"id": "metrik mana yang dijadikan patokan, dan mengapa.",
+                               "en": "which metric is treated as the headline, and why."},
+    # Kredit penelitian TERSTRUKTUR. Nama tampil research pipeline disusun
+    # sebagai "<kredit> — <nama>", pola yang sama dengan atribusi bawaan.
+    "ap.sec_credit": {"id": "Kredit penelitian", "en": "Research credit"},
+    "ap.lbl_researcher": {"id": "Peneliti", "en": "Researcher"},
+    "ap.lbl_year": {"id": "Tahun", "en": "Year"},
+    "ap.lbl_source_type": {"id": "Jenis", "en": "Kind"},
+    "ap.ph_source_type": {"id": "Skripsi, tesis, jurnal…", "en": "Thesis, journal…"},
+    "ap.lbl_title": {"id": "Judul penelitian", "en": "Research title"},
+    "ap.lbl_institution": {"id": "Institusi", "en": "Institution"},
+    "ap.lbl_scope": {"id": "Cakupan penelitian", "en": "Research scope"},
+    # Dari mana datanya berasal, dan milik siapa. Pipeline bawaan menyebutnya;
+    # tanpa ini baris "Sumber dataset" pada panel unggahan kosong.
+    "ap.sec_dataset_source": {"id": "Sumber dataset", "en": "Dataset source"},
+    "ap.lbl_dataset_name": {"id": "Nama dataset", "en": "Dataset name"},
+    "ap.lbl_dataset_attribution": {"id": "Atribusi / pemilik", "en": "Attribution / owner"},
+    "ap.lbl_dataset_note": {"id": "Catatan sumber", "en": "Source note"},
+    "ap.ph_dataset_note": {"id": "mis. varian, tahun pengambilan, atau tautan",
+                           "en": "e.g. variant, collection year, or link"},
+    "ap.credit_preview": {"id": "Akan tampil sebagai **{credit} — {name}** pada pemilih research pipeline.",
+                          "en": "Will appear as **{credit} — {name}** in the research pipeline picker."},
+    # Kolom DIPILIH dari dataset lampiran, bukan diketik: salah ketik satu
+    # huruf membuat kontraknya tidak cocok tanpa ada yang memberi tahu.
+    "ap.columns_from_dataset": {"id": "{count} kolom terbaca dari dataset yang Anda lampirkan — pilih dari daftar agar namanya tidak meleset.",
+                                "en": "{count} columns read from the dataset you attached — pick from the list so the names cannot drift."},
+    "ap.detected_stages": {"id": "Fase progres terbaca: {stages} — periksa urutannya.",
+                           "en": "Progress phases detected: {stages} — check the order."},
     "ap.lbl_file_role": {"id": "Peran berkas", "en": "File role"},
     "ap.lbl_pipeline_name": {"id": "Nama pipeline", "en": "Pipeline name"},
-    "ap.lbl_paper": {"id": "Paper / rujukan", "en": "Paper / reference"},
     "ap.lbl_note": {"id": "Catatan", "en": "Note"},
     "ap.lbl_dataset_file": {"id": "Berkas dataset", "en": "Dataset file"},
     "ap.ph_pick_file": {"id": "Pilih berkas…", "en": "Choose a file…"},
@@ -937,6 +1002,10 @@ CATALOG: dict[str, dict[str, str]] = {
               "dipindahkan atau dihapus dari server.",
         "en": "Pipeline file not found: {path}. It may have been moved or "
               "deleted on the server."},
+    "err.research_name_taken": {"id": "Nama research \"{name}\" sudah dipakai research pipeline lain. Pilih nama yang berbeda.",
+                                "en": "The research name \"{name}\" is already used by another research pipeline. Choose a different name."},
+    "err.info_snapshot_failed": {"id": "Keterangan `{pipeline}` tidak dapat dibaca dari berkasnya.",
+                                 "en": "The details for `{pipeline}` could not be read from its file."},
     "err.pipeline_not_registered": {
         "id": "Pipeline terdaftar tidak ditemukan: {pipeline}. Periksa daftar "
               "pipeline aktif di halaman Add Pipeline & Dataset.",
@@ -2393,6 +2462,11 @@ CATALOG: dict[str, dict[str, str]] = {
     "ins.chip_more": {"id": "+{count} lainnya", "en": "+{count} more"},
 
     # ── Panduan: tabel kontrak pipeline ──────────────────────────────────
+    # Pemilih research pipeline pada halaman Tambah Dataset. Menggantikan
+    # sederet tab, yang tumbuh ke samping setiap kali sebuah research pipeline
+    # kontribusi disetujui.
+    "ins.lbl_research_pipeline": {"id": "Research Pipeline",
+                                  "en": "Research Pipeline"},
     "ins.col_aspect": {"id": "Aspek", "en": "Aspect"},
     "ins.col_rule": {"id": "Ketentuan", "en": "Requirement"},
     "ins.row_base_class": {"id": "Kelas induk", "en": "Parent class"},
@@ -2578,6 +2652,13 @@ CATALOG: dict[str, dict[str, str]] = {
               "it need not be present in the file"},
     "ins.dslabel_binary": {"id": "`{column}` — `0` = benign, `1` = malicious",
                            "en": "`{column}` — `0` = benign, `1` = malicious"},
+    # Kontrak yang DIDEKLARASIKAN kontributor: ia menyebut nama kolomnya,
+    # bukan arti nilainya — jadi artinya tidak dikarang di sini.
+    "ins.dslabel_declared": {"id": "`{column}` — sesuai kontrak yang dinyatakan pengunggah",
+                             "en": "`{column}` — as declared by the uploader"},
+    "ins.dsrow_required_columns": {"id": "Kolom wajib", "en": "Required columns"},
+    "ins.dsval_declared_columns": {"id": "{count} kolom sesuai kontrak yang dinyatakan",
+                                   "en": "{count} columns per the declared contract"},
 
     "ins.dschk_json_format": {
         "id": "Format {exts}, satu objek JSON per baris.",
@@ -2931,6 +3012,11 @@ CATALOG: dict[str, dict[str, str]] = {
                         "en": "active"},
     "rv.status_inactive": {"id": "nonaktif",
                           "en": "inactive"},
+    # Aktif TAPI belum dapat dijalankan. Tanpa kata ini, tabel di halaman
+    # peninjauan dan halaman Jalankan Eksperimen mengatakan dua hal berbeda
+    # tentang pipeline yang sama.
+    "rv.status_no_dataset": {"id": "belum ada datasetnya",
+                             "en": "no dataset yet"},
     "rv.state_missing_short": {"id": "berkas hilang",
                               "en": "file missing"},
     "rv.state_tampered_short": {"id": "hash tidak cocok",
@@ -3397,6 +3483,20 @@ CATALOG: dict[str, dict[str, str]] = {
                                  "en": "**Review history**"},
     "ap.review_history_empty": {"id": " — belum ada pengajuan yang ditinjau.",
                                "en": " — no submissions have been reviewed yet."},
+    # Kolom & ringkasan tabel berkas paket. Jumlah pemeriksaan tetap DISEBUT:
+    # menyembunyikan perinciannya tanpa menyebut berapa yang berjalan akan
+    # terbaca seperti tidak diperiksa sama sekali.
+    "sr.col_file": {"id": "Berkas", "en": "File"},
+    "sr.col_role": {"id": "Peran", "en": "Role"},
+    "sr.col_size": {"id": "Ukuran", "en": "Size"},
+    "sr.checks_clean": {"id": "{total} pemeriksaan · semua lolos",
+                        "en": "{total} checks · all passed"},
+    "sr.checks_warned": {"id": "{total} pemeriksaan · {count} peringatan",
+                         "en": "{total} checks · {count} warning(s)"},
+    "sr.checks_failed": {"id": "{total} pemeriksaan · {count} gagal",
+                         "en": "{total} checks · {count} failed"},
+    "sr.checks_tally": {"id": "{total} pemeriksaan · {passed} lolos",
+                        "en": "{total} checks · {passed} passed"},
     "sr.summary_line": {"id": "**{name}** · {verdict} · {files} berkas · oleh {who} · {when}",
                        "en": "**{name}** · {verdict} · {files} files · by {who} · {when}"},
     "pc.pre_stage_parse": {"id": "Parsing & validasi dataset",
@@ -3413,12 +3513,38 @@ CATALOG: dict[str, dict[str, str]] = {
     # yang satu tidak mengubah apa pun, yang lain setiap kendalinya
     # mengubah keadaan.
     "ap.zone_examined": {"id": "Yang diperiksa", "en": "What was checked"},
+    "ap.zone_testing": {"id": "Pengujian", "en": "Testing"},
     "ap.zone_decision": {"id": "Keputusan", "en": "Decision"},
     "ap.rejection_note": {"id": "Pengajuan #{id} ditolak — **{note}**",
                           "en": "Submission #{id} was rejected — **{note}**"},
 
 
     # ── Katalog: pipeline kontribusi & keadaannya ───────────────────────────────────────
+    # ── Katalog: cari & saring bertingkat ───────────────────────────────────
+    # Kategori dipilih dulu, nilainya menyusul. Sebuah kategori hanya muncul
+    # bila nilainya lebih dari satu — penyaring dengan satu pilihan tidak
+    # menyaring apa pun.
+    "re.cat_search": {"id": "Cari research pipeline",
+                      "en": "Search research pipelines"},
+    "re.cat_search_ph": {"id": "nama, algoritma, institusi, tahun…",
+                         "en": "name, algorithm, institution, year…"},
+    "re.cat_filter_by": {"id": "Saring menurut", "en": "Filter by"},
+    "re.cat_filter_none": {"id": "tanpa penyaring", "en": "no filter"},
+    "re.cat_by_origin": {"id": "Asal", "en": "Origin"},
+    "re.cat_by_dataset": {"id": "Jenis dataset", "en": "Dataset type"},
+    "re.cat_by_format": {"id": "Format berkas", "en": "File format"},
+    "re.cat_by_algorithm": {"id": "Algoritma", "en": "Algorithm"},
+    "re.cat_by_institution": {"id": "Institusi", "en": "Institution"},
+    "re.cat_by_year": {"id": "Tahun", "en": "Year"},
+    "re.cat_origin_builtin": {"id": "bawaan", "en": "built-in"},
+    "re.cat_origin_uploaded": {"id": "kontribusi", "en": "contributed"},
+    "re.cat_value_unspecified": {"id": "tidak disebutkan", "en": "not stated"},
+    "re.cat_active_filters": {"id": "Aktif: {filters}", "en": "Active: {filters}"},
+    "re.cat_clear_filters": {"id": "Bersihkan", "en": "Clear"},
+    "re.cat_shown": {"id": "Menampilkan {shown} dari {total} research pipeline.",
+                     "en": "Showing {shown} of {total} research pipelines."},
+    "re.cat_empty_filtered": {"id": "Tidak ada yang cocok dengan penyaring yang sedang aktif. Bersihkan salah satunya untuk melihat lebih banyak.",
+                              "en": "Nothing matches the filters currently active. Clear one of them to see more."},
     "re.cat_contributed_group": {"id": "Pipeline kontribusi · {dataset}",
                                 "en": "Contributed pipeline · {dataset}"},
     "re.cat_badge_contributed": {"id": "kontribusi v{version}",
@@ -3429,6 +3555,11 @@ CATALOG: dict[str, dict[str, str]] = {
                                "en": "no dataset yet"},
     "re.cat_no_dataset_reason": {"id": "Belum ada dataset platform berjenis ini, jadi pipeline ini belum dapat dijalankan. Unggah dataset yang sesuai lewat halaman Tambah Pipeline & Dataset.",
                                 "en": "No platform dataset of this type exists yet, so this pipeline cannot be run. Upload a matching dataset from the Add Pipeline & Dataset page."},
+    # Research pipeline KONTRIBUSI memakai dataset yang terikat pada paketnya,
+    # bukan isi `storage/datasets/`. Menyuruhnya mengunggah ke sana adalah
+    # instruksi yang tidak mungkin berhasil.
+    "re.cat_no_dataset_reason_uploaded": {"id": "Dataset milik paket ini tidak ditemukan, jadi pipeline ini belum dapat dijalankan. Ia memakai dataset yang dilampirkan pengunggahnya — bukan isi storage/datasets — jadi yang memulihkannya adalah pengajuan ulang berisi dataset itu.",
+                                          "en": "This package's own dataset is missing, so the pipeline cannot be run. It uses the dataset its uploader attached — not the contents of storage/datasets — so restoring it means a new submission carrying that dataset."},
     "re.cat_broken_heading": {"id": "Tidak dapat dimuat",
                              "en": "Cannot be loaded"},
 
@@ -3438,6 +3569,11 @@ CATALOG: dict[str, dict[str, str]] = {
                                    "en": "The dataset type is not known yet, so the trial cannot run. Fill in the target dataset in the submission metadata, or choose a platform dataset whose type is recognised."},
     "td.err_trial_failed": {"id": "Uji coba tidak dapat dijalankan karena kesalahan tak terduga ({kind}). Rinciannya tercatat pada log untuk pengembang.",
                            "en": "The trial could not be run because of an unexpected error ({kind}). The details are recorded in the developer log."},
+    # Research pipeline yang berdiri sendiri terikat ke datasetnya sendiri
+    # setelah disetujui. Meluluskannya atas dataset platform membuat
+    # "sudah diuji" berbicara tentang data yang tidak akan pernah ia pakai.
+    "td.err_standalone_needs_own_dataset": {"id": "Research pipeline ini berdiri sendiri, jadi ia hanya dapat diuji dengan dataset yang dilampirkan pengunggahnya — bukan dataset platform.",
+                                            "en": "This research pipeline stands alone, so it can only be trialled with the dataset its uploader attached — not a platform dataset."},
     "td.missing_dataset_type": {"id": "Dataset target belum diisi pada pengajuan ini.",
                                "en": "The target dataset has not been set on this submission."},
     "ap.lbl_other_dataset": {"id": "Lainnya / belum terdaftar",
@@ -3554,8 +3690,8 @@ CATALOG: dict[str, dict[str, str]] = {
 
     "ap.sec_declare_schema": {"id": "Kontrak dataset research pipeline ini",
                              "en": "Dataset contract for this research pipeline"},
-    "ap.help_declare_schema": {"id": "Jenis datasetnya belum terdaftar, jadi platform tidak mengenal bentuknya. Nyatakan kontraknya di sini — inilah yang dipakai memeriksa berkas dataset yang Anda lampirkan.",
-                              "en": "This dataset type is not registered yet, so the platform does not know its shape. Declare its contract here — this is what the dataset file you attach will be checked against."},
+    "ap.help_declare_schema": {"id": "Paket ini berdiri sendiri, jadi platform tidak punya skema bawaan untuknya. Nyatakan kontraknya di sini — inilah yang dipakai memeriksa dataset yang Anda lampirkan.",
+                               "en": "This package stands alone, so the platform has no built-in schema for it. State its contract here — this is what checks the dataset you attach."},
     "ap.lbl_label_column": {"id": "Kolom label",
                            "en": "Label column"},
     "ap.lbl_file_format": {"id": "Format berkas",
@@ -3569,10 +3705,16 @@ CATALOG: dict[str, dict[str, str]] = {
 
     # Pipeline kontribusi di katalog: keterangan rincinya TIDAK dibaca di sini,
     # dan alasannya dinyatakan alih-alih meninggalkan bidang kosong.
-    "re.cat_uploaded_no_info": {"id": "Keterangan rinci tidak dibaca di katalog — pipeline kontribusi tidak dimuat saat halaman dibuka. Rinciannya tersedia setelah pipeline dijalankan.",
-                               "en": "Detailed information is not read in the catalogue — contributed pipelines are not loaded when the page opens. The details become available once the pipeline has been run."},
+    "re.cat_uploaded_no_info": {"id": "Keterangan rinci pipeline ini belum pernah dipotret — ia terdaftar sebelum platform menyimpannya. Research Admin dapat mengambilnya lewat \"Perbarui keterangan\" di halaman Jalankan Eksperimen.",
+                               "en": "This pipeline's details were never captured — it was registered before the platform stored them. A Research Admin can fetch them with \"Refresh details\" on the Run Experiment page."},
     "re.cat_uploaded_no_info_label": {"id": "Keterangan rinci",
                                      "en": "Detailed information"},
+    # Potret `get_info()` yang belum pernah diambil — beserta cara mengambilnya.
+    "re.lbl_info_missing": {"id": "Keterangan belum dipotret.",
+                            "en": "Details not captured yet."},
+    "re.btn_refresh_info": {"id": "Perbarui keterangan", "en": "Refresh details"},
+    "re.msg_info_refreshed": {"id": "Keterangan {algorithm} diperbarui.",
+                              "en": "Details for {algorithm} refreshed."},
 
     # ── Daftar antrean peninjauan: cari, urutkan, penggal, buka ──────────────
     "ap.lbl_search_queue": {"id": "Cari pengajuan",

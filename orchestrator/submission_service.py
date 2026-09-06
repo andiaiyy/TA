@@ -29,7 +29,7 @@ import json
 import logging
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from config.settings import DATASETS_DIR, STORAGE_DIR
 from database.db import _retry_on_locked, get_connection
@@ -61,6 +61,42 @@ SUBMISSION_DIRS = {
 }
 
 _CHUNK = 4 * 1024 * 1024        # 4 MB per blok — jangan muat berkas ke memori
+
+def stored_location(raw) -> Path:
+    """Letak paket sebuah pengajuan, ditambatkan ke ``storage/`` yang BERLAKU.
+
+    ``stored_path`` dicatat sebagai jalur ABSOLUT saat pengajuannya masuk.
+    Platform ini dijalankan bergantian di dalam container
+    (``/app/storage/...``) dan langsung di host (``D:...storage...``), dengan
+    folder ``storage/`` yang SAMA dipasang ke keduanya. Jadi jalur yang benar
+    di satu lingkungan salah di lingkungan lain — dan pembacanya melaporkan
+    paket yang ada di depan matanya sebagai hilang. Dua pengajuan nyata
+    terbaca NOL berkas karena ini, salah satunya masih berstatus `pending`:
+    peninjaunya melihat paket kosong tanpa cara mengetahui sebabnya.
+
+    Yang tetap benar di kedua lingkungan adalah EKORNYA — bagian setelah
+    ``uploaded_pipelines/`` atau ``uploaded_datasets/``. Jadi: pakai jalurnya
+    apa adanya bila memang ada; bila tidak, tambatkan ekor itu ke akar yang
+    berlaku sekarang, dan hanya bila hasilnya benar-benar ada. Fungsi ini tidak
+    pernah mengarang letak, dan tidak pernah menulis apa pun.
+    """
+    text = str(raw or "").strip()
+    if not text:
+        return Path(text)
+    path = Path(text)
+    if path.exists():
+        return path
+
+    parts = PurePosixPath(text.replace(chr(92), "/")).parts
+    for anchor_name, root in (("uploaded_pipelines", PIPELINE_ROOT),
+                              ("uploaded_datasets", DATASET_ROOT)):
+        if anchor_name in parts:
+            tail = parts[parts.index(anchor_name) + 1:]
+            candidate = Path(root).joinpath(*tail)
+            if candidate.exists():
+                return candidate
+    return path                 # tidak ditemukan: apa adanya, bukan tebakan
+
 
 
 class SubmissionError(AuthError):
@@ -428,7 +464,7 @@ def approve_submission(submission_id: int, *, actor: dict | None, note: str = ""
             "Pengajuan ini belum lolos uji coba pada platform, sehingga belum "
             "dapat disetujui.", key=blocked)
 
-    source = Path(item["stored_path"])
+    source = stored_location(item["stored_path"])
     if not source.exists():
         raise SubmissionError(
             f"Berkas pengajuan tidak ditemukan: {source}",
@@ -644,6 +680,115 @@ def _plan_research_identity(item: dict) -> tuple[str, str, dict]:
     return dataset_type, name, declared_schema_of(item)
 
 
+def planned_research_identity(item: dict) -> tuple[str, dict]:
+    """(dataset_type, skema) yang AKAN dimiliki pengajuan ini — atau ``("", {})``.
+
+    Bentuk :func:`_plan_research_identity` yang TIDAK MELEMPAR, untuk pemanggil
+    yang hanya bertanya "kalau disetujui, jadinya apa?" dan tidak boleh gagal
+    karena jawabannya belum ada.
+
+    Ini yang membuka kebuntuan melingkar pada uji coba. Identitas sebuah
+    research pipeline berdiri sendiri baru DIBUAT saat pengajuannya disetujui,
+    sementara persetujuan menuntut uji coba yang lulus, dan uji coba menuntut
+    identitas itu — sehingga tidak satu pun unggahan berdiri sendiri pernah
+    dapat disetujui. Padahal jawabannya sudah lengkap di dalam pengajuan itu
+    sendiri: namanya membentuk pengenalnya, dan kontrak datasetnya sudah
+    dideklarasikan kontributor.
+
+    Yang dikembalikan di sini DIHITUNG, bukan didaftarkan: tidak ada baris
+    ``research_pipelines`` yang lahir lebih awal, dan persetujuan tetap satu-
+    satunya tempat identitas itu benar-benar tercatat.
+
+    Fungsi MURNI: tidak menyentuh basis data maupun disk.
+    """
+    if not is_standalone(item):
+        return "", {}
+    try:
+        dataset_type, _name, schema = _plan_research_identity(item)
+    except SubmissionError:
+        # "Belum punya identitas yang sah" adalah jawaban, bukan kegagalan —
+        # pemanggilnya (mis. penentu jenis dataset) tidak boleh melempar.
+        return "", {}
+    return dataset_type, schema
+
+
+def research_credit(researcher: str, year="",
+                    study: str = "") -> str:
+    """Kredit penelitian sebagai SATU kalimat: "Budi (2026), UNHAS".
+
+    Bentuknya mengikuti atribusi bawaan (`config/research_attribution.py`),
+    sehingga kredit kontribusi dan kredit bawaan terbaca dengan pola yang sama.
+    Bagian yang kosong dibuang, bukan diganti tanda hubung — "— (—)" bukan
+    keterangan, hanya ruang yang terisi.
+
+    Fungsi MURNI.
+    """
+    who = str(researcher or "").strip()
+    when = str(year or "").strip()
+    where = str(study or "").strip()
+    if not who:
+        return where
+    head = f"{who} ({when})" if when else who
+    return f"{head}, {where}" if where else head
+
+
+def research_attribution_of(item: dict, name: str) -> dict:
+    """Atribusi research pipeline sebuah pengajuan: nama tampil + kredit.
+
+    ``display_name`` disusun sebagai ``"<kredit> — <nama>"`` — pola yang SAMA
+    dengan atribusi bawaan, dan itu yang membuat labelnya benar. Sebelumnya ia
+    disimpan sebagai ``"<nama> (kontribusi)"`` tanpa tanda hubung, sehingga
+    ``short_label_for`` — yang mengambil bagian sebelum "—" sebagai kredit —
+    tidak menemukan kredit apa pun dan menghasilkan nama yang mengulang
+    dirinya: "Deteksi Anomali (kontribusi) — Deteksi Anomali".
+
+    Pengajuan LAMA tidak membawa bagian kreditnya. Bagi mereka nama itulah
+    satu-satunya yang diketahui, dan ia dipakai apa adanya — tanpa mengarang
+    peneliti yang tidak pernah disebut siapa pun.
+
+    Fungsi MURNI: tidak menyentuh basis data maupun disk.
+    """
+    metadata = item.get("metadata") or {}
+    # `study` adalah bidang GABUNGAN pada pengajuan yang lebih lama, sebelum
+    # judul dan institusi dipisah. Ia dipakai sebagai cadangan institusi supaya
+    # pengajuan itu tetap menghasilkan kredit yang sama seperti dulu.
+    institution = (metadata.get("institution")
+                   or metadata.get("study") or "")
+    credit = research_credit(metadata.get("researcher"),
+                             metadata.get("year"), institution)
+    # Cadangan terakhir: pengajuan paling lama hanya punya satu kolom bebas.
+    credit = credit or str(metadata.get("paper") or "").strip()
+
+    display = f"{credit} — {name}" if credit else name
+    out = {k: v for k, v in (("display_name", display),
+                             ("short_name", name),
+                             ("paper_credit", credit),
+                             ("scope", str(metadata.get("scope") or "").strip()),
+                             ("pipeline_source",
+                              _clean({"type": metadata.get("source_type"),
+                                      "authors": metadata.get("researcher"),
+                                      "title": metadata.get("title"),
+                                      "institution": institution,
+                                      "year": metadata.get("year")})),
+                             ("dataset_source",
+                              _clean({"name": metadata.get("dataset_name"),
+                                      "attribution":
+                                          metadata.get("dataset_attribution"),
+                                      "note": metadata.get("dataset_note")})),
+                             ) if v}
+    return out
+
+
+def _clean(values: dict) -> dict:
+    """Bidang yang benar-benar terisi. Kosong DIBUANG, bukan diisi tanda hubung.
+
+    Penyaji panelnya membuang baris yang nilainya kosong, jadi menyimpan ""
+    hanya akan menjadi baris "—" yang memenuhi ruang tanpa mengatakan apa pun.
+    """
+    return {k: str(v).strip() for k, v in values.items()
+            if str(v or "").strip()}
+
+
 def _create_research_identity(item: dict, actor: dict,
                               db_path: str | None) -> str:
     """Buat identitas research pengajuan ini; kembalikan `dataset_type`-nya.
@@ -655,12 +800,7 @@ def _create_research_identity(item: dict, actor: dict,
     from orchestrator.research_registry import register_research
 
     dataset_type, name, schema = _plan_research_identity(item)
-    metadata = item.get("metadata") or {}
-    attribution = {k: v for k, v in (
-        ("display_name", f"{name} (kontribusi)"),
-        ("short_name", name),
-        ("paper_credit", metadata.get("paper")),
-    ) if v}
+    attribution = research_attribution_of(item, name)
 
     register_research(dataset_type=dataset_type, name=name, schema=schema,
                       registered_by=actor["username"],
@@ -750,7 +890,10 @@ def _register_approved_pipeline(item: dict, package_dir: Path, actor: dict,
             entry_file=entry_file, registered_by=actor["username"],
             submission_id=item["id"],
             algorithm=entry.get("algorithm") or metadata.get("algorithm"),
-            paper=metadata.get("paper"), db_path=db_path,
+            paper=metadata.get("paper"),
+            # Fase milik BERKAS ini, bukan milik paketnya: satu paket boleh
+            # memuat beberapa algoritma dengan urutan fase yang berbeda.
+            stages=entry.get("stages") or None, db_path=db_path,
         )
 
 
@@ -763,7 +906,7 @@ def deletion_summary(item: dict, db_path: str | None = None) -> dict:
     from database import trials as trial_db
     from orchestrator.trial_dataset_service import attachment_of
 
-    folder = Path(item.get("stored_path") or "")
+    folder = stored_location(item.get("stored_path"))
     try:
         trials = len(trial_db.list_trials(item["id"], db_path))
     except Exception:                        # pragma: no cover - defensif
@@ -782,7 +925,47 @@ def deletion_summary(item: dict, db_path: str | None = None) -> dict:
         "attachment": "" if bound else (attachment.get("filename") or ""),
         "attachment_kept": bool(bound and attachment.get("filename")),
         "registered": len(_registered_of(item["id"], db_path)),
+        # Identitas research yang lahir dari pengajuan ini: ikut hilang bila
+        # tidak ada pipeline yang memakainya, BERTAHAN bila masih dipakai.
+        "research": _research_identity_of(item["id"], db_path),
+        "research_kept": bool(_research_in_use(item["id"], db_path)),
     }
+
+
+def _research_identity_of(submission_id: int, db_path: str | None) -> str:
+    """dataset_type identitas research yang lahir dari pengajuan ini; ""."""
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT dataset_type FROM research_pipelines "
+                "WHERE submission_id = ?", (submission_id,)).fetchone()
+        return row["dataset_type"] if row else ""
+    except Exception:                        # pragma: no cover - defensif
+        logger.exception("Identitas research pengajuan #%s tidak terbaca",
+                         submission_id)
+        return ""
+
+
+def _research_in_use(submission_id: int, db_path: str | None) -> bool:
+    """Apakah identitas itu masih dipakai pipeline yang terdaftar.
+
+    Tidak tahu = anggap DIPAKAI. Menghapus identitas sebuah jenis dataset yang
+    masih menjadi milik pipeline aktif akan membuat pipeline itu berhenti
+    mengenali datanya sendiri; meninggalkan identitas yang tak terpakai hanya
+    menahan satu nama.
+    """
+    dataset_type = _research_identity_of(submission_id, db_path)
+    if not dataset_type:
+        return False
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM registered_pipelines WHERE dataset_type = ?",
+                (dataset_type,)).fetchone()
+        return row is not None
+    except Exception:                        # pragma: no cover - defensif
+        logger.exception("Pemakaian research %s tidak terbaca", dataset_type)
+        return True
 
 
 def _registered_of(submission_id: int, db_path: str | None) -> list[dict]:
@@ -857,15 +1040,32 @@ def delete_submission(submission_id: int, *, actor: dict | None,
     except Exception:                        # pragma: no cover - defensif
         logger.exception("Hasil uji pengajuan #%s gagal dibuang", submission_id)
 
-    # 3. Baris pengajuan. Dihapus SEBELUM berkasnya, sehingga kegagalan
+    # 3. Identitas research yang lahir dari pengajuan ini — HANYA bila tidak
+    #    ada pipeline terdaftar yang memakainya.
+    #
+    #    Dibiarkan menggantung, ia tidak terlihat di mana pun DAN memblokir
+    #    unggahan berikutnya dengan nama yang sama: `dataset_type` unik di
+    #    level skema, sehingga pendaftaran ulang gagal — di tangan PENINJAU,
+    #    saat menekan Setujui, jauh dari sebabnya.
+    #
+    #    Yang masih DIPAKAI tidak disentuh: pipeline yang terdaftar memakai
+    #    jenis dataset itu sebagai miliknya, dan mencabutnya membuat pipeline
+    #    yang masih berjalan berhenti mengenali datanya sendiri. Penghapusan
+    #    pengajuan bukan penghapusan pipeline.
+    keep_research = _research_in_use(submission_id, db_path)
+
+    # 4. Baris pengajuan. Dihapus SEBELUM berkasnya, sehingga kegagalan
     #    menghapus berkas meninggalkan berkas yatim — bukan baris yang
     #    menunjuk berkas yang sudah tidak ada.
     with get_connection(db_path) as conn:
+        if not keep_research:
+            conn.execute("DELETE FROM research_pipelines WHERE submission_id = ?",
+                         (submission_id,))
         conn.execute("DELETE FROM submissions WHERE id = ?", (submission_id,))
         conn.commit()
 
-    # 4. Folder paketnya.
-    folder = Path(item.get("stored_path") or "")
+    # 5. Folder paketnya.
+    folder = stored_location(item.get("stored_path"))
     try:
         if folder.is_dir():
             shutil.rmtree(folder, ignore_errors=True)
@@ -982,7 +1182,7 @@ def reopen_submission(submission_id: int, *, actor: dict | None, note: str = "",
         raise SubmissionError(
             "Pengajuan ini belum dapat ditinjau ulang.", key=blocker)
 
-    source = Path(item["stored_path"])
+    source = stored_location(item["stored_path"])
     moved = source
     if source.exists():
         moved = _move_into(source, SUBMISSION_DIRS[item["kind"]][SUBMISSION_PENDING],
@@ -1023,7 +1223,7 @@ def reject_submission(submission_id: int, *, actor: dict | None, note: str,
         raise SubmissionError("Catatan alasan wajib diisi saat menolak.",
             key="err.reject_reason_required")
     item = _load_pending(submission_id, db_path)
-    source = Path(item["stored_path"])
+    source = stored_location(item["stored_path"])
 
     moved = source
     if source.exists():
@@ -1048,7 +1248,7 @@ def read_submission_sources(item: dict) -> list[tuple[str, str]]:
     """
     if item.get("kind") != KIND_PIPELINE:
         return []
-    folder = Path(item["stored_path"])
+    folder = stored_location(item["stored_path"])
     if not folder.is_dir():
         return []
     out: list[tuple[str, str]] = []
