@@ -582,22 +582,29 @@ def render_active(user: dict) -> None:
             _render_pipeline_page(summary, user)
             return
 
-    render_section("Aktif",
-                   help=t("ap.help_active_list"))
+    # Yang dikelola di sini adalah RESEARCH PIPELINE — bawaan maupun
+    # kontribusi, aktif maupun tidak. Sebelumnya bagian ini menggambar tabel
+    # `registered_pipelines`, yaitu daftar VERSI ALGORITMA milik unggahan saja:
+    # HIKARI2021 dan EVE_SURICATA tidak pernah muncul di sana, padahal
+    # keduanya research pipeline yang paling banyak dipakai platform ini.
+    #
+    # Tabel versinya tidak hilang — ia pindah ke halaman satu pipeline, yang
+    # dibuka dari kartu research yang bersangkutan.
+    from ui.components import research_manage as rs
+
+    render_section("Aktif", help=t("ap.help_active_list"))
+    rs.render(user, heading=False)
+
+    # Tabel VERSI algoritma — tetap ada, tetapi bukan lagi tampilan utamanya.
+    # Keadaan kosongnya tetap dinyatakan sebagai kalimat: daftar research di
+    # atas tidak pernah kosong (bawaan selalu ada), jadi tanpa kalimat ini
+    # ketiadaan pipeline kontribusi menjadi tidak terbaca sama sekali.
     summaries = active_rows()
-
-    # SATU tabel, bukan tabel-mati DITAMBAH tumpukan tombol. Sebelumnya kedua
-    # benda itu digambar berurutan dengan isi yang sama persis, dan yang dapat
-    # diklik justru yang tidak berkolom — tidak dapat diurutkan, tidak dapat
-    # dibandingkan berdampingan. Aksinya (sunting, nonaktifkan, riwayat)
-    # tinggal di HALAMAN pipeline yang terbuka saat barisnya dipilih; widget
-    # Streamlit memang tidak dapat hidup di dalam sel tabel, dan memaksakannya
-    # justru melahirkan dua daftar.
-    if not summaries:
-        prose(t(rv.EMPTY_STATE_KEY), key="mp_active_empty")
-        return
-
-    _render_pipeline_grid(summaries)
+    with st.expander(t("mp.exp_versions"), expanded=False):
+        if summaries:
+            _render_pipeline_grid(summaries)
+        else:
+            prose(t(rv.EMPTY_STATE_KEY), key="mp_active_empty")
 
     # Kolom "Status" menyebut sebuah pipeline nonaktif, tetapi tidak menyebut
     # AKIBATNYA. Ketika yang nonaktif masih punya sub-judul sendiri, kalimat

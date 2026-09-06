@@ -291,6 +291,27 @@ MIGRATIONS = [
         "description": "Add nullable info_json to registered_pipelines (get_info snapshot)",
         "sql": "ALTER TABLE registered_pipelines ADD COLUMN info_json TEXT",
         "add_column": ("registered_pipelines", "info_json"),
+    },    {
+        # Kapan sebuah research pipeline TERAKHIR disunting, dan oleh siapa.
+        #
+        # `registered_at` menjawab "kapan ia lahir" dan tidak pernah berubah.
+        # Begitu metadatanya dapat disunting dari halaman pengelolaan, kedua
+        # pertanyaan itu berbeda — dan tanpa kolom ini halaman pengelolaan
+        # hanya bisa menampilkan tanggal lahir sambil menyebutnya "diperbarui",
+        # yaitu mengarang.
+        #
+        # NULLABLE: baris yang belum pernah disunting memang tidak punya waktu
+        # suntingan, dan itu keadaan yang sah — bukan isian yang terlewat.
+        "version": 30,
+        "description": "Add nullable updated_at to research_pipelines",
+        "sql": "ALTER TABLE research_pipelines ADD COLUMN updated_at TEXT",
+        "add_column": ("research_pipelines", "updated_at"),
+    },
+    {
+        "version": 31,
+        "description": "Add nullable updated_by to research_pipelines",
+        "sql": "ALTER TABLE research_pipelines ADD COLUMN updated_by TEXT",
+        "add_column": ("research_pipelines", "updated_by"),
     },
 ]
 
