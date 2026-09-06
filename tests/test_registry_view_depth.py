@@ -626,12 +626,14 @@ def test_both_sections_render_for_a_research_admin(tmp_path):
     import grid_probe
 
     active = _run(tmp_path, seed=True, section="Aktif")
-    assert grid_probe.count(active) == 1, "daftar aktif bukan satu tabel"
-    names = [r.get("Pipeline") for r in grid_probe.rows(active)]
-    assert any("contoh" in (n or "") for n in names), names
-    # Aksinya TIDAK lagi menumpuk di daftar.
+    # Bagian ini kini menampilkan RESEARCH PIPELINE sebagai kartu — bawaan
+    # maupun kontribusi — dan aksinya (Sunting, Nonaktifkan) memang berada di
+    # kartunya. Tabel versi algoritma tidak hilang; ia pindah ke expander.
+    teks = " ".join(m.value for m in active.markdown)
+    assert "HIKARI2021" in teks, "research bawaan tidak ikut tampil"
+    assert "contoh" in teks.lower(), teks[:200]
     listed = {b.label for b in active.button}
-    assert "Nonaktifkan" not in listed
+    assert {"Sunting", "Nonaktifkan"} <= listed, listed
 
     # …dan benar-benar ada di halaman pipeline-nya.
     page = _run(tmp_path, seed=True, section="Aktif",
@@ -679,4 +681,8 @@ def test_the_empty_state_renders(tmp_path):
     at = _run(tmp_path, seed=False, section="Aktif")
     assert grid_probe.count(at) == 0, "tabel kosong tetap digambar"
     text = " ".join(m.value for m in at.markdown)
+    # Daftar research TIDAK pernah kosong — research bawaan selalu ada — jadi
+    # yang kosong adalah tabel VERSI algoritma, dan ketiadaannya tetap
+    # dinyatakan sebagai kalimat, bukan sebagai tabel berjudul tanpa baris.
+    assert "HIKARI2021" in text, "research bawaan hilang dari daftar"
     assert rv.EMPTY_STATE in text, text

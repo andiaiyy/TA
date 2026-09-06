@@ -275,7 +275,13 @@ CREATE TABLE IF NOT EXISTS research_pipelines (
     active         INTEGER NOT NULL DEFAULT 1,
     -- Dataset yang MENYATU dengan research pipeline ini. NULL bila ia
     -- menumpang jenis bawaan dan memakai dataset platform.
-    dataset_json   TEXT
+    dataset_json   TEXT,
+    -- Suntingan TERAKHIR atas metadatanya. NULL selama belum pernah disunting:
+    -- `registered_at` menjawab "kapan lahir", kedua kolom ini menjawab "kapan
+    -- terakhir diubah, oleh siapa" — dan keduanya tidak boleh dikarang dari
+    -- yang pertama.
+    updated_at     TEXT,
+    updated_by     TEXT
 );
 """
 

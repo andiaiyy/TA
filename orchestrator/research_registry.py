@@ -117,6 +117,31 @@ def get_research(dataset_type: str, db_path: str | None = None) -> dict | None:
         return None
 
 
+def research_override(dataset_type: str,
+                      db_path: str | None = None) -> dict | None:
+    """Baris `research_pipelines` sebuah jenis dataset — BAWAAN maupun unggahan.
+
+    Berbeda dari :func:`get_research`, yang sengaja menolak jenis bawaan:
+    fungsi ini justru dipakai untuk MENIMPA keterangan bawaan.
+
+    Definisi research bawaan hidup di `contracts/` dan `config/` — berkas yang
+    tidak boleh disentuh, dan memang tidak perlu: yang disunting Research Admin
+    adalah METADATANYA, dan metadata itu disimpan sebagai baris timpaan di
+    sini. Menghapus barisnya mengembalikan keterangan bawaan ke definisi git,
+    utuh, tanpa satu berkas pun berubah.
+    """
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT * FROM research_pipelines WHERE dataset_type = ?",
+                (dataset_type,)).fetchone()
+        return dict(row) if row else None
+    except Exception:                       # pragma: no cover - defensif
+        logger.warning("Timpaan research %s tidak terbaca", dataset_type,
+                       exc_info=True)
+        return None
+
+
 def register_research(*, dataset_type: str, name: str, schema: dict,
                       registered_by: str, submission_id: int | None = None,
                       attribution: dict | None = None,
@@ -155,6 +180,107 @@ def register_research(*, dataset_type: str, name: str, schema: dict,
 
 # -- Pembaca GABUNGAN: inilah yang dipakai orchestrator & tampilan ---------
 
+def update_research(dataset_type: str, *, name: str | None = None,
+                    attribution: dict | None = None,
+                    schema: dict | None = None, actor: dict | None,
+                    db_path: str | None = None) -> dict:
+    """Sunting metadata sebuah research pipeline. Hanya Research Admin.
+
+    Berlaku untuk KEDUANYA. Research kontribusi punya barisnya sendiri dan
+    barisnya diperbarui; research bawaan tidak punya baris, jadi sebuah baris
+    TIMPAAN dibuat untuknya — definisi di `contracts/` dan `config/` tidak
+    pernah disentuh, dan menghapus baris timpaan itu mengembalikan semuanya ke
+    definisi git (lihat :func:`revert_research`).
+
+    Yang disunting hanyalah KETERANGAN: nama tampil, atribusi penelitian, dan
+    kontrak dataset. Tidak ada kode pipeline, hash, versi, atau berkas yang
+    tersentuh — dan `dataset_type` tidak pernah berubah, karena baris
+    `experiments` yang sudah ada menunjuk padanya.
+    """
+    from orchestrator.auth_service import require_approve  # hindari impor siklik
+
+    require_approve(actor, db_path)
+    dataset_type = str(dataset_type or "").strip()
+    if not dataset_type:
+        raise ResearchRegistryError("dataset_type kosong.",
+                                    key="err.research_not_found",
+                                    values={"research": ""})
+
+    row = research_override(dataset_type, db_path)
+    static_schema = _static_schema(dataset_type)
+    if row is None and static_schema is None:
+        raise ResearchRegistryError(
+            f"Research pipeline tidak ditemukan: {dataset_type}",
+            key="err.research_not_found", values={"research": dataset_type})
+
+    # Bidang yang TIDAK diberikan tidak berubah. Skema selalu tersimpan utuh:
+    # kolomnya NOT NULL, dan sebuah baris timpaan tanpa skema akan membuat
+    # jenis bawaan kehilangan kontraknya.
+    efektif_schema = schema if schema is not None else (
+        _row_schema(row.get("schema_json")) if row else None) or static_schema or {}
+    efektif_nama = (name or "").strip() or (row["name"] if row else
+                                            dataset_type)
+    if attribution is None:
+        try:
+            attribution = json.loads(row["attribution_json"] or "{}") if row else {}
+        except (TypeError, ValueError):
+            attribution = {}
+
+    sekarang = now_iso()
+    siapa = (actor or {}).get("username") or ""
+    with get_connection(db_path) as conn:
+        if row is None:
+            conn.execute(
+                "INSERT INTO research_pipelines "
+                "(dataset_type, name, submission_id, schema_json, "
+                " attribution_json, registered_by, registered_at, active, "
+                " updated_at, updated_by) "
+                "VALUES (?, ?, NULL, ?, ?, ?, ?, 1, ?, ?)",
+                (dataset_type, efektif_nama, json.dumps(efektif_schema),
+                 json.dumps(attribution), siapa, sekarang, sekarang, siapa))
+        else:
+            conn.execute(
+                "UPDATE research_pipelines SET name = ?, schema_json = ?, "
+                "attribution_json = ?, updated_at = ?, updated_by = ? "
+                "WHERE dataset_type = ?",
+                (efektif_nama, json.dumps(efektif_schema),
+                 json.dumps(attribution), sekarang, siapa, dataset_type))
+        conn.commit()
+    logger.info("Research pipeline %s disunting oleh %s", dataset_type, siapa)
+    return research_override(dataset_type, db_path) or {}
+
+
+def revert_research(dataset_type: str, *, actor: dict | None,
+                    db_path: str | None = None) -> bool:
+    """Buang baris TIMPAAN sebuah research BAWAAN; True bila ada yang dibuang.
+
+    Hanya untuk jenis bawaan: barisnya semata lapisan di atas definisi git,
+    jadi membuangnya memulihkan keterangan aslinya tanpa kehilangan apa pun.
+    Research KONTRIBUSI ditolak — barisnya bukan timpaan, melainkan satu-
+    satunya tempat identitasnya hidup.
+    """
+    from orchestrator.auth_service import require_approve
+
+    require_approve(actor, db_path)
+    # Diperiksa lewat ruang namanya, bukan lewat ada-tidaknya definisi statis:
+    # `get_research_attribution` mengembalikan bentuk kosong (bukan None) untuk
+    # jenis yang tidak dikenalnya, sehingga penjaga berbasis itu meloloskan
+    # research kontribusi — dan menghapus barisnya berarti menghapus
+    # identitasnya, bukan memulihkan apa pun.
+    if is_uploaded_research(dataset_type):
+        raise ResearchRegistryError(
+            f"Bukan research bawaan, tidak ada yang dapat dipulihkan: "
+            f"{dataset_type}",
+            key="err.research_not_builtin", values={"research": dataset_type})
+
+    with get_connection(db_path) as conn:
+        cur = conn.execute(
+            "DELETE FROM research_pipelines WHERE dataset_type = ?",
+            (dataset_type,))
+        conn.commit()
+    return bool(cur.rowcount)
+
+
 def all_dataset_types(db_path: str | None = None) -> list[str]:
     """`dataset_type` bawaan + terunggah yang aktif. Bawaan SELALU lebih dulu."""
     out = list(_static_types())
@@ -164,6 +290,69 @@ def all_dataset_types(db_path: str | None = None) -> list[str]:
     return out
 
 
+def _is_deliberate_override(dataset_type: str, row: dict | None) -> bool:
+    """Apakah baris ini SUNTINGAN yang disengaja atas sebuah jenis bawaan.
+
+    Jenis bawaan hanya boleh ditimpa oleh :func:`update_research`, yang selalu
+    mengisi ``updated_at`` dan ``updated_by``. Baris yang muncul lewat jalur
+    lain — disisipkan langsung ke basis data dengan nama bawaan — TIDAK
+    menimpa apa pun: definisi di git tetap menang, persis seperti sebelum
+    penyuntingan ada.
+
+    Untuk jenis KONTRIBUSI pertanyaannya tidak berlaku: barisnya bukan lapisan
+    di atas apa pun, ia satu-satunya tempat identitasnya hidup.
+    """
+    if row is None:
+        return False
+    if is_uploaded_research(dataset_type):
+        return True
+    return bool(str(row.get("updated_at") or "").strip())
+
+
+def merge_schema(dataset_type: str, row: dict | None) -> dict | None:
+    """Skema efektif dari (jenis, baris timpaan) — MURNI, tanpa basis data.
+
+    Dipisah supaya pemanggil yang sudah memegang barisnya — halaman
+    pengelolaan membaca seluruh baris sekali — tidak perlu membacanya lagi
+    per research. Aturannya: SUNTINGAN yang disengaja menang, lalu bawaan.
+    """
+    if (row is not None and row.get("active")
+            and _is_deliberate_override(dataset_type, row)):
+        declared = _row_schema(row.get("schema_json"))
+        if declared:
+            return declared
+    static = _static_schema(dataset_type)
+    if static is not None:
+        return static
+    if row is None or not row.get("active"):
+        return None
+    return _row_schema(row.get("schema_json")) or None
+
+
+def merge_attribution(dataset_type: str, row: dict | None) -> dict:
+    """Atribusi efektif dari (jenis, baris timpaan) — MURNI, tanpa basis data."""
+    static = _static_attribution(dataset_type) or {}
+    if row is None or not _is_deliberate_override(dataset_type, row):
+        return dict(static)
+
+    try:
+        declared = json.loads(row.get("attribution_json") or "{}")
+    except (TypeError, ValueError):
+        declared = {}
+    if not isinstance(declared, dict):
+        declared = {}
+
+    if static:
+        gabung = dict(static)
+        gabung.update({k: v for k, v in declared.items()
+                       if v not in (None, "", {}, [])})
+        return gabung
+
+    declared.setdefault("display_name", f"{row['name']} (kontribusi)")
+    declared.setdefault("short_name", row["name"])
+    return declared
+
+
 def schema_for(dataset_type: str, db_path: str | None = None) -> dict | None:
     """Skema sebuah `dataset_type` - bawaan MENANG, lalu terunggah.
 
@@ -171,34 +360,22 @@ def schema_for(dataset_type: str, db_path: str | None = None) -> dict | None:
     ``contracts.dataset_schemas.get_schema``, sehingga seluruh pemanggil yang
     sudah menangani ``None`` tidak berubah perilakunya sama sekali.
     """
-    static = _static_schema(dataset_type)
-    if static is not None:
-        return static
-    row = get_research(dataset_type, db_path)
-    if row is None or not row.get("active"):
-        return None
-    return _row_schema(row.get("schema_json")) or None
+    # Timpaan yang DISUNTING Research Admin menang atas definisi bawaan —
+    # itulah artinya "dapat disunting". Tanpa baris timpaan, jawabannya sama
+    # persis seperti sebelumnya.
+    return merge_schema(dataset_type, research_override(dataset_type, db_path))
 
 
 def attribution_for(dataset_type: str, db_path: str | None = None) -> dict:
-    """Atribusi sebuah `dataset_type` - bawaan MENANG, lalu terunggah."""
-    static = _static_attribution(dataset_type)
-    if static:
-        return static
-    row = get_research(dataset_type, db_path)
-    if row is None:
-        return {}
-    try:
-        declared = json.loads(row["attribution_json"] or "{}")
-    except (TypeError, ValueError):
-        declared = {}
-    if not isinstance(declared, dict):
-        declared = {}
-    # Nama tampilan SELALU ada: pembaca berhak tahu ini research kontribusi,
-    # dan dari mana asalnya.
-    declared.setdefault("display_name", f"{row['name']} (kontribusi)")
-    declared.setdefault("short_name", row["name"])
-    return declared
+    """Atribusi sebuah `dataset_type`: definisi bawaan, DITIMPA suntingan.
+
+    Suntingan Research Admin disimpan sebagai baris `research_pipelines` dan
+    ditumpuk DI ATAS definisi bawaan — bidang yang tidak disunting tetap
+    datang dari `config/research_attribution.py`, dan menghapus baris
+    timpaannya mengembalikan seluruhnya ke definisi git.
+    """
+    return merge_attribution(dataset_type,
+                             research_override(dataset_type, db_path))
 
 
 # -- Dataset yang MENYATU dengan research pipeline ------------------------
@@ -271,13 +448,23 @@ def display_name_for(dataset_type: str, db_path: str | None = None) -> str:
     return entry.get("display_name") or dataset_type
 
 
-def short_label_for(dataset_type: str, db_path: str | None = None) -> str:
-    entry = attribution_for(dataset_type, db_path)
+def short_label_from(dataset_type: str, entry: dict) -> str:
+    """Label pendek dari atribusi yang SUDAH ada — MURNI, tanpa basis data.
+
+    Dipisah karena pemanggil yang menyusun daftar sudah memegang atribusinya;
+    memanggil `short_label_for()` di sana berarti membaca barisnya sekali lagi
+    untuk setiap research.
+    """
     if not entry:
         return dataset_type
     credit = str(entry.get("display_name") or "").split("—")[0].strip()
     short = entry.get("short_name") or dataset_type
     return f"{credit} — {short}" if credit and credit != short else short
+
+
+def short_label_for(dataset_type: str, db_path: str | None = None) -> str:
+    return short_label_from(dataset_type,
+                            attribution_for(dataset_type, db_path))
 
 
 def paper_credit_for(dataset_type: str, db_path: str | None = None) -> str:
