@@ -704,10 +704,22 @@ def dataset_contract_rows(dataset_type: str) -> list[tuple[str, str]]:
         ]
 
     # Jenis kontribusi: hanya yang benar-benar dinyatakan kontraknya. Baris
-    # "sifat fitur" dan "jumlah kelas" tidak ada di sana, dan baris kosong
-    # bertanda "—" terbaca sebagai platform yang tidak mengenal datasetnya.
-    rows = [(t("ins.dsrow_format"), exts),
-            (t("ins.dsrow_label_column"), label_meaning)]
+    # yang tidak dinyatakan TIDAK ditampilkan — baris kosong bertanda "—"
+    # terbaca sebagai platform yang tidak mengenal datasetnya.
+    from ui.views.run_experiment import declared_dataset_facts
+
+    facts = declared_dataset_facts(dataset_type)
+    row_unit = str(facts.get("row_unit") or "").strip()
+    arti = str(facts.get("label_meaning") or "").strip()
+    rows = [(t("ins.dsrow_format"), f"{exts} — {row_unit}" if row_unit else exts),
+            (t("ins.dsrow_label_column"),
+             f"`{label_col}` — {arti}" if arti else label_meaning)]
+    if facts.get("feature_nature"):
+        rows.append((t("ins.dsrow_feature_nature"),
+                     str(facts["feature_nature"])))
+    if facts.get("class_count"):
+        rows.append((t("ins.dsrow_class_count"),
+                     t("re.req_classes_declared", count=facts["class_count"])))
     columns = schema.get("expected_columns") or []
     if columns:
         rows.append((t("ins.dsrow_required_columns"),
@@ -727,8 +739,6 @@ def render_dataset_instructions() -> None:
     from orchestrator.research_registry import (
         short_label_for as get_research_short_label,
     )
-    from ui.views.run_experiment import _render_dataset_requirements
-
     from ui.i18n import t
 
     inject_css()
@@ -772,19 +782,26 @@ def render_dataset_instructions() -> None:
     render_mistakes(common_dataset_mistakes(),
                     title=t("ins.mistakes_dataset_title"))
 
-    with st.expander(t("ins.exp_dataset_requirements"), expanded=False):
-        st.markdown(f"**{labels.get(dtype, dtype)}**")
-        _render_dataset_requirements(dtype)
+    # TIDAK ada expander "persyaratan lengkap" di bawah ini lagi. Isinya
+    # adalah kontrak yang SAMA dengan tabel + contoh + checklist di atas,
+    # hanya dengan kata-kata yang berbeda — jadi halaman ini mencetak
+    # persyaratan yang sama DUA KALI, dan mendorong tab unggahnya turun
+    # sejauh dua puluhan elemen dari judul halaman. Panel bersama itu tetap
+    # hidup di tempat asalnya: halaman Jalankan Eksperimen dan modal katalog,
+    # tempat sebuah research dipilih untuk DIJALANKAN.
 
 
 def dataset_sample_snippet(dataset_type: str) -> str:
     """Potongan struktur RINGKAS memakai nama kolom/field NYATA dari skema."""
     import json
 
-    from contracts.dataset_schemas import get_schema
-    from ui.views.run_experiment import _DATASET_REQUIREMENTS, _hikari_column_facts
+    from ui.views.run_experiment import (
+        _DATASET_REQUIREMENTS, _hikari_column_facts, _schema_of,
+    )
 
-    schema = get_schema(dataset_type) or {}
+    # Skema GABUNGAN: jenis kontribusi mendeklarasikan kolomnya sendiri, dan
+    # skema statis tidak mengenalnya sama sekali.
+    schema = _schema_of(dataset_type) or {}
     req = _DATASET_REQUIREMENTS.get(dataset_type, {})
 
     if schema.get("expected_top_level_keys"):
@@ -793,6 +810,13 @@ def dataset_sample_snippet(dataset_type: str) -> str:
         if not keys:
             return ""
         return json.dumps({k: values[k] for k in keys}, ensure_ascii=False) + " …"
+
+    # Jenis kontribusi: yang diketahui hanyalah NAMA kolom yang dinyatakan.
+    # Satu baris header sudah cukup untuk dicocokkan, dan tidak ada nilai
+    # yang dikarang.
+    if dataset_type not in _DATASET_REQUIREMENTS:
+        columns = [str(c) for c in (schema.get("expected_columns") or []) if c]
+        return ",".join(columns) if columns else ""
 
     features, _drops, _names = _hikari_column_facts()
     pairs = [(c, v) for c, v in (req.get("sample_columns") or {}).items()
@@ -806,15 +830,30 @@ def dataset_sample_snippet(dataset_type: str) -> str:
 
 
 def dataset_checklist(dataset_type: str) -> list[str]:
-    """Checklist padat "Dataset Anda cocok jika…" — diturunkan dari skema."""
-    from contracts.dataset_schemas import get_schema
-    from ui.views.run_experiment import _dataset_extensions
+    """Checklist padat "Dataset Anda cocok jika…" — diturunkan dari skema.
 
-    schema = get_schema(dataset_type) or {}
+    Untuk research KONTRIBUSI, yang boleh dikatakan hanyalah kontrak yang
+    dinyatakan pengunggahnya. Sebelum perbaikan ini fungsinya membaca skema
+    STATIS — yang tidak mengenal jenis kontribusi — lalu mencetak tiga klaim
+    yang tidak pernah dinyatakan siapa pun: "satu baris per flow", kolom label
+    bernama "`?`" berisi "`0`/`1`", dan "dua kelas: benign dan malicious".
+    """
+    from ui.views.run_experiment import (
+        _DATASET_REQUIREMENTS, _dataset_extensions, _schema_of,
+        declared_checklist,
+    )
+
+    schema = _schema_of(dataset_type) or {}
     exts = " / ".join(f"`{e}`" for e in _dataset_extensions(dataset_type))
     label_col = schema.get("label_column", "?")
 
     from ui.i18n import t
+
+    # Persyaratan yang DITULIS PLATFORM hanya ada untuk dua jenis bawaan;
+    # diperiksa lebih dulu supaya jenis kontribusi berformat NDJSON tidak
+    # ikut memakai kalimat khas EVE ("event TLS", "alert Suricata").
+    if dataset_type not in _DATASET_REQUIREMENTS:
+        return declared_checklist(schema, exts, schema.get("label_column") or "")
 
     if schema.get("expected_top_level_keys"):
         return [

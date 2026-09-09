@@ -123,6 +123,7 @@ def register_pipeline(*, name: str, dataset_type: str, entry_class: str,
                       paper: str | None = None, edited_by: str | None = None,
                       edited_at: str | None = None, change_note: str | None = None,
                       stages: list | None = None,
+                      info_extra: dict | None = None,
                       db_path: str | None = None) -> dict:
     """Daftarkan satu VERSI BARU pipeline terunggah.
 
@@ -172,7 +173,8 @@ def register_pipeline(*, name: str, dataset_type: str, entry_class: str,
              entry_class, str(entry_path), digest, algorithm, paper,
              registered_by, now_iso(), edited_by, edited_at, change_note,
              json.dumps(list(stages)) if stages else None,
-             _dumped_info(_snapshot_info(entry_path, entry_class, digest))),
+             _dumped_info(merge_info(
+                 _snapshot_info(entry_path, entry_class, digest), info_extra))),
         )
         conn.commit()
     finally:
@@ -180,6 +182,35 @@ def register_pipeline(*, name: str, dataset_type: str, entry_class: str,
     logger.info("Pipeline terunggah didaftarkan: %s (kelas %s, hash %s…)",
                 pipeline_id, entry_class, digest[:12])
     return get_registered(pipeline_id, db_path)
+
+
+def _declared_notes_of(submission_id, db_path: str | None = None) -> dict:
+    """Keterangan metode dari FORMULIR pengajuan sebuah baris registry.
+
+    Potret meratakan kunci yang ditulis kode dengan kunci yang diketik
+    pengunggah, sehingga potret itu sendiri tidak dapat ditanya "yang mana
+    milik siapa". Yang dapat ditanya adalah ``submissions.metadata_json``:
+    jawaban formulirnya tersimpan di sana apa adanya, dan ia catatan sejarah —
+    tidak pernah ditulis ulang. Itulah provenansi yang membuat potret dapat
+    diambil ulang tanpa menghapus keterangan yang tidak berasal dari kode.
+
+    Tanpa pengajuan (baris uji, baris lama) -> {}.
+    """
+    if not submission_id:
+        return {}
+    from orchestrator.submission_service import info_extra_of
+
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT metadata_json FROM submissions WHERE id = ?",
+                (submission_id,)).fetchone()
+        metadata = json.loads((row["metadata_json"] if row else "") or "{}")
+    except Exception:                        # pragma: no cover - defensif
+        logger.warning("Metadata pengajuan #%s tidak terbaca", submission_id,
+                       exc_info=True)
+        return {}
+    return info_extra_of(metadata if isinstance(metadata, dict) else {})
 
 
 @_retry_on_locked()
@@ -196,7 +227,16 @@ def refresh_info(pipeline_id: str, *, actor: dict | None,
 
     Hash tetap diverifikasi seperti biasa; berkas yang berubah ditolak sebelum
     kodenya dieksekusi. Hanya Research Admin.
+
+    Memotret ulang TIDAK BOLEH menghapus keterangan yang bukan berasal dari
+    kode. Untuk research kontribusi keterangan itu memang tidak ada di sini —
+    ia tinggal di baris research dan ditumpuk saat tampil. Untuk paket yang
+    MENUMPANG jenis bawaan tidak ada baris research yang memilikinya, jadi
+    keterangannya diterapkan kembali dari pengajuannya, persis seperti saat
+    pendaftaran. Tanpa itu tombol ini menghapus jawaban formulir kontributor
+    tanpa cara mengembalikannya selain mengajukan ulang paketnya.
     """
+    from database.models import is_uploaded_research
     from orchestrator.auth_service import require_approve   # hindari impor siklik
 
     require_approve(actor, db_path)
@@ -207,9 +247,20 @@ def refresh_info(pipeline_id: str, *, actor: dict | None,
             key="err.pipeline_not_registered",
             values={"pipeline": pipeline_id})
 
-    dumped = _dumped_info(_snapshot_info(Path(item["entry_file"]),
-                                         item["entry_class"],
-                                         item["file_hash"]))
+    # Potret diperiksa SENDIRI: berkas yang berubah harus tetap ditolak walau
+    # pengajuannya membawa keterangan formulir. Tanpa pemeriksaan terpisah,
+    # keterangan itu akan mengisi potret yang gagal dan kegagalannya lolos.
+    potret = _snapshot_info(Path(item["entry_file"]), item["entry_class"],
+                            item["file_hash"])
+    if potret is None:
+        raise DynamicRegistryError(
+            f"Keterangan {pipeline_id} tidak dapat dibaca dari berkasnya.",
+            key="err.info_snapshot_failed",
+            values={"pipeline": pipeline_id})
+
+    ekstra = {} if is_uploaded_research(item["dataset_type"]) else \
+        _declared_notes_of(item.get("submission_id"), db_path)
+    dumped = _dumped_info(merge_info(potret, ekstra))
     if dumped is None:
         raise DynamicRegistryError(
             f"Keterangan {pipeline_id} tidak dapat dibaca dari berkasnya.",
@@ -506,6 +557,28 @@ def _snapshot_info(entry_file: Path, entry_class: str,
     return info if isinstance(info, dict) else None
 
 
+def merge_info(info: dict | None, extra: dict | None) -> dict | None:
+    """Potret ``get_info()`` DITUMPUK keterangan dari formulir pengajuan.
+
+    Aturannya satu, dan arahnya tidak boleh terbalik: **kode menang**. Yang
+    ditulis pipeline adalah kebenaran tentang apa yang benar-benar dijalankan;
+    isian formulir hanya menerangkan, dan hanya mengisi kunci yang kodenya
+    memang tidak menyebutkan. Bila formulir dibiarkan menimpa kode, keterangan
+    yang dibaca peninjau dapat berbeda dari yang dieksekusi — dan seluruh
+    klaim ketertelusuran bertumpu pada keduanya tidak pernah berbeda.
+
+    Nilai kosong pada ``extra`` diabaikan: "tidak diisi" bukan "kosongkan".
+    """
+    bersih = {k: v for k, v in (extra or {}).items()
+              if v not in (None, "", [], {})}
+    if not bersih:
+        return info
+    gabung = dict(bersih)
+    gabung.update({k: v for k, v in (info or {}).items()
+                   if v not in (None, "", [], {})})
+    return gabung
+
+
 def _dumped_info(info: dict | None) -> str | None:
     """Potret ``get_info()`` sebagai JSON; None bila tidak dapat dipotret.
 
@@ -540,11 +613,47 @@ def _info_of(row: dict) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _entry_from_row(row: dict) -> dict:
+def _method_notes_map(db_path: str | None = None) -> dict:
+    """``dataset_type`` -> keterangan metode yang dinyatakan pengunggahnya.
+
+    Dibaca SEKALI untuk seluruh penggambaran, bukan sekali per baris registry:
+    sebuah research pipeline lazimnya punya beberapa algoritma dan beberapa
+    versi, dan menanyakan catatan yang sama berulang kali akan mengembalikan
+    persis biaya yang dihapus potret ``info_json``.
+
+    Gagal membaca -> peta KOSONG. Daftar pipeline harus tetap utuh walau tabel
+    research hilang; yang hilang hanya keterangannya, dan itu terlihat.
+
+    Barisnya dibaca lewat ``merge_attribution`` — bukan langsung dari
+    ``attribution_json`` — supaya aturan timpaan yang sama berlaku di sini:
+    baris bernama jenis BAWAAN yang tidak lahir dari penyuntingan tidak menimpa
+    apa pun, dan karenanya tidak dapat menyelundupkan keterangan.
+    """
+    from orchestrator.research_registry import list_research, merge_attribution
+
+    out: dict = {}
+    for row in list_research(active_only=False, db_path=db_path):
+        dtype = row["dataset_type"]
+        try:
+            notes = (merge_attribution(dtype, row) or {}).get("method_notes")
+        except Exception:                     # pragma: no cover - defensif
+            continue
+        if isinstance(notes, dict) and notes:
+            out[dtype] = notes
+    return out
+
+
+def _entry_from_row(row: dict, notes: dict | None = None) -> dict:
     """Baris DB -> entri bergaya registry, TANPA memuat kelasnya.
 
     Menampilkan daftar tidak boleh mengeksekusi kode unggahan; kelas baru
     dimuat saat pipeline benar-benar dijalankan.
+
+    ``notes`` adalah keterangan metode research ini, ditumpuk ke potret DI SINI
+    — saat tampil, bukan saat menulis. Itulah yang membuatnya dapat disunting:
+    potret merekam apa yang KODE katakan dan tidak pernah berubah, sedangkan
+    catatan hidup di baris research dan boleh diperbaiki kapan saja. Arah
+    presedennya tetap sama, ``merge_info`` yang menjaganya: kode menang.
     """
     return {
         "dataset_type": row["dataset_type"],
@@ -558,7 +667,7 @@ def _entry_from_row(row: dict) -> dict:
         "stages": _stages_of(row),
         # Potret `get_info()`. Inilah yang membuat katalog dan halaman riwayat
         # dapat MENJELASKAN pipeline ini tanpa mengimpor kodenya.
-        "info": _info_of(row),
+        "info": merge_info(_info_of(row), notes),
         "uploaded": True,
         "version": row["version"],
         "file_hash": row["file_hash"],
@@ -584,6 +693,17 @@ def get_all_pipelines(db_path: str | None = None) -> dict:
                        "hanya pipeline bawaan yang ditampilkan", exc_info=True)
         return merged
 
+    # SATU pembacaan untuk seluruh daftar. Keterangan metode milik research,
+    # bukan milik masing-masing versi, jadi menanyakannya per baris berarti
+    # kueri yang tumbuh linear terhadap jumlah algoritma × versi.
+    try:
+        notes = _method_notes_map(db_path)
+    except Exception:                        # pragma: no cover - defensif
+        logger.warning("Keterangan metode research tidak terbaca — "
+                       "pipeline tetap ditampilkan tanpa keterangan itu",
+                       exc_info=True)
+        notes = {}
+
     for row in rows:
         pipeline_id = row["pipeline_id"]
         if pipeline_id in merged:            # tidak mungkin terjadi (namespace
@@ -592,7 +712,8 @@ def get_all_pipelines(db_path: str | None = None) -> dict:
                 "entri bawaan dipertahankan.", pipeline_id)
             continue
         try:
-            merged[pipeline_id] = _entry_from_row(row)
+            merged[pipeline_id] = _entry_from_row(
+                row, notes.get(row["dataset_type"]))
         except Exception:                    # pragma: no cover - defensive
             logger.warning("Entri pipeline terunggah %s dilewati", pipeline_id,
                            exc_info=True)

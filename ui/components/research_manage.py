@@ -135,6 +135,7 @@ def research_catalog(db_path=None) -> list[dict]:
 
         source = attribution.get("pipeline_source") or {}
         dataset_source = attribution.get("dataset_source") or {}
+        notes = attribution.get("method_notes") or {}
         ids = algoritma.get(dtype, [])
         uploaded = is_uploaded_research(dtype)
 
@@ -155,6 +156,31 @@ def research_catalog(db_path=None) -> list[dict]:
             "dataset_name": str(dataset_source.get("name") or "").strip(),
             "dataset_attribution": str(dataset_source.get("attribution") or "").strip(),
             "dataset_note": str(dataset_source.get("note") or "").strip(),
+            # Keterangan dataset yang DITERIMA research ini. Ikut dibawa agar
+            # formulir sunting dapat mengisinya — dan, yang lebih penting,
+            # agar menyimpan suntingan tidak menghapusnya diam-diam.
+            "dataset_row_unit": str(dataset_source.get("row_unit") or "").strip(),
+            "dataset_label_meaning":
+                str(dataset_source.get("label_meaning") or "").strip(),
+            "dataset_feature_nature":
+                str(dataset_source.get("feature_nature") or "").strip(),
+            "dataset_class_count":
+                str(dataset_source.get("class_count") or "").strip(),
+            "dataset_sample_values":
+                str(dataset_source.get("sample_values") or "").strip(),
+            "dataset_ignored_columns":
+                str(dataset_source.get("ignored_columns") or "").strip(),
+            # Keterangan METODE. Ia mengisi baris pada modal katalog dan panel
+            # Tentang Research Pipeline yang dahulu hanya terisi untuk research
+            # bawaan. Disimpan di sini — bukan di potret `info_json` — supaya
+            # dapat disunting; kunci yang `get_info()` sebutkan sendiri tetap
+            # menang saat digabungkan.
+            "info_app": str(notes.get("app") or "").strip(),
+            "info_metrics_policy": str(notes.get("metrics_policy") or "").strip(),
+            "info_dataset": str(notes.get("dataset") or "").strip(),
+            # Daftar -> satu tindakan per baris, bentuk yang sama dengan
+            # formulir unggahnya.
+            "info_anti_leakage": _lines(notes.get("anti_leakage")),
             "file_format": str(schema.get("file_format") or "").strip(),
             "extensions": list(_dataset_extensions(dtype) or ()),
             "label_column": str(schema.get("label_column") or "").strip(),
@@ -423,6 +449,72 @@ def _render_edit_form(row: dict, user: dict | None) -> None:
                                    value=row["dataset_note"],
                                    key=f"rs_f_dsnote_{dtype}")
 
+        # Keterangan dataset yang DITERIMA research ini — memakai label yang
+        # sama persis dengan formulir unggah, supaya pengunggah dan peninjau
+        # membaca pertanyaan yang sama. Seluruhnya opsional; yang dikosongkan
+        # tidak ditampilkan di panel persyaratan, bukan diisi tanda hubung.
+        e1, e2 = st.columns(2)
+        ds_baris = e1.text_input(t("ap.lbl_row_unit"),
+                                 value=row["dataset_row_unit"],
+                                 placeholder=t("ap.ph_row_unit"),
+                                 key=f"rs_f_dsrow_{dtype}")
+        ds_arti = e2.text_input(t("ap.lbl_label_meaning"),
+                                value=row["dataset_label_meaning"],
+                                placeholder=t("ap.ph_label_meaning"),
+                                key=f"rs_f_dsmean_{dtype}")
+        e3, e4 = st.columns([3, 1])
+        ds_fitur = e3.text_input(t("ap.lbl_feature_nature"),
+                                 value=row["dataset_feature_nature"],
+                                 placeholder=t("ap.ph_feature_nature"),
+                                 key=f"rs_f_dsfeat_{dtype}")
+        _kelas_awal = row["dataset_class_count"]
+        ds_kelas = e4.number_input(
+            t("ap.lbl_class_count"), min_value=0, max_value=99,
+            value=int(_kelas_awal) if str(_kelas_awal).isdigit() else 0,
+            step=1, help=t("ap.help_class_count"), key=f"rs_f_dscls_{dtype}")
+        ds_contoh = st.text_area(t("ap.lbl_sample_values"), height=70,
+                                 value=row["dataset_sample_values"],
+                                 placeholder=t("ap.ph_sample_values"),
+                                 help=t("ap.help_sample_values"),
+                                 key=f"rs_f_dssample_{dtype}")
+        ds_abai = st.text_input(t("ap.lbl_ignored_columns"),
+                                value=row["dataset_ignored_columns"],
+                                help=t("ap.help_ignored_columns"),
+                                key=f"rs_f_dsignore_{dtype}")
+
+        # Keterangan metode — hanya untuk research KONTRIBUSI. Pipeline bawaan
+        # menuliskan keempat kunci ini sendiri di dalam `get_info()`, dan kode
+        # selalu menang; isian di sini tidak akan pernah berpengaruh pada
+        # mereka. Menampilkannya tetap berarti menawarkan kendali yang tidak
+        # ada — lebih buruk daripada tidak menawarkannya sama sekali.
+        kontribusi = row["origin"] == ORIGIN_UPLOADED
+        info_app = info_metrik = info_data = info_anti = ""
+        if kontribusi:
+            st.markdown(f"**{t('ap.sec_method_notes')}**")
+            m1, m2 = st.columns(2)
+            # Aturan "kode menang" dijelaskan sebagai tooltip, bukan caption:
+            # halaman ini sudah memakai seluruh jatah teks kecilnya, dan
+            # keterangan yang hanya dibutuhkan sekali tidak layak mengambil
+            # jatah itu dari keterangan yang dibutuhkan setiap saat.
+            info_app = m1.text_input(t("ap.lbl_info_app"),
+                                     value=row["info_app"],
+                                     placeholder=t("ap.ph_info_app"),
+                                     help=t("ap.help_method_notes"),
+                                     key=f"rs_f_infoapp_{dtype}")
+            info_metrik = m2.text_input(t("ap.lbl_info_metrics"),
+                                        value=row["info_metrics_policy"],
+                                        placeholder=t("ap.ph_info_metrics"),
+                                        key=f"rs_f_infometric_{dtype}")
+            info_data = st.text_input(t("ap.lbl_info_dataset"),
+                                      value=row["info_dataset"],
+                                      placeholder=t("ap.ph_info_dataset"),
+                                      key=f"rs_f_infods_{dtype}")
+            info_anti = st.text_area(t("ap.lbl_info_anti_leakage"), height=90,
+                                     value=row["info_anti_leakage"],
+                                     placeholder=t("ap.ph_info_anti_leakage"),
+                                     help=t("ap.help_info_anti_leakage"),
+                                     key=f"rs_f_infoanti_{dtype}")
+
         # Kontrak dataset. Mengubahnya mengubah cara berkas dataset DIPERIKSA,
         # jadi akibatnya dinyatakan — bukan disembunyikan di balik isian biasa.
         st.markdown(f"**{t('rs.sec_contract')}**")
@@ -454,9 +546,33 @@ def _render_edit_form(row: dict, user: dict | None) -> None:
             atribusi["pipeline_source"] = _clean({
                 "type": jenis, "authors": penulis, "title": judul,
                 "institution": institusi, "year": tahun})
+            # Keempat keterangan IKUT ditulis. Tanpa itu `_clean` — yang
+            # membuang bidang kosong — akan menghapusnya diam-diam setiap kali
+            # seseorang menyunting nama datasetnya saja.
             atribusi["dataset_source"] = _clean({
                 "name": ds_nama, "attribution": ds_atribusi,
-                "note": ds_catatan})
+                "note": ds_catatan, "row_unit": ds_baris,
+                "label_meaning": ds_arti, "feature_nature": ds_fitur,
+                "class_count": ds_kelas or "",
+                "sample_values": ds_contoh, "ignored_columns": ds_abai})
+            # Keterangan metode ditulis UTUH setiap kali — penjagaan yang sama
+            # seperti di atas, dan `_clean` tidak dipakai di sini karena
+            # `anti_leakage` sebuah DAFTAR, bukan teks. Research bawaan tidak
+            # menampilkan isian ini, jadi barisnya tidak disentuh sama sekali:
+            # yang tidak ditanyakan tidak boleh ikut ditulis ulang.
+            if kontribusi:
+                catatan = {k: v for k, v in (
+                    ("app", info_app.strip()),
+                    ("metrics_policy", info_metrik.strip()),
+                    ("dataset", info_data.strip()),
+                    ("anti_leakage", [b.strip() for b in info_anti.splitlines()
+                                      if b.strip()]),
+                ) if v}
+                # Keempatnya dikosongkan berarti "buang", bukan "simpan kosong".
+                if catatan:
+                    atribusi["method_notes"] = catatan
+                else:
+                    atribusi.pop("method_notes", None)
             # Nama tampil disusun ulang dari bagiannya, pola yang sama dengan
             # atribusi bawaan: "<kredit> — <nama>".
             kredit = _credit(penulis, tahun, institusi)
@@ -488,6 +604,13 @@ def _render_edit_form(row: dict, user: dict | None) -> None:
 
 def _clean(values: dict) -> dict:
     return {k: str(v).strip() for k, v in values.items() if str(v or "").strip()}
+
+
+def _lines(value) -> str:
+    """Daftar -> satu butir per baris; teks dibiarkan apa adanya."""
+    if isinstance(value, (list, tuple)):
+        return "\n".join(str(v).strip() for v in value if str(v).strip())
+    return str(value or "").strip()
 
 
 def _credit(authors: str, year: str, institution: str) -> str:

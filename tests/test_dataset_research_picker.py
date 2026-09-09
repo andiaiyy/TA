@@ -154,14 +154,25 @@ def test_the_page_still_carries_its_warnings():
     assert "tersimpan langsung" in teks.lower()
 
 
-def test_the_shared_requirements_panel_is_still_reused():
-    """Panel persyaratan halaman Run Experiment tetap dipakai apa adanya —
-    yang berubah hanya BERAPA research yang dilewatkan kepadanya."""
+def test_the_page_states_the_contract_once_not_twice():
+    """Halaman ini pernah mencetak persyaratan DUA KALI: tabel + contoh +
+    checklist di badan halaman, lalu panel bersama halaman Jalankan Eksperimen
+    di dalam expander — kontrak yang sama, kata-kata berbeda. Salinan kedua
+    itulah yang mendorong tab unggahnya jauh ke bawah judul halaman.
+
+    Panel bersamanya tidak dihapus; ia tetap hidup di tempat asalnya."""
+    from pathlib import Path
+
     body = MODULE.split("def render_dataset_instructions(")[1].split(
         chr(10) + "def ")[0]
 
-    assert "_render_dataset_requirements(dtype)" in body
+    assert "_render_dataset_requirements" not in body
+    assert "st.expander" not in body
     assert "for dtype in supported_datasets()" not in body
+
+    run_src = (Path(ins.__file__).resolve().parents[2] / "ui" / "views"
+               / "run_experiment.py").read_text(encoding="utf-8")
+    assert "def _render_dataset_requirements(" in run_src
 
 
 def test_an_empty_registry_does_not_crash():

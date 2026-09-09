@@ -162,8 +162,20 @@ def test_the_three_fields_are_pickers_now(key, expected):
 
 def test_typing_your_own_value_is_still_possible():
     """Tanpa dataset yang dilampirkan, mengetik sendiri adalah satu-satunya
-    jalan — daftar yang mengunci akan menutupnya."""
-    assert _flow().count("accept_new_options=True") == 3
+    jalan — daftar yang mengunci akan menutupnya.
+
+    Yang dijaga adalah ATURANNYA, bukan jumlahnya: SETIAP pemilih pada alur ini
+    harus menerima nilai yang diketik sendiri. Menghitungnya membuat tes ini
+    gagal setiap kali sebuah pemilih yang benar ditambahkan — persis yang
+    terjadi ketika "kolom yang boleh ada tetapi diabaikan" masuk.
+    """
+    flow = _flow()
+    # `.multiselect(` sudah mencakup `st.multiselect(` maupun yang dipanggil
+    # pada sebuah kolom (`c2.multiselect(`), jadi ia dihitung SEKALI saja.
+    pemilih = flow.count(".multiselect(")
+
+    assert pemilih >= 3
+    assert flow.count("accept_new_options=True") == pemilih
 
 
 def test_the_label_column_takes_exactly_one():

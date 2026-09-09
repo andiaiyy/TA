@@ -774,9 +774,48 @@ def research_attribution_of(item: dict, name: str) -> dict:
                               _clean({"name": metadata.get("dataset_name"),
                                       "attribution":
                                           metadata.get("dataset_attribution"),
-                                      "note": metadata.get("dataset_note")})),
+                                      "note": metadata.get("dataset_note"),
+                                      # Keterangan dataset yang DITERIMA
+                                      # pipeline ini. Empat bidang inilah yang
+                                      # membuat panel persyaratan sebuah
+                                      # research kontribusi dapat berkata
+                                      # selengkap research bawaan tanpa
+                                      # mengarang satu kalimat pun.
+                                      "row_unit":
+                                          metadata.get("dataset_row_unit"),
+                                      "label_meaning":
+                                          metadata.get("dataset_label_meaning"),
+                                      "feature_nature":
+                                          metadata.get("dataset_feature_nature"),
+                                      "class_count":
+                                          metadata.get("dataset_class_count"),
+                                      # Contoh nilai & kolom yang boleh ada
+                                      # tetapi diabaikan: dua bidang terakhir
+                                      # yang dahulu hanya dipunyai tabel
+                                      # persyaratan milik platform.
+                                      "sample_values":
+                                          metadata.get("dataset_sample_values"),
+                                      "ignored_columns":
+                                          _joined(metadata.get(
+                                              "dataset_ignored_columns"))})),
+                             # Keterangan METODE. Ia tinggal di sini, bukan di
+                             # dalam potret `info_json`, karena potret itu milik
+                             # satu versi satu algoritma dan tidak boleh diubah
+                             # — ia rekaman apa yang kodenya katakan. Keterangan
+                             # ini milik researchnya, berlaku untuk seluruh
+                             # algoritma dan versinya, dan justru HARUS dapat
+                             # diperbaiki. Penggabungannya terjadi saat tampil,
+                             # dengan aturan yang sama: kode menang.
+                             ("method_notes", info_extra_of(metadata)),
                              ) if v}
     return out
+
+
+def _joined(value) -> str:
+    """Daftar -> satu kalimat berkoma; teks dibiarkan apa adanya."""
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v).strip() for v in value if str(v).strip())
+    return str(value or "").strip()
 
 
 def _clean(values: dict) -> dict:
@@ -893,8 +932,47 @@ def _register_approved_pipeline(item: dict, package_dir: Path, actor: dict,
             paper=metadata.get("paper"),
             # Fase milik BERKAS ini, bukan milik paketnya: satu paket boleh
             # memuat beberapa algoritma dengan urutan fase yang berbeda.
-            stages=entry.get("stages") or None, db_path=db_path,
+            stages=entry.get("stages") or None,
+            # Keterangan metode dari FORMULIR — hanya untuk paket yang
+            # MENUMPANG jenis dataset bawaan. Paket itu tidak punya baris
+            # research sendiri, jadi tidak ada tempat lain yang memilikinya dan
+            # potretlah satu-satunya rumahnya. Research yang BERDIRI SENDIRI
+            # menyimpannya di baris researchnya (`research_attribution_of`)
+            # supaya dapat disunting; menitipkannya ke potret juga akan
+            # membuat salinan basi yang menutupi suntingan itu.
+            #
+            # Apa pun jalurnya, ia hanya mengisi kunci yang `get_info()`
+            # pipeline ini tidak menyebutkan — kode selalu menang, lihat
+            # `dynamic_registry.merge_info`.
+            info_extra=None if is_standalone(item) else info_extra_of(metadata),
+            db_path=db_path,
         )
+
+
+def info_extra_of(metadata: dict | None) -> dict:
+    """Keterangan metode yang dinyatakan pengunggah di FORMULIR.
+
+    Empat kunci ini ditulis pipeline BAWAAN di dalam ``get_info()`` dan
+    ditampilkan pada modal katalog serta panel "Tentang Research Pipeline",
+    tetapi validator tidak mewajibkannya — jadi paket kontribusi hampir tidak
+    pernah memuatnya, dan keempat tempat itu kosong. Menanyakannya di formulir
+    menutup kekosongan itu tanpa menolak satu pun paket lama.
+
+    Baris kosong dibuang; ``anti_leakage`` menjadi DAFTAR karena penyajinya
+    memang menggabungkan daftar menjadi satu kalimat.
+
+    Fungsi MURNI.
+    """
+    metadata = metadata or {}
+    anti = [b.strip() for b in
+            str(metadata.get("info_anti_leakage") or "").splitlines() if b.strip()]
+    keluar = {"app": str(metadata.get("info_app") or "").strip(),
+              "metrics_policy": str(metadata.get("info_metrics_policy") or "").strip(),
+              "dataset": str(metadata.get("info_dataset") or "").strip()}
+    out = {k: v for k, v in keluar.items() if v}
+    if anti:
+        out["anti_leakage"] = anti
+    return out
 
 
 def deletion_summary(item: dict, db_path: str | None = None) -> dict:

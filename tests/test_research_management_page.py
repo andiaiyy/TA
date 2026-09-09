@@ -446,3 +446,103 @@ def test_an_old_row_without_the_columns_still_reads(db, admin):
 
     assert baris["updated_at"] == ""
     assert rs.detail_line(baris)               # tetap dapat digambar
+
+
+# ── 7. Keterangan dataset dapat disunting — dan tidak terhapus diam-diam ──
+#
+# Keempat keterangan ini (satuan baris, arti nilai label, sifat fitur, jumlah
+# kelas) menentukan seberapa lengkap panel persyaratan sebuah research
+# kontribusi dapat berbicara. Ia dinyatakan saat pengunggahan; halaman inilah
+# satu-satunya tempat ia dapat diperbaiki belakangan.
+
+FAKTA_DATASET = {"row_unit": "satu baris per sesi", "label_meaning": "0 = normal",
+                 "feature_nature": "kolom numerik", "class_count": "2"}
+
+
+def test_the_catalog_carries_the_declared_dataset_notes(db, admin):
+    from orchestrator.research_registry import register_research, update_research
+
+    register_research(dataset_type="uploaded:catat", name="Catat",
+                      schema={"label_column": "y"}, registered_by="bos",
+                      db_path=db)
+    update_research("uploaded:catat", name="Catat",
+                    attribution={"dataset_source": dict(FAKTA_DATASET)},
+                    actor=admin, db_path=db)
+
+    baris = next(r for r in rs.research_catalog(db)
+                 if r["dataset_type"] == "uploaded:catat")
+
+    assert baris["dataset_row_unit"] == "satu baris per sesi"
+    assert baris["dataset_label_meaning"] == "0 = normal"
+    assert baris["dataset_feature_nature"] == "kolom numerik"
+    assert baris["dataset_class_count"] == "2"
+
+
+def test_the_edit_form_offers_all_four(db):
+    """Label yang dipakai SAMA dengan formulir unggah: pengunggah dan peninjau
+    membaca pertanyaan yang sama."""
+    source = Path(rs.__file__).read_text(encoding="utf-8")
+    form = source.split("def _render_edit_form(")[1].split(chr(10) + "def ")[0]
+
+    for key in ("rs_f_dsrow_", "rs_f_dsmean_", "rs_f_dsfeat_", "rs_f_dscls_"):
+        assert key in form, key
+    for label in ("ap.lbl_row_unit", "ap.lbl_label_meaning",
+                  "ap.lbl_feature_nature", "ap.lbl_class_count"):
+        assert label in form, label
+
+
+def test_saving_carries_the_four_notes_along():
+    """`_clean` membuang bidang kosong. Bila keempatnya tidak ikut ditulis,
+    menyunting nama dataset saja akan MENGHAPUSNYA tanpa ada yang tahu."""
+    source = Path(rs.__file__).read_text(encoding="utf-8")
+    form = source.split("def _render_edit_form(")[1].split(chr(10) + "def ")[0]
+    simpan = form.split('atribusi["dataset_source"]')[1][:400]
+
+    for kunci in ("row_unit", "label_meaning", "feature_nature", "class_count"):
+        assert kunci in simpan, kunci
+
+
+def test_an_untouched_note_survives_an_edit(db, admin):
+    """Bukti perilakunya, bukan hanya bentuk kodenya."""
+    from orchestrator.research_registry import (
+        attribution_for, register_research, update_research,
+    )
+
+    register_research(dataset_type="uploaded:tetap", name="Tetap",
+                      schema={"label_column": "y"}, registered_by="bos",
+                      db_path=db)
+    update_research("uploaded:tetap", name="Tetap",
+                    attribution={"dataset_source": dict(FAKTA_DATASET)},
+                    actor=admin, db_path=db)
+
+    # Menyunting nama saja — persis yang dilakukan formulir bila keempat
+    # isiannya dibiarkan apa adanya.
+    sekarang = attribution_for("uploaded:tetap", db)
+    update_research("uploaded:tetap", name="Tetap Baru",
+                    attribution={**sekarang,
+                                 "dataset_source": dict(FAKTA_DATASET)},
+                    actor=admin, db_path=db)
+
+    sumber = attribution_for("uploaded:tetap", db)["dataset_source"]
+    assert sumber == FAKTA_DATASET
+
+
+def test_a_class_count_of_zero_means_unstated(db, admin):
+    """0 pada pemilih angka berarti "tidak dinyatakan", bukan "nol kelas"."""
+    from orchestrator.research_registry import (
+        attribution_for, register_research, update_research,
+    )
+    from ui.views.run_experiment import declared_requirement_rows
+
+    register_research(dataset_type="uploaded:nol", name="Nol",
+                      schema={"label_column": "y"}, registered_by="bos",
+                      db_path=db)
+    update_research("uploaded:nol", name="Nol",
+                    attribution={"dataset_source": {"row_unit": "satu baris"}},
+                    actor=admin, db_path=db)
+
+    fakta = (attribution_for("uploaded:nol", db) or {}).get("dataset_source")
+    aspek = [a for a, _n in declared_requirement_rows(
+        {"label_column": "y"}, "`.csv`", "y", fakta)]
+
+    assert not any("kelas" in a.lower() for a in aspek)

@@ -829,6 +829,135 @@ def _eve_label_facts() -> tuple[str, list[str]]:
         return "", []
 
 
+def declared_dataset_facts(dataset_type: str) -> dict:
+    """Keterangan dataset yang DINYATAKAN pengunggah; ``{}`` bila tidak ada.
+
+    Tersimpan pada atribusi (bukan skema) karena sifatnya menerangkan, bukan
+    menegakkan: validator tidak pernah memeriksanya. Tidak pernah melempar.
+    """
+    try:
+        from orchestrator.research_registry import attribution_for
+
+        source = (attribution_for(dataset_type) or {}).get("dataset_source")
+    except Exception:                       # pragma: no cover - defensif
+        return {}
+    return dict(source or {})
+
+
+def declared_requirement_rows(schema: dict, ext_text: str, label_col: str,
+                              facts: dict | None = None
+                              ) -> list[tuple[str, str]]:
+    """(aspek, ketentuan) untuk research yang kontraknya DIDEKLARASIKAN.
+
+    Research kontribusi tidak punya entri di ``_DATASET_REQUIREMENTS`` — tabel
+    itu milik dua jenis bawaan. Yang ia punya adalah kontrak yang dinyatakan
+    pengunggahnya saat mengajukan paket, dan hanya itulah yang boleh
+    dikatakan: tidak ada "satu baris per flow", tidak ada "0 = benign", tidak
+    ada "dua kelas", karena tidak satu pun dari ketiganya pernah dinyatakan.
+
+    Murni data, jadi dapat diuji tanpa Streamlit.
+    """
+    facts = facts or {}
+    row_unit = str(facts.get("row_unit") or "").strip()
+    rows = [(t("re.req_row_format"),
+             ext_text + " — " + row_unit if row_unit else ext_text)]
+    if label_col:
+        arti = str(facts.get("label_meaning") or "").strip()
+        rows.append((t("re.req_row_label"),
+                     "`" + label_col + "` — " + arti if arti
+                     else t("ins.dslabel_declared", column=label_col)))
+    columns = [str(c) for c in (schema.get("expected_columns") or []) if c]
+    if columns:
+        rows.append((t("re.req_row_columns"),
+                     ", ".join("`" + c + "`" for c in columns)))
+    facts = facts or {}
+    if facts.get("feature_nature"):
+        rows.append((t("re.req_row_features"), str(facts["feature_nature"])))
+    if facts.get("class_count"):
+        rows.append((t("re.req_row_classes"),
+                     t("re.req_classes_declared", count=facts["class_count"])))
+    if facts.get("ignored_columns"):
+        # Tanpa baris ini, pemilik dataset mengira setiap kolom tambahan
+        # membuat berkasnya ditolak.
+        rows.append((t("re.req_row_ignored"), str(facts["ignored_columns"])))
+    keys = [str(k) for k in (schema.get("expected_top_level_keys") or []) if k]
+    if keys and keys != columns:
+        # Kunci JSON tingkat atas DIDEKLARASIKAN di formulir unggah tetapi
+        # tidak pernah ditampilkan di mana pun sebelum ini.
+        rows.append((t("re.req_row_top_keys"),
+                     ", ".join("`" + k + "`" for k in keys)))
+    return rows
+
+
+def declared_checklist(schema: dict, ext_text: str, label_col: str,
+                       facts: dict | None = None) -> list[str]:
+    """Checklist kecocokan dari kontrak yang dinyatakan — tanpa tambahan."""
+    facts = facts or {}
+    row_unit = str(facts.get("row_unit") or "").strip()
+    items = [t("re.dschk_declared_format", exts=ext_text)
+             if not row_unit
+             else t("re.req_chk_format", exts=ext_text, row_unit=row_unit)]
+    if label_col:
+        items.append(t("re.dschk_declared_label", column=label_col))
+    columns = [str(c) for c in (schema.get("expected_columns") or []) if c]
+    if columns:
+        items.append(t("re.dschk_declared_columns", count=len(columns)))
+    if facts.get("class_count"):
+        items.append(t("re.dschk_declared_classes",
+                       count=facts["class_count"]))
+    return items
+
+
+def declared_sample_block(columns: list, sample_values=None) -> str:
+    """Contoh struktur: baris nama kolom, dan baris NILAI bila dinyatakan.
+
+    ``sample_values`` ditulis pengunggah sebagai ``kolom = nilai`` per baris.
+    Kolom yang tidak disebutkan diisi "…" — bukan nilai karangan, dan bukan
+    pula alasan menyembunyikan seluruh barisnya.
+    """
+    header = ",".join(columns)
+    pasangan = {}
+    for baris in str(sample_values or "").splitlines():
+        if "=" in baris:
+            kunci, _, nilai = baris.partition("=")
+            if kunci.strip():
+                pasangan[kunci.strip()] = nilai.strip()
+    if not pasangan:
+        return header
+    return header + chr(10) + ",".join(pasangan.get(c, "…") for c in columns)
+
+
+def _render_declared_requirements(dataset_type: str, schema: dict,
+                                  ext_text: str, label_col: str) -> None:
+    """Persyaratan research yang kontraknya dideklarasikan pengunggah."""
+    facts = declared_dataset_facts(dataset_type)
+    rows = declared_requirement_rows(schema, ext_text, label_col, facts)
+    st.markdown(
+        "| " + t("re.req_col_aspect") + " | " + t("re.req_col_requirement") + " |\n"
+        "| --- | --- |\n"
+        + "\n".join("| " + aspek + " | " + nilai + " |"
+                   for aspek, nilai in rows)
+    )
+    st.caption(t("re.req_declared_note"))
+
+    # Contoh struktur dibentuk dari NAMA kolom yang dinyatakan — bukan nilai
+    # karangan. Hanya baris headernya, karena isi barisnya memang tidak
+    # pernah dinyatakan siapa pun.
+    columns = [str(c) for c in (schema.get("expected_columns") or []) if c]
+    if columns:
+        st.markdown(t("re.req_structure_example"))
+        st.code(declared_sample_block(columns, facts.get("sample_values")),
+                language=None)
+        st.caption(t("re.req_sample_declared_note")
+                   if not facts.get("sample_values")
+                   else t("re.req_caption_columns"))
+
+    items = declared_checklist(schema, ext_text, label_col, facts)
+    if items:
+        st.markdown(t("re.req_checklist_heading"))
+        st.markdown("\n".join("- ✔ " + item for item in items))
+
+
 def _render_dataset_requirements(dataset_type: str) -> None:
     """Sub-bagian read-only "Persyaratan Dataset" di dalam expander "Tentang
     Research Pipeline". Lima elemen: format berkas, kolom label, sifat fitur,
@@ -839,9 +968,15 @@ def _render_dataset_requirements(dataset_type: str) -> None:
     pun dan tidak menyentuh jalur komputasi."""
     import json as _json
 
-    schema = get_schema(dataset_type) or {}
+    # Skema GABUNGAN, bukan `get_schema()`. Yang statis hanya mengenal jenis
+    # BAWAAN; untuk research kontribusi ia mengembalikan None, dan panel ini
+    # dahulu jatuh ke nilai bawaan "label" — nama kolom yang tidak pernah
+    # dinyatakan siapa pun. Akibatnya panel yang sama menyebut `serangan`
+    # pada baris keterangan dataset dan `label` beberapa baris di bawahnya:
+    # dua kalimat yang saling bertentangan dalam satu tampilan.
+    schema = _schema_of(dataset_type) or {}
     req = _DATASET_REQUIREMENTS.get(dataset_type, {})
-    label_col = schema.get("label_column") or "label"
+    label_col = schema.get("label_column") or ""
     exts = _dataset_extensions(dataset_type)
     ext_text = " / ".join(f"`{e}`" for e in exts)
 
@@ -850,9 +985,10 @@ def _render_dataset_requirements(dataset_type: str) -> None:
     st.caption(t("re.note_follows_pipeline"))
 
     if not req:
-        # Tipe dataset baru/tak dikenal: tetap jujur, tetap diturunkan.
-        st.markdown(t("re.req_unknown_format", exts=ext_text) + "\n"
-                    + t("re.req_unknown_label", column=label_col))
+        # Research yang kontraknya DIDEKLARASIKAN pengunggah, bukan
+        # dituliskan platform. Yang boleh dikatakan hanya isi deklarasi itu.
+        _render_declared_requirements(dataset_type, schema, ext_text,
+                                      label_col)
         return
 
     # ── 1-3. Format, kolom label, sifat fitur (tabel ringkas) ─────────────

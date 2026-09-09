@@ -1881,6 +1881,62 @@ def _render_pipeline_flow() -> None:
         t("ap.lbl_required_columns"), known, accept_new_options=True,
         key="contrib_schema_cols", placeholder="flow_duration, src_port, attack",
         help=t("ap.help_required_columns"))
+    # Empat keterangan berikut menjawab pertanyaan yang selama ini tidak
+    # pernah ditanyakan kepada pengunggah, sehingga panel persyaratan untuk
+    # research kontribusi hanya dapat menyebut format dan nama kolom — dan
+    # dahulu MENGARANG sisanya dengan kalimat milik HIKARI2021. Seluruhnya
+    # OPSIONAL: yang tidak diisi tidak ditampilkan, bukan diisi tanda hubung.
+    prose(t("ap.help_dataset_facts"), key="dataset_facts")
+    f1, f2 = st.columns(2)
+    row_unit = f1.text_input(t("ap.lbl_row_unit"), key="contrib_schema_rowunit",
+                             placeholder=t("ap.ph_row_unit"))
+    label_meaning = f2.text_input(
+        t("ap.lbl_label_meaning"), key="contrib_schema_labelmeaning",
+        placeholder=t("ap.ph_label_meaning"))
+    f3, f4 = st.columns([3, 1])
+    feature_nature = f3.text_input(
+        t("ap.lbl_feature_nature"), key="contrib_schema_features",
+        placeholder=t("ap.ph_feature_nature"))
+    # 0 berarti "tidak dinyatakan" — bukan "nol kelas". Baris jumlah kelas
+    # memang tidak ditampilkan bila tidak diisi.
+    class_count = f4.number_input(t("ap.lbl_class_count"), min_value=0,
+                                  max_value=99, value=0, step=1,
+                                  key="contrib_schema_classes",
+                                  help=t("ap.help_class_count"))
+
+    # ── Keterangan METODE ────────────────────────────────────────────────
+    # Empat kunci berikut ditulis pipeline BAWAAN di dalam `get_info()` dan
+    # ditampilkan pada modal katalog serta panel "Tentang Research Pipeline",
+    # tetapi validator tidak mewajibkannya — jadi paket kontribusi hampir
+    # tidak pernah memuatnya dan keempat tempat itu kosong. Isian di sini
+    # HANYA mengisi kunci yang kode pipelinenya tidak menyebutkan: kode selalu
+    # menang (lihat `dynamic_registry.merge_info`).
+    st.markdown(f"**{t('ap.sec_method_notes')}**")
+    prose(t("ap.help_method_notes"), key="method_notes")
+    m1, m2 = st.columns(2)
+    info_app = m1.text_input(t("ap.lbl_info_app"), key="contrib_info_app",
+                             placeholder=t("ap.ph_info_app"))
+    info_metrics = m2.text_input(t("ap.lbl_info_metrics"),
+                                 key="contrib_info_metrics",
+                                 placeholder=t("ap.ph_info_metrics"))
+    info_dataset = st.text_input(t("ap.lbl_info_dataset"),
+                                 key="contrib_info_dataset",
+                                 placeholder=t("ap.ph_info_dataset"))
+    info_anti = st.text_area(t("ap.lbl_info_anti_leakage"), height=90,
+                             key="contrib_info_anti",
+                             placeholder=t("ap.ph_info_anti_leakage"),
+                             help=t("ap.help_info_anti_leakage"))
+
+    # Dua bidang terakhir menerangkan DATASET-nya, bukan metodenya, jadi
+    # keduanya menempel pada kontrak dataset di atas.
+    sample_values = st.text_area(t("ap.lbl_sample_values"), height=70,
+                                 key="contrib_sample_values",
+                                 placeholder=t("ap.ph_sample_values"),
+                                 help=t("ap.help_sample_values"))
+    ignored_columns = st.multiselect(
+        t("ap.lbl_ignored_columns"), known, accept_new_options=True,
+        key="contrib_ignored_cols", help=t("ap.help_ignored_columns"))
+
     declared_schema = {
         "label_column": (label_column or "").strip(),
         "expected_columns": [str(c).strip() for c in columns if str(c).strip()],
@@ -1925,6 +1981,20 @@ def _render_pipeline_flow() -> None:
         "dataset_name": dataset_name,
         "dataset_attribution": dataset_attribution,
         "dataset_note": dataset_note,
+        # Keterangan dataset yang DITERIMA pipeline ini. Bukan aturan yang
+        # ditegakkan validator — semata yang perlu diketahui orang yang hendak
+        # mencocokkan berkasnya sendiri.
+        "dataset_row_unit": row_unit,
+        "dataset_label_meaning": label_meaning,
+        "dataset_feature_nature": feature_nature,
+        "dataset_class_count": int(class_count) if class_count else "",
+        "dataset_sample_values": sample_values,
+        "dataset_ignored_columns": ignored_columns,
+        # Keterangan metode: mengisi `get_info()` yang tidak menyebutkannya.
+        "info_app": info_app,
+        "info_metrics_policy": info_metrics,
+        "info_dataset": info_dataset,
+        "info_anti_leakage": info_anti,
         # Apa yang dibandingkan/dicakup penelitian ini.
         "scope": scope,
         "notes": notes,

@@ -277,11 +277,22 @@ def test_dataset_panel_keeps_the_sample_caveat(monkeypatch):
 
 # ── the shared Run Experiment panel is untouched ──────────────────────────
 
-def test_the_shared_requirements_panel_is_reused_not_duplicated():
-    """Panel persyaratan halaman Run Experiment dipakai apa adanya di dalam
-    expander — tidak ada teks persyaratan yang disalin ulang ke sini."""
+def test_the_requirements_panel_lives_in_one_place_only():
+    """Persyaratan dataset dinyatakan SEKALI per halaman.
+
+    Halaman Tambah Dataset punya bentuknya sendiri (tabel kontrak, contoh,
+    checklist); panel bersama tetap tinggal di halaman Jalankan Eksperimen dan
+    modal katalog. Sebelumnya keduanya digambar berurutan pada satu halaman,
+    jadi kontrak yang sama tercetak dua kali dengan kata-kata berbeda.
+    """
     src = MODULE.read_text(encoding="utf-8")
-    assert "_render_dataset_requirements" in src
+    body = src.split("def render_dataset_instructions(")[1].split(
+        chr(10) + "def ")[0]
+    assert "_render_dataset_requirements" not in body
 
     run_src = (REPO_ROOT / "ui" / "views" / "run_experiment.py").read_text(encoding="utf-8")
     assert "def _render_dataset_requirements(" in run_src   # masih di tempatnya
+
+    catalog_src = (REPO_ROOT / "ui" / "components"
+                   / "pipeline_catalog.py").read_text(encoding="utf-8")
+    assert "_render_dataset_requirements" in catalog_src
