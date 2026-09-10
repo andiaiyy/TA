@@ -35,10 +35,17 @@ COMPAT_KEY = "_compat_check_type"          # uji kecocokan dataset (Run Experime
 CATALOG_DETAIL_KEY = "_catalog_detail"     # detail research pipeline (katalog)
 CATALOG_RUN_KEY = "_catalog_run"           # pilih dataset untuk menjalankan
 AUTH_KEY = "_auth_dialog"                  # masuk/daftar
+# Panduan kedua jalur kontribusi. Namanya sengaja seawalan — `contrib_info_` —
+# karena gaya tombolnya SATU aturan CSS yang mengait awalan itu; dua nama yang
+# berbeda bentuk akan menjadi dua aturan yang bisa berbeda sendiri.
+PIPELINE_INFO_KEY = "_contrib_info_pipeline"   # panduan unggah pipeline
+DATASET_INFO_KEY = "_contrib_info_dataset"     # panduan tambah dataset
+RUN_INFO_KEY = "_run_info_details"             # detail dataset/research/algoritma
 
 DIALOG_KEYS: tuple[str, ...] = (
     DETAIL_KEY, COMPARE_KEY, COMPAT_KEY,
     CATALOG_DETAIL_KEY, CATALOG_RUN_KEY, AUTH_KEY,
+    PIPELINE_INFO_KEY, DATASET_INFO_KEY, RUN_INFO_KEY,
 )
 
 # Flag milik halaman Run Experiment — dibersihkan bersama saat pengguna

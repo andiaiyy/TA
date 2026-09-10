@@ -254,8 +254,19 @@ def test_visitor_sees_disabled_upload_controls_and_a_sign_in_prompt(tmp_path, mo
     ("dataset", ("Label",)),
 ])
 def test_visitor_still_sees_the_requirements(tmp_path, mode, must_show):
-    """Halaman & instruksi TIDAK disembunyikan — hanya aksinya yang dimatikan."""
+    """Halaman & instruksi TIDAK disembunyikan — hanya aksinya yang dimatikan.
+
+    Pada KEDUA jalur panduannya kini dibuka lewat tombol "Info". Itu bukan
+    penyembunyian: yang dijaga tes ini adalah panduannya TERJANGKAU pengunjung
+    dan LENGKAP saat dibuka — bukan bahwa ia tergambar tanpa diminta. Maka
+    tombolnya diperiksa ada dan HIDUP bagi pengunjung, lalu ditekan seperti
+    pengunjung menekannya, dan isinya diperiksa sesudah itu.
+    """
     at = _run_page(tmp_path, mode)
+    tombol = at.button(key=f"contrib_info_{mode}")
+    assert tombol, "pengunjung harus menemukan tombol panduannya"
+    assert not tombol.proto.disabled, "panduan tidak boleh ikut dimatikan"
+    at = tombol.click().run()
     text = (" ".join(m.value for m in at.markdown)
             + " ".join(c.value for c in at.caption))
     for token in must_show:
@@ -266,12 +277,18 @@ def test_visitor_still_sees_the_requirements(tmp_path, mode, must_show):
 
 def test_a_visitor_can_reach_every_research_pipeline(tmp_path):
     """Menampilkan satu research pada satu waktu bukan menyembunyikan sisanya:
-    seluruhnya tetap ditawarkan pemilih, dan pengunjung boleh menggantinya."""
+    seluruhnya tetap ditawarkan pemilih, dan pengunjung boleh menggantinya.
+
+    Pemilihnya kini hidup DI DALAM modal panduan — tempatnya memang di sana,
+    karena ia hanya memilih persyaratan siapa yang sedang dibaca dan tidak
+    menentukan apa pun tentang berkas yang diunggah.
+    """
     from orchestrator.research_registry import (
         all_dataset_types, short_label_for,
     )
 
     at = _run_page(tmp_path, "dataset")
+    at = at.button(key="contrib_info_dataset").click().run()
     picker = at.selectbox(key="ins_dataset_research")
 
     # `options` sudah melewati `format_func`, jadi yang dibandingkan adalah

@@ -1,18 +1,22 @@
 """Tests for the contextual panels on "Add Pipeline & Dataset".
 
-The page must answer four questions before the user tries anything: what
-ecosystem am I adding to, what am I allowed to do, what happens after I upload,
-and what usually goes wrong. Everything shown must be *computed* — from the
-registry, the dataset folder, the submission table, and the real check names —
-so the page can never drift from the platform it describes.
+The page answers two questions before the user tries anything: what happens
+after I upload, and what usually goes wrong. Everything shown is *computed* —
+from the submission table and the real check names — so the page can never
+drift from the platform it describes.
+
+It used to answer two more, with three counted numbers and a line stating the
+user's rights. Both were removed: the numbers describe the platform rather than
+guide an action, and the rights line repeats what the live-or-dead controls
+already say. Their tests went with them; what survives here is what the page
+still shows.
 """
 from pathlib import Path
 
 import pytest
 
 from ui.components.contribute_context import (
-    AFTER_UPLOAD_FLOW, AFTER_UPLOAD_FLOW_ALT, capability,
-    platform_stats, submission_counts,
+    AFTER_UPLOAD_FLOW, AFTER_UPLOAD_FLOW_ALT, submission_counts,
 )
 from ui.components.instructions import (
     ENTRY_POINT_RULE, common_dataset_mistakes, common_pipeline_mistakes,
@@ -26,132 +30,6 @@ VISITOR = None
 PENDING = {"username": "baru", "role": "contributor", "status": "pending"}
 CONTRIBUTOR = {"username": "rina", "role": "contributor", "status": "active"}
 ADMIN = {"username": "boss", "role": "research_admin", "status": "active"}
-
-
-# ── platform summary is COUNTED, never typed ──────────────────────────────
-
-def _fake_registry(entries: list[tuple[str, str]]) -> dict:
-    return {f"p{i}": {"dataset_type": dt, "algorithm": algo}
-            for i, (dt, algo) in enumerate(entries)}
-
-
-def test_platform_numbers_come_from_the_registry(monkeypatch):
-    import config.pipeline_registry as registry
-    import ui.views.run_experiment as run_exp
-
-    monkeypatch.setattr(registry, "list_all_pipelines", lambda: _fake_registry([
-        ("A", "Decision Tree"), ("A", "Random Forest"), ("B", "XGBoost"),
-    ]))
-    monkeypatch.setattr(run_exp, "_all_dataset_options", lambda: [("x.csv", "A")])
-
-    stats = platform_stats()
-    assert stats["research"] == 2            # dua dataset_type berbeda
-    assert stats["algorithms"] == 3
-    assert stats["datasets"] == 1
-
-
-def test_platform_numbers_follow_the_registry_when_it_changes(monkeypatch):
-    """Angka BUKAN konstanta: menambah entri langsung mengubah hasilnya."""
-    import config.pipeline_registry as registry
-    import ui.views.run_experiment as run_exp
-
-    monkeypatch.setattr(run_exp, "_all_dataset_options", lambda: [])
-    monkeypatch.setattr(registry, "list_all_pipelines",
-                        lambda: _fake_registry([("A", "DT")]))
-    before = platform_stats()
-
-    monkeypatch.setattr(registry, "list_all_pipelines", lambda: _fake_registry([
-        ("A", "DT"), ("A", "RF"), ("B", "DT"), ("C", "SVC"),
-    ]))
-    after = platform_stats()
-
-    assert (before["research"], before["algorithms"]) == (1, 1)
-    assert (after["research"], after["algorithms"]) == (3, 4)
-
-
-def test_duplicate_algorithm_names_within_one_research_are_counted_once(monkeypatch):
-    """Sama seperti daftar pilihan di Run Experiment: dedup per research."""
-    import config.pipeline_registry as registry
-    import ui.views.run_experiment as run_exp
-
-    monkeypatch.setattr(run_exp, "_all_dataset_options", lambda: [])
-    monkeypatch.setattr(registry, "list_all_pipelines", lambda: _fake_registry([
-        ("A", "Decision Tree"), ("A", "Decision Tree"), ("B", "Decision Tree"),
-    ]))
-    stats = platform_stats()
-    assert stats["research"] == 2
-    assert stats["algorithms"] == 2          # satu per research, bukan tiga
-
-
-def test_dataset_count_reads_the_server_folder(monkeypatch):
-    import ui.views.run_experiment as run_exp
-    monkeypatch.setattr(run_exp, "_all_dataset_options",
-                        lambda: [("a.csv", "A"), ("b.ndjson", "B"), ("c.csv", "A")])
-    assert platform_stats()["datasets"] == 3
-
-
-def test_platform_stats_survive_a_broken_source(monkeypatch):
-    """Ringkasan tidak boleh menjatuhkan halaman bila salah satu sumber gagal."""
-    import config.pipeline_registry as registry
-
-    def _boom():
-        raise RuntimeError("registry rusak")
-
-    monkeypatch.setattr(registry, "list_all_pipelines", _boom)
-    stats = platform_stats()
-    assert stats["research"] == 0 and stats["algorithms"] == 0
-
-
-def test_the_real_platform_reports_plausible_numbers():
-    """Tanpa monkeypatch: angka nyata harus positif & konsisten."""
-    stats = platform_stats()
-    assert stats["research"] >= 1
-    assert stats["algorithms"] >= stats["research"]
-    assert stats["datasets"] >= 0
-
-
-# ── user status & rights come from the permission helpers ─────────────────
-
-@pytest.mark.parametrize("user, must_say", [
-    # Kini berupa FRASA pendek, bukan kalimat — isinya tetap sama.
-    (VISITOR, "membaca"),
-    (PENDING, "menunggu persetujuan"),
-    (CONTRIBUTOR, "mengajukan"),
-    (ADMIN, "meninjau"),
-])
-def test_capability_line_matches_the_role(user, must_say):
-    cap = capability(user)
-    assert cap["label"]
-    assert must_say in cap["what"].lower()
-
-
-def test_capability_never_promises_more_than_the_guards_allow():
-    """Hak yang ditampilkan DIBACA dari can_upload/can_approve — helper yang
-    sama dengan yang ditegakkan lapis aksi, bukan penilaian peran sendiri."""
-    from orchestrator.auth_service import can_approve, can_upload
-
-    for user in (VISITOR, PENDING, CONTRIBUTOR, ADMIN):
-        cap = capability(user)
-        assert cap["may_upload"] == bool(can_upload(user)), user
-        assert cap["may_review"] == bool(can_approve(user)), user
-
-
-def test_only_the_permitted_are_told_they_can_submit():
-    """Kalimatnya mengikuti boolean, jadi akun pending tidak pernah dijanjikan
-    dapat mengajukan."""
-    assert capability(PENDING)["may_upload"] is False
-    assert "belum dapat mengajukan" in capability(PENDING)["what"].lower()
-    assert capability(CONTRIBUTOR)["what"].lower().startswith("mengajukan")
-    assert capability(ADMIN)["may_review"] is True
-
-
-def test_capability_reads_the_shared_helpers_not_its_own_role_check():
-    src = (REPO_ROOT / "ui" / "components" / "contribute_context.py").read_text(
-        encoding="utf-8")
-    assert "can_upload" in src and "can_approve" in src
-    # Tidak ada perbandingan peran mentah yang bisa menyimpang dari guard.
-    for hardcoded in ('role"] == "', "role') == '", '== "research_admin"'):
-        assert hardcoded not in src, hardcoded
 
 
 # ── the submission queue summary ──────────────────────────────────────────
@@ -350,25 +228,6 @@ def test_the_page_renders_without_exceptions(tmp_path, mode, user):
     assert at.exception is None or not at.exception
 
 
-@pytest.mark.parametrize("user", [VISITOR, CONTRIBUTOR, ADMIN],
-                         ids=["pengunjung", "kontributor", "research_admin"])
-def test_the_landing_view_shows_platform_context(tmp_path, user):
-    """Konteks platform + status pengguna tampil untuk SEMUA peran.
-
-    Ringkasannya kini memakai KOTAK sel angka yang sama dengan halaman Run
-    Experiment (sebelumnya `st.metric` berjajar), jadi yang diperiksa adalah
-    blok kotaknya — bukan lagi elemen metric.
-    """
-    at = _run_page(tmp_path, None, user)
-    boxes = [e.proto.body for e in at.get("html") if "ids-counts" in e.proto.body]
-    assert boxes, "ringkasan keadaan platform harus tampil"
-
-    box = boxes[0]
-    for label in ("research pipeline", "algoritma", "dataset"):
-        assert f">{label}<" in box, label
-
-    expected = capability(user)["label"]
-    assert expected in _page_text(at), expected
 
 
 def test_the_visitor_landing_view_invites_sign_in(tmp_path):
@@ -377,11 +236,15 @@ def test_the_visitor_landing_view_invites_sign_in(tmp_path):
 
 
 def test_the_landing_view_links_to_run_experiment(tmp_path):
-    """Kaitan ke halaman lain tampil tanpa perlu membuka expander.
+    """Kaitan ke halaman lain kini hidup DI DALAM dropdown pasca-unggah.
+
+    Ia menjawab pertanyaan yang sama dengan dropdown itu — apa yang terjadi
+    sesudah berkasnya diterima — jadi tempatnya memang di sana, bukan sebagai
+    baris lepas di badan halaman.
 
     Nama halaman disebut sebagaimana ia tampil di navigasi pada bahasa yang
-    sedang aktif — menyebut "Run Experiment" pada mode Indonesia justru
-    menunjuk ke label yang tidak ada di sidebar.
+    sedang aktif: menyebut "Run Experiment" pada mode Indonesia justru menunjuk
+    ke label yang tidak ada di sidebar.
     """
     text = _page_text(_run_page(tmp_path, None, CONTRIBUTOR))
     assert lookup("page.run_experiment", "id") in text
@@ -392,8 +255,18 @@ def test_the_landing_view_links_to_run_experiment(tmp_path):
 
 # ── honest notes survive the enrichment (regression) ──────────────────────
 
+def _with_guide(at, mode: str = "pipeline"):
+    """Buka modal panduan sebuah jalur, seperti pengguna menekan "Info".
+
+    Panduan KEDUA jalur pindah ke modal; yang dijaga tes-tes di bawah tetap
+    ISINYA, dan isi itu sekarang dibaca sesudah tombolnya ditekan — bukan dari
+    halaman yang menggambarnya tanpa diminta.
+    """
+    return at.button(key=f"contrib_info_{mode}").click().run()
+
+
 def test_the_pipeline_path_keeps_its_honest_notes(tmp_path):
-    text = _page_text(_run_page(tmp_path, "pipeline")).lower()
+    text = _page_text(_with_guide(_run_page(tmp_path, "pipeline"))).lower()
     assert "statis" in text
     assert "tidak dijalankan" in text
     assert "belum aktif" in text or "bukan</b> berarti" in text
@@ -401,7 +274,8 @@ def test_the_pipeline_path_keeps_its_honest_notes(tmp_path):
 
 
 def test_the_dataset_path_keeps_the_sample_caveat(tmp_path):
-    text = _page_text(_run_page(tmp_path, "dataset")).lower()
+    text = _page_text(_with_guide(_run_page(tmp_path, "dataset"),
+                                  "dataset")).lower()
     assert "cuplikan" in text
     # Dataset tidak lagi ditinjau — yang harus tersampaikan kini justru
     # bahwa berkasnya tersimpan langsung, dan tinjauan hanya untuk pipeline.
@@ -410,7 +284,7 @@ def test_the_dataset_path_keeps_the_sample_caveat(tmp_path):
 
 
 def test_the_pipeline_path_shows_the_example_and_the_mistakes(tmp_path):
-    at = _run_page(tmp_path, "pipeline")
+    at = _with_guide(_run_page(tmp_path, "pipeline"))
     code = " ".join(c.value for c in at.code)
     assert "class MyPipeline(" in code            # contoh kerangka
     text = _page_text(at)

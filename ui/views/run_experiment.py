@@ -860,11 +860,11 @@ def declared_requirement_rows(schema: dict, ext_text: str, label_col: str,
     facts = facts or {}
     row_unit = str(facts.get("row_unit") or "").strip()
     rows = [(t("re.req_row_format"),
-             ext_text + " — " + row_unit if row_unit else ext_text)]
+             ext_text + ", " + row_unit if row_unit else ext_text)]
     if label_col:
         arti = str(facts.get("label_meaning") or "").strip()
         rows.append((t("re.req_row_label"),
-                     "`" + label_col + "` — " + arti if arti
+                     "`" + label_col + "`: " + arti if arti
                      else t("ins.dslabel_declared", column=label_col)))
     columns = [str(c) for c in (schema.get("expected_columns") or []) if c]
     if columns:
@@ -1021,7 +1021,7 @@ def _render_dataset_requirements(dataset_type: str) -> None:
     st.markdown(
         f"| {t('re.req_col_aspect')} | {t('re.req_col_requirement')} |\n"
         "| --- | --- |\n"
-        f"| {t('re.req_row_format')} | {ext_text} — {row_unit} |\n"
+        f"| {t('re.req_row_format')} | {ext_text}, {row_unit} |\n"
         f"| {t('re.req_row_label')} | {label_text} |\n"
         f"| {t('re.req_row_features')} | {feature_text} |"
     )
@@ -1495,11 +1495,6 @@ def _any_compatible(diag: dict) -> bool:
     return bool(diag.get("compatible_types"))
 
 
-def _compatible_names(diag: dict) -> list[str]:
-    """Nama tampilan research pipeline yang cocok (untuk indikator ringkas)."""
-    return [get_research_display_name(dt) for dt in (diag.get("compatible_types") or [])]
-
-
 def _requirement_summary(dataset_type: str) -> str:
     """Syarat dataset dalam SATU baris untuk kotak pipeline: format · kolom
     label · sifat fitur. Diturunkan dari _EXT_MAP + skema + dict persyaratan
@@ -1646,59 +1641,6 @@ def _render_compat_boxes(diag: dict) -> None:
 
 
 # ── Execution-status panel (async-only UI; mode shown, never toggled) ──────
-
-@st.cache_data(ttl=30, show_spinner=False)
-def _experiment_counts() -> dict:
-    """{pipeline_id: jumlah eksperimen} dari BASIS DATA.
-
-    Dipakai hanya untuk baris angka ringkas — bukan metrik hasil (metrik ada di
-    halaman Progress & Status). Di-cache singkat supaya rerun biasa tidak
-    memukul basis data berulang kali.
-    """
-    try:
-        from orchestrator.result_service import list_all_experiments
-        counts: dict[str, int] = {}
-        for row in list_all_experiments() or []:
-            pid = row.get("pipeline_id")
-            if pid:
-                counts[pid] = counts.get(pid, 0) + 1
-        return counts
-    except Exception:                       # pragma: no cover - defensif
-        logger.debug("Jumlah eksperimen tidak terbaca", exc_info=True)
-        return {}
-
-
-def _dataset_facts(dataset_type: str, dataset_path: str, validation: dict,
-                   diagnosis: dict) -> list[tuple[str, str]]:
-    """Ringkasan dataset terpilih — SELURUHNYA dari data yang sudah dihitung.
-
-    Sumbernya dua, keduanya sudah berjalan sebelum fungsi ini dipanggil:
-    ``validate_dataset_for_ui`` (baris/kolom/kelas/hash) dan diagnosa kecocokan
-    yang ber-cache (format terdeteksi, kolom label, daftar research pipeline
-    yang cocok). Tidak ada pembacaan berkas tambahan dan tidak ada angka yang
-    dikarang — pasangan yang datanya tidak ada akan dibuang penyajinya.
-    """
-    profile = (diagnosis or {}).get("profile") or {}
-    try:
-        size = format_size(Path(dataset_path).stat().st_size)
-    except OSError:                         # pragma: no cover - defensif
-        size = ""
-
-    rows = validation.get("row_count")
-    labels = validation.get("unique_labels")
-    compatible = _compatible_names(diagnosis)
-
-    return [
-        ("Research pipeline", dataset_type),
-        ("Format", profile.get("detected_format") or ""),
-        ("Ukuran", size),
-        ("Baris", f"{rows:,}" if isinstance(rows, int) else ""),
-        ("Kolom", validation.get("column_count") or profile.get("column_count") or ""),
-        ("Kolom label", profile.get("label_column") or
-         ("dibentuk pipeline" if not profile.get("label_column") else "")),
-        ("Kelas", len(labels) if labels else "dibentuk pipeline"),
-        ("Cocok untuk", ", ".join(compatible) if compatible else "belum ada"),
-    ]
 
 
 def _pipeline_facts(pipeline_id: str, info: dict) -> list[tuple[str, str]]:
@@ -1984,7 +1926,7 @@ def _catalog_detail_body(group: dict) -> None:
             index=0 if algorithms else None, key="_catalog_run_algo",
             label_visibility="collapsed",
             placeholder=t("re.ph_pick_algorithm")) if algorithms else None
-    run_clicked = cols[1].button(t("re.btn_run_pipeline"), type="primary",
+    run_clicked = cols[1].button(t("re.btn_setup"), type="primary",
                                  key="_catalog_run", use_container_width=True,
                                  disabled=not algorithms)
     if run_clicked and choice:
@@ -2166,8 +2108,8 @@ def _render_catalog_view() -> None:
 
     # Nama tombolnya sudah menjelaskan dirinya — keterangan di sampingnya
     # dibuang, petunjuknya pindah ke help=.
-    cols = st.columns([1, 1, 3])
-    if cols[0].button(t("re.btn_run"), type="primary", key="_run_go",
+    cols = st.columns([2, 1, 3])
+    if cols[0].button(t("re.btn_setup"), type="primary", key="_run_go",
                       use_container_width=True,
                       help=t("re.help_order")):
         go_to_execute()
@@ -2183,12 +2125,213 @@ def _render_catalog_view() -> None:
     _maybe_render_catalog_run(catalog)
 
 
-def render():
-    st.title(t("page.run_experiment"))
+# ── Modal detail: empat hal yang dahulu berserak di sepanjang halaman ─────
+#
+# Dataset, research pipeline, algoritma, dan berkas konfigurasi masing-masing
+# punya expander sendiri, dua di antaranya terbuka otomatis — sehingga alur
+# pilih → pilih → pilih → jalankan terus terputus oleh blok keterangan yang
+# hanya dibaca sesekali. Semuanya pindah ke SATU modal ber-tab.
+#
+# Setiap tab membaca ulang keadaannya dari `session_state`, bukan dari variabel
+# lokal `_render_execute()`: fungsi ber-@st.dialog dipanggil dari alur utama,
+# jauh dari tempat variabel itu hidup, dan menitipkannya lewat argumen akan
+# membekukan nilai dari rerun sebelumnya.
 
+
+def _detail_state() -> dict:
+    """Pilihan yang sedang berlaku, dibaca dari `session_state`."""
+    v = st.session_state.get("validation") or {}
+    pipelines = v.get("compatible_pipelines", {}) or {}
+    research = st.session_state.get("research_select")
+
+    groups: dict[str, dict[str, str]] = {}
+    for pid, info in pipelines.items():
+        groups.setdefault(info.get("dataset_type", "") or pid, {})[
+            info.get("algorithm") or info.get("name", pid)] = pid
+
+    algo_to_pid = groups.get(research or "", {})
+    rep_pid = next(iter(algo_to_pid.values()), "")
+    return {
+        "dataset_path": st.session_state.get("dataset_path") or "",
+        "dataset_type": st.session_state.get("dataset_type") or "",
+        "validation": v,
+        "research": research or "",
+        "rep_pid": rep_pid,
+        "pdtype": (pipelines.get(rep_pid, {}) or {}).get("dataset_type") or "",
+        "selected": st.session_state.get("selected_pipeline") or "",
+    }
+
+
+def _detail_dataset(state: dict) -> None:
+    if not state["dataset_path"]:
+        st.caption(t("re.detail_pick_dataset_first"))
+        return
+
+    v = state["validation"]
+    st.markdown("**Preview (beberapa baris pertama):**")
+    try:
+        _preview = _dataset_preview(state["dataset_path"], state["dataset_type"],
+                                    n=5)
+        if _preview is not None and not _preview.empty:
+            st.dataframe(_preview, use_container_width=True)
+        else:
+            st.caption(t("re.msg_preview_unavailable"))
+    except Exception as _e:
+        st.caption(f"Preview tidak tersedia: {_e}")
+
+    st.markdown("---")
+    if not v.get("success"):
+        # Rincian kegagalannya tetap digambar di HALAMAN, bukan di sini: ia
+        # tindakan yang harus diambil, bukan keterangan yang dicari.
+        st.error(t("re.msg_dataset_invalid"))
+        return
+
+    st.success(t("re.msg_dataset_valid"))
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Type", state["dataset_type"])
+    c2.metric("Rows", f"{v['row_count']:,}"
+              if isinstance(v.get("row_count"), int) else "-")
+    c3.metric("Columns", v.get("column_count", "-"))
+    # Dataset bergaya EVE tidak punya label di berkas mentahnya; Fase 1 yang
+    # membentuknya. Ditulis apa adanya, bukan sebagai angka yang tidak berarti.
+    if v.get("unique_labels"):
+        c4.metric("Classes", len(v["unique_labels"]))
+    else:
+        c4.metric("Classes", "pipeline-generated")
+    if v.get("dataset_hash"):
+        st.code(f"SHA-256: {v['dataset_hash']}", language=None)
+    if v.get("unique_labels"):
+        st.markdown("**Labels:** "
+                    + ", ".join(str(lbl) for lbl in v["unique_labels"]))
+
+
+def _detail_research(state: dict) -> None:
+    if not state["research"]:
+        st.caption(t("re.detail_pick_research_first"))
+        return
+
+    # Sumbernya terstruktur seluruhnya: registry, atribusi penelitian
+    # (config/research_attribution.py), get_info(), dan skema dataset. Tidak ada
+    # nilai yang dapat diubah di sini dan tidak ada yang memengaruhi komputasi.
+    rep_info = get_pipeline_info(state["rep_pid"]) or {}
+    for _title, _pairs in research_about_groups(
+            state["research"],
+            get_research_display_name(state["research"]),
+            rep_info, get_research_attribution(state["research"]),
+            _dataset_info_lines(state["pdtype"]) if state["pdtype"] else ()):
+        st.markdown(f"**{_title}**")
+        # columns=1 -> satu pasangan per baris, sehingga nilai panjang (judul
+        # penelitian, kalimat paper) tetap utuh dalam SATU baris nilai.
+        render_facts(_pairs, columns=1)
+
+    # Persyaratan dataset MILIK research pipeline, bukan milik berkas yang
+    # kebetulan dipilih: ia diturunkan dari skema dan konstanta pipelinenya, dan
+    # terbaca walau belum ada dataset dipilih.
+    if state["pdtype"]:
+        _render_dataset_requirements(state["pdtype"])
+
+    st.caption(t("re.detail_see_algorithm_tab"))
+
+
+def _detail_algorithm(state: dict) -> None:
+    if not state["selected"]:
+        st.caption(t("re.detail_pick_algorithm_first"))
+        return
+
+    info = get_pipeline_info(state["selected"]) or {}
+    if not info:
+        st.caption(t("re.detail_no_info"))
+        return
+
+    st.markdown(f"**Paper:** {info.get('paper')}")
+    st.markdown(f"**Algorithm:** {info.get('algorithm')}")
+    if info.get("preprocessing_steps"):
+        st.markdown("**Preprocessing:**")
+        for i, s in enumerate(info["preprocessing_steps"], 1):
+            st.markdown(f"  {i}. {s}")
+    if info.get("feature_selection"):
+        st.markdown(f"**Feature Selection:** {info['feature_selection']}")
+    if info.get("fixed_params"):
+        st.markdown("**Fixed Params:**")
+        st.json(info["fixed_params"])
+    if info.get("runtime_warning"):
+        st.warning(info["runtime_warning"])
+    # Klaim lama "semua parameter terkunci" hanya benar untuk run RESMI, yang
+    # tetap menjadi bawaan. Dikatakan apa adanya.
+    st.info("Nilai di atas adalah parameter TERKUNCI yang dipakai run resmi. "
+            "Run eksplorasi dapat menyesuaikan sebagian di antaranya; hasilnya "
+            "ditandai dan tidak masuk perbandingan resmi.")
+
+
+def _detail_files(state: dict) -> None:
+    if not state["selected"]:
+        st.caption(t("re.detail_pick_algorithm_first"))
+        return
+    render_file_browser(_build_pipeline_config_files(state["selected"]),
+                        state_key="selected_file_pipeline_view")
+
+
+def _run_info_body() -> None:
+    """Empat tab. Tab yang belum dapat diisi menyebut apa yang harus dipilih
+    lebih dulu, dan TIDAK disembunyikan: tab yang hilang-timbul memindahkan
+    posisi tab lain setiap kali pengguna maju satu langkah."""
+    state = _detail_state()
+    # Label tab TIDAK memakai kunci bagian halaman: `re.sec_algorithm` berbunyi
+    # "Pilih Algoritma", dan tab ini tidak meminta memilih apa pun — ia
+    # menerangkan yang sudah dipilih.
+    tabs = st.tabs([t("re.tab_dataset"), t("re.tab_research"),
+                    t("re.tab_algorithm"), t("re.tab_files")])
+    with tabs[0]:
+        _detail_dataset(state)
+    with tabs[1]:
+        _detail_research(state)
+    with tabs[2]:
+        _detail_algorithm(state)
+    with tabs[3]:
+        _detail_files(state)
+
+    if st.button(t("ap.btn_close_info"), key="run_info_close"):
+        _close_run_info()
+
+
+if _HAS_ST_DIALOG:
+    _run_info_dialog = dlg.dialog_decorator(
+        t("re.dlg_details"), dlg.RUN_INFO_KEY, width="large")(_run_info_body)
+else:  # pragma: no cover - hanya untuk Streamlit < 1.37
+    def _run_info_dialog() -> None:
+        with st.expander(t("re.dlg_details"), expanded=True):
+            _run_info_body()
+
+
+def _request_run_info() -> None:
+    dlg.open_dialog(dlg.RUN_INFO_KEY)
+
+
+def _close_run_info() -> None:
+    dlg.close_dialog(dlg.RUN_INFO_KEY)
+    st.rerun()
+
+
+def _maybe_render_run_info() -> None:
+    """Dipanggil dari ALUR UTAMA script, bukan dari dalam kolom atau tombol."""
+    if dlg.is_open(dlg.RUN_INFO_KEY):
+        _run_info_dialog()
+
+
+def render():
     if current_view() == VIEW_CATALOG:
+        # Tampilan katalog TIDAK mendapat tombol detail: tiap blok research di
+        # sana sudah punya tombol "Detail" sendiri, dan tombol kedua di judul
+        # halaman menawarkan hal yang sama dua kali.
+        st.title(t("page.run_experiment"))
         _render_catalog_view()
         return
+
+    judul, aksi = st.columns([4, 1])
+    judul.title(t("page.run_experiment"))
+    if aksi.button(t("ap.btn_info"), key="run_info",
+                   use_container_width=True):
+        _request_run_info()
 
     # Sentinel per-run: dipakai jaring pengaman di bawah untuk tahu apakah
     # stage view benar-benar tercapai.
@@ -2207,6 +2350,11 @@ def render():
     if is_polling() and not st.session_state.get(_POLL_RENDERED_KEY):
         st.session_state[_POLL_RENDERED_KEY] = True
         _poll_experiment(st.session_state["polling_experiment_id"])
+
+    # Modal digambar TERAKHIR, dari alur utama script — sesudah seluruh kolom
+    # dan container di atas selesai, dan sesudah `session_state` yang dibacanya
+    # terisi oleh alur eksekusi.
+    _maybe_render_run_info()
 
 
 def _render_execute():
@@ -2298,43 +2446,13 @@ def _render_execute():
 
     v = st.session_state.get("validation") or {}
 
-    # Detail dataset — memory-safe preview (first rows only) + existing validation info.
-    with st.expander(t("re.dlg_dataset_detail"), expanded=True):
-        st.markdown("**Preview (beberapa baris pertama):**")
-        try:
-            _preview = _dataset_preview(dataset_path, dataset_type, n=5)
-            if _preview is not None and not _preview.empty:
-                st.dataframe(_preview, use_container_width=True)
-            else:
-                st.caption(t("re.msg_preview_unavailable"))
-        except Exception as _e:
-            st.caption(f"Preview tidak tersedia: {_e}")
-
-        st.markdown("---")
-        if not v.get("success"):
-            # Ringkasannya dirender DI LUAR expander ini (lihat di bawah), karena
-            # daftar lengkap kolom butuh expander sendiri dan Streamlit melarang
-            # expander bersarang.
-            st.error(t("re.msg_dataset_invalid"))
-        else:
-            st.success(t("re.msg_dataset_valid"))
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Type", dataset_type)
-            c2.metric("Rows", f"{v['row_count']:,}" if isinstance(v.get("row_count"), int) else "-")
-            c3.metric("Columns", v.get("column_count", "-"))
-            # EVE-style datasets have no labels in the raw file — Phase 1
-            # synthesizes them. Show a placeholder instead of a meaningless count.
-            if v.get("unique_labels"):
-                c4.metric("Classes", len(v["unique_labels"]))
-            else:
-                c4.metric("Classes", "pipeline-generated")
-            if v.get("dataset_hash"):
-                st.code(f"SHA-256: {v['dataset_hash']}", language=None)
-            if v.get("unique_labels"):
-                st.markdown(f"**Labels:** {', '.join(str(lbl) for lbl in v['unique_labels'])}")
+    # Detail dataset (pratinjau, status validasi, SHA-256, daftar label) pindah
+    # ke tab Dataset pada modal "Info" di judul halaman. Yang tersisa di sini
+    # hanya yang menuntut TINDAKAN.
 
     # Ringkasan kegagalan validasi (jumlah + contoh + "lihat semua" tertutup).
-    # Di luar expander di atas supaya expander daftar-lengkapnya sah.
+    # Tetap di halaman: ia bukan keterangan yang dicari, melainkan hal yang
+    # harus diperbaiki sebelum apa pun dapat dijalankan.
     if not v.get("success"):
         _render_validation_failure(v, dataset_type)
 
@@ -2349,14 +2467,14 @@ def _render_execute():
     with st.spinner("Memeriksa kecocokan dataset…"):
         _diag = _diagnose_selected(dataset_path)
 
-    # Ringkasan berkas terpilih — DI BAWAH kontrolnya, bukan di sebelahnya.
-    # Seluruh nilainya sudah dihitung: `v` dari validasi skema, `_diag` dari
-    # diagnosa kecocokan yang ber-cache. Tidak ada pembacaan berkas tambahan.
-    render_facts(_dataset_facts(dataset_type, dataset_path, v, _diag),
-                 columns=_FACT_COLUMNS)
+    # Ringkasan berkas terpilih (format, ukuran, baris, kolom, kelas, "cocok
+    # untuk") DICABUT dari sini: ia melaporkan keadaan berkas, bukan menuntun
+    # langkah berikutnya, dan berdiri di antara pemilih dataset dan bagian
+    # Pemilihan Research Pipeline yang menyusulinya.
 
-    # Kotak per research pipeline hanya muncul bila TIDAK ada yang cocok —
-    # kecocokan yang normal sudah terbaca dari baris "Cocok untuk" di kanan.
+    # Kotak per research pipeline hanya muncul bila TIDAK ada yang cocok.
+    # Kecocokan yang normal kini terbaca dari bagian Pemilihan Research
+    # Pipeline di bawah, yang memang terisi hanya oleh pipeline yang cocok.
     if not _any_compatible(_diag):
         _render_compat_boxes(_diag)
     _maybe_render_compat_dialog(_diag)
@@ -2407,20 +2525,12 @@ def _render_execute():
     _research_compatible = True
     if research:
         algo_to_pid = research_groups[research]
-        # Baris ANGKA, bukan kalimat. Ketiganya dihitung dari sumber nyata:
-        # isi storage/datasets/, registry pipeline yang kompatibel, dan basis
-        # data eksperimen. Jumlah eksperimen di sini murni hitungan riwayat —
-        # metriknya sendiri tetap hanya ada di halaman Progress & Status.
-        _counts = _experiment_counts()
-        render_counts([
-            ("dataset", len(_ds_options),
-             "Berkas dataset di storage/datasets/."),
-            ("algoritma", len(algo_to_pid),
-             "Algoritma pada research pipeline yang dipilih."),
-            ("eksperimen",
-             sum(_counts.get(pid, 0) for pid in algo_to_pid.values()),
-             "Eksperimen sebelumnya untuk research pipeline ini."),
-        ])
+        # Baris tiga angka (dataset, algoritma, eksperimen) DICABUT dari sini.
+        # Ketiganya menerangkan keadaan platform, bukan menuntun langkah
+        # berikutnya, dan berdiri tepat di antara pemilih research pipeline dan
+        # pemilih algoritma yang menyusulinya. Jumlah eksperimen sebelumnya
+        # tetap terbaca di halaman Progress & Status, tempat riwayat memang
+        # dibaca.
         _rep_pid = next(iter(algo_to_pid.values()))  # representative for shared info
         _pdtype = pipelines.get(_rep_pid, {}).get("dataset_type")
 
@@ -2432,40 +2542,10 @@ def _render_execute():
             _sel_result = (_diag.get("results") or {}).get(_pdtype) or {}
             _research_compatible = bool(_sel_result.get("compatible", True))
 
-        # Research-level info consolidated in ONE read-only expander (the former
-        # separate blue st.info dataset box is merged in here). All fields are
-        # derived from structured sources: registry (name/dataset_type/paper),
-        # get_info() (feature_selection/app/anti_leakage/metrics_policy), and the
-        # dataset schema (via _dataset_info_lines). Nothing here is editable and
-        # nothing affects computation.
-        rep_info = get_pipeline_info(_rep_pid) or {}
-        with st.expander("Tentang Research Pipeline (Read-Only)", expanded=True):
-            # Pasangan label-nilai BERKELOMPOK, bukan bullet bertingkat. Isinya
-            # tetap dari sumber terstruktur yang sama: registry + atribusi
-            # (config/research_attribution.py, sumber tunggal kredit
-            # penelitian), get_info(), dan skema dataset. Tidak ada nilai yang
-            # dapat diubah di sini dan tidak memengaruhi komputasi.
-            for _title, _pairs in research_about_groups(
-                    research, research_display.get(research, research),
-                    rep_info, get_research_attribution(research),
-                    _dataset_info_lines(_pdtype) if _pdtype else ()):
-                st.markdown(f"**{_title}**")
-                # columns=1 -> satu pasangan per baris: label di kolom kiri,
-                # nilai di kolom kanan. Nilai panjang (judul penelitian,
-                # kalimat paper) tetap utuh dalam SATU baris nilai.
-                render_facts(_pairs, columns=1)
-
-            # Sub-bagian read-only "Persyaratan Dataset" — agar pengguna dapat
-            # mencocokkan datasetnya sendiri sebelum menjalankan eksperimen.
-            # Mengikuti dataset_type (bukan algoritma), diturunkan dari skema +
-            # konstanta pipeline. Tidak memvalidasi berkas apa pun.
-            if _pdtype:
-                _render_dataset_requirements(_pdtype)
-
-            st.caption(
-                "Pilih algoritma di bawah untuk melihat preprocessing & "
-                "hyperparameter spesifik algoritma tersebut."
-            )
+        # Keterangan research pipeline (kelompok fakta beratribusi +
+        # Persyaratan Dataset) pindah ke tab Research Pipeline pada modal
+        # "Info" di judul halaman. Ia dibaca sesekali, sedangkan tempatnya
+        # dahulu terbuka otomatis di antara dua pemilih.
 
         # Panel Research Admin: kelola research pipeline INI dari tempat ia
         # dipakai. Digambar hanya untuk yang berhak, dan tiap aksinya tetap
@@ -2504,7 +2584,7 @@ def _render_execute():
 
         # Ringkasan pipeline terpilih DI BAWAH pemilihnya: algoritma, mode
         # eksekusi yang sedang dipilih, dan BEBERAPA parameter terkunci. Daftar
-        # lengkapnya tetap di expander "Pipeline Detail" di bawah.
+        # lengkapnya ada di tab Algoritma pada modal "Info".
         if selected:
             render_facts(_pipeline_facts(selected,
                                          get_pipeline_info(selected) or {}),
@@ -2512,36 +2592,10 @@ def _render_execute():
 
     st.session_state["selected_pipeline"] = selected
 
-    if selected:
-        # Algorithm-specific detail (full per-pipeline get_info) + config viewer.
-        info = get_pipeline_info(selected)
-        if info:
-            with st.expander("Pipeline Detail (Read-Only)"):
-                st.markdown(f"**Paper:** {info.get('paper')}")
-                st.markdown(f"**Algorithm:** {info.get('algorithm')}")
-                if info.get("preprocessing_steps"):
-                    st.markdown("**Preprocessing:**")
-                    for i, s in enumerate(info["preprocessing_steps"], 1):
-                        st.markdown(f"  {i}. {s}")
-                if info.get("feature_selection"):
-                    st.markdown(f"**Feature Selection:** {info['feature_selection']}")
-                if info.get("fixed_params"):
-                    st.markdown("**Fixed Params:**")
-                    st.json(info["fixed_params"])
-                if info.get("runtime_warning"):
-                    st.warning(info["runtime_warning"])
-                # Klaim lama "semua parameter terkunci" kini hanya benar untuk
-                # run RESMI — yang tetap menjadi bawaan. Dikatakan apa adanya.
-                st.info("Nilai di atas adalah parameter TERKUNCI yang dipakai "
-                        "run resmi. Run eksplorasi dapat menyesuaikan sebagian "
-                        "di antaranya; hasilnya ditandai dan tidak masuk "
-                        "perbandingan resmi.")
-
-        with st.expander("Pipeline Config Viewer (info.yaml · source · registry · contract)"):
-            render_file_browser(
-                _build_pipeline_config_files(selected),
-                state_key="selected_file_pipeline_view",
-            )
+    # Detail algoritma (paper, preprocessing, parameter terkunci) dan penjelajah
+    # berkas konfigurasinya pindah ke tab Algoritma dan tab Berkas pada modal
+    # "Info" di judul halaman. Modal itu membaca `selected_pipeline` dari
+    # `session_state`, yang barusan ditulis di atas.
 
     # ── Execute (conditional — only after a pipeline is selected) ───────
     # Async polling view takes over while an experiment is in flight.

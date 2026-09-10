@@ -333,15 +333,6 @@ def test_every_exit_clears_the_comparison_flag_and_payload():
 
 # ── 4. Teks pengunjung tidak ambigu ───────────────────────────────────────
 
-def test_the_visitor_line_names_what_can_actually_be_done():
-    from ui.components.contribute_context import capability
-
-    what = capability(None)["what"]
-    assert "membaca persyaratan" in what
-    assert "memeriksa kecocokan dataset" in what
-    assert "Kontributor" in what
-    # Frasa ambigu lama benar-benar hilang.
-    assert "menjalankan pemeriksaan" not in what
 
 
 def test_the_visitor_line_matches_real_behaviour():
@@ -363,7 +354,9 @@ def test_no_bare_pemeriksaan_is_left_in_the_page_texts():
     """Setiap "pemeriksaan" yang tampil menyebut OBJEK-nya."""
     import ui.components.contribute_context as cc
 
-    texts = [cc.capability(None)["what"], cc.AFTER_UPLOAD_FLOW_ALT]
+    # Baris hak pengguna sudah dicabut dari halaman, jadi yang tersisa untuk
+    # diperiksa adalah label alur pasca-unggah dan teks alternatifnya.
+    texts = [cc.AFTER_UPLOAD_FLOW_ALT]
     texts += [label for _icon, label in cc.AFTER_UPLOAD_FLOW]
     for text in texts:
         low = text.lower()

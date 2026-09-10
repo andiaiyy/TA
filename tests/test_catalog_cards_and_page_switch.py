@@ -237,7 +237,8 @@ def test_the_about_expander_is_grouped_label_value_not_nested_bullets():
     judul = dict(groups[0][1])["Judul"]
     assert "\n" not in judul and len(judul) > 40
 
-    body = RUN_SRC.split('st.expander("Tentang Research Pipeline')[1][:1600]
+    # Panelnya kini badan TAB pada modal detail, bukan expander di halaman.
+    body = RUN_SRC.split("def _detail_research(")[1][:1600]
     assert "render_facts(_pairs, columns=1)" in body
     assert "  - **" not in body                  # bullet bertingkat lama hilang
 

@@ -401,7 +401,10 @@ def test_factual_notes_are_not_dropped_by_the_typography_pass():
     # valid ≠ aktif — kalimatnya pindah ke kamus, maknanya tidak.
     assert 't("ap.msg_valid_not_active")' in src
     assert "belum aktif" in lookup("ap.msg_valid_not_active", "id")
-    assert "berkas tidak dimuat" in src            # catatan sampel
+    # Catatan sampel. Dicocokkan tanpa peduli huruf besar-kecil: kalimatnya
+    # dipecah saat em dash dicabut, sehingga "berkas" kini memulai kalimat.
+    # Yang dijaga tes ini faktanya, bukan kapitalisasinya.
+    assert "berkas tidak dimuat" in src.lower()    # catatan sampel
     assert "Batas unggah" in src                   # batas ukuran
     assert "_action_sentence" in src               # tindakan "Agar cocok…"
     assert "_cause_sentence" in src                # penyebab utama

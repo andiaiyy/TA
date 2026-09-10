@@ -237,6 +237,39 @@ CATALOG: dict[str, dict[str, str]] = {
     "re.sec_pipeline": {"id": "Pemilihan Research Pipeline",
                         "en": "Research Pipeline Selection"},
     "re.sec_algorithm": {"id": "Pilih Algoritma", "en": "Choose Algorithm"},
+    # Modal detail: empat tab. Labelnya sengaja BUKAN kunci bagian di atas —
+    # bagian halaman meminta memilih, tab ini menerangkan yang sudah dipilih.
+    "re.dlg_details": {"id": "Detail Pilihan", "en": "Selection details"},
+    "re.tab_dataset": {"id": "Dataset", "en": "Dataset"},
+    "re.tab_research": {"id": "Research Pipeline", "en": "Research pipeline"},
+    "re.tab_algorithm": {"id": "Algoritma", "en": "Algorithm"},
+    "re.tab_files": {"id": "Berkas", "en": "Files"},
+    "re.detail_pick_dataset_first": {
+        "id": "Pilih berkas dataset lebih dulu untuk melihat pratinjau dan "
+              "hasil validasinya.",
+        "en": "Choose a dataset file first to see its preview and validation "
+              "result."},
+    "re.detail_pick_research_first": {
+        "id": "Pilih research pipeline lebih dulu untuk melihat kredit "
+              "penelitian dan persyaratan datasetnya.",
+        "en": "Choose a research pipeline first to see its research credit and "
+              "dataset requirements."},
+    "re.detail_pick_algorithm_first": {
+        "id": "Pilih algoritma lebih dulu untuk melihat preprocessing dan "
+              "parameter terkuncinya.",
+        "en": "Choose an algorithm first to see its preprocessing and locked "
+              "parameters."},
+    # Kalimat lama berbunyi "Pilih algoritma DI BAWAH…", petunjuk arah yang
+    # benar ketika keterangan ini masih berupa expander di badan halaman. Di
+    # dalam modal tidak ada "di bawah"; isinya dipertahankan, arahnya dibetulkan.
+    "re.detail_see_algorithm_tab": {
+        "id": "Buka tab **Algoritma** untuk preprocessing dan hyperparameter "
+              "spesifik algoritma yang dipilih.",
+        "en": "Open the **Algorithm** tab for the preprocessing and "
+              "hyperparameters specific to the chosen algorithm."},
+    "re.detail_no_info": {
+        "id": "Algoritma ini tidak membawa keterangan `get_info()`.",
+        "en": "This algorithm carries no `get_info()` details."},
     "re.sec_execute": {"id": "Jalankan", "en": "Execute"},
     "re.sec_results": {"id": "Hasil", "en": "Results"},
     "re.sec_download": {"id": "Unduh Laporan", "en": "Download Report"},
@@ -270,9 +303,14 @@ CATALOG: dict[str, dict[str, str]] = {
     "re.lbl_run_mode": {"id": "Mode eksekusi", "en": "Run mode"},
 
     # ── Tombol ───────────────────────────────────────────────────────────
+    # Dua tombol, dua janji berbeda, dan bedanya harus terbaca dari labelnya.
+    # `re.btn_run` HANYA milik tombol yang benar-benar memanggil eksekusi;
+    # `re.btn_setup` milik setiap tombol yang membawa pengguna ke layar
+    # penyiapan tanpa menjalankan apa pun. Dahulu keduanya memakai kunci yang
+    # sama, sehingga tombol yang sekadar berpindah halaman berbunyi seolah ia
+    # sudah menjalankan eksperimennya.
     "re.btn_run": {"id": "Jalankan Eksperimen", "en": "Run Experiment"},
-    "re.btn_run_pipeline": {"id": "Jalankan pipeline ini", "en": "Run this pipeline"},
-    "re.btn_run_short": {"id": "Jalankan", "en": "Run Pipeline"},
+    "re.btn_setup": {"id": "Siapkan Eksperimen", "en": "Set up experiment"},
     "re.btn_detail": {"id": "Detail", "en": "Details"},
     "re.btn_cancel_exp": {"id": "Batalkan Eksperimen", "en": "Cancel Experiment"},
     "re.btn_use_dataset": {"id": "Pakai dataset ini", "en": "Use this dataset"},
@@ -397,10 +435,10 @@ CATALOG: dict[str, dict[str, str]] = {
     # Kelengkapan `get_info()`. Tiap kalimat menyebut apa yang HILANG bila
     # kuncinya kosong — dan tiap akibat di bawah punya pembaca nyata di kode
     # ini, bukan peringatan yang dikarang untuk menakut-nakuti.
-    "ap.info_incomplete": {"id": "`{filename}` — metadata `get_info()` terisi {have} dari {total}. Yang belum ada, dan akibatnya:",
-                           "en": "`{filename}` — `get_info()` metadata filled {have} of {total}. What is missing, and what it costs:"},
-    "ap.info_incomplete_note": {"id": "Kekurangan ini TIDAK menghalangi pengajuan: pipelinenya tetap berjalan. Yang hilang adalah keterbacaannya — dan yang perlu diperbaiki adalah `get_info()` pada kode Anda, bukan isian di halaman ini.",
-                                "en": "None of this blocks your submission: the pipeline still runs. What is lost is how well it reads — and the fix belongs in `get_info()` in your code, not in a field on this page."},
+    "ap.info_incomplete": {"id": "`{filename}`: metadata `get_info()` terisi {have} dari {total}. Yang belum ada, dan akibatnya:",
+                           "en": "`{filename}`: `get_info()` metadata filled {have} of {total}. What is missing, and what it costs:"},
+    "ap.info_incomplete_note": {"id": "Kekurangan ini TIDAK menghalangi pengajuan: pipelinenya tetap berjalan. Yang hilang adalah keterbacaannya. Yang perlu diperbaiki adalah `get_info()` pada kode Anda, bukan isian di halaman ini.",
+                                "en": "None of this blocks your submission: the pipeline still runs. What is lost is how well it reads. The fix belongs in `get_info()` in your code, not in a field on this page."},
     "ap.cost_paper": {"id": "kredit penelitian tidak muncul pada entri registry maupun laporan eksperimen.",
                       "en": "the research credit will not appear in the registry entry or the experiment report."},
     "ap.cost_algorithm": {"id": "nama algoritma jatuh ke nama paket pada pemilih dan tabel riwayat.",
@@ -409,14 +447,14 @@ CATALOG: dict[str, dict[str, str]] = {
                               "en": "the preprocessing steps will not be readable in the catalogue or the report."},
     "ap.cost_feature_selection": {"id": "keterangan seleksi fitur tidak terbaca di katalog maupun laporan.",
                                   "en": "the feature selection note will not be readable in the catalogue or the report."},
-    "ap.cost_fixed_params": {"id": "**tidak ada satu pun parameter yang tampil** — transparansi hyperparameter hilang, dan mode eksplorasi tidak dapat dipakai sama sekali.",
-                             "en": "**no parameter will be shown at all** — hyperparameter transparency is lost, and exploration mode cannot be used."},
+    "ap.cost_fixed_params": {"id": "**tidak ada satu pun parameter yang tampil**: transparansi hyperparameter hilang, dan mode eksplorasi tidak dapat dipakai sama sekali.",
+                             "en": "**no parameter will be shown at all**: hyperparameter transparency is lost, and exploration mode cannot be used."},
     "ap.cost_train_test_split": {"id": "pembagian train/test tidak terbaca di katalog maupun laporan.",
                                  "en": "the train/test split will not be readable in the catalogue or the report."},
     # Kunci OPSIONAL: ditawarkan, tidak dituntut. Kalimatnya menyebut apa yang
     # DIDAPAT bila diisi — bukan apa yang hilang bila tidak.
-    "ap.info_optional": {"id": "`{filename}` — tiga kunci opsional ini tidak diminta kontrak, tetapi panel \"Tentang Research Pipeline\" menampilkannya bila ada:",
-                         "en": "`{filename}` — these three optional keys are not required by the contract, but the \"About Research Pipeline\" panel shows them when present:"},
+    "ap.info_optional": {"id": "`{filename}`: tiga kunci opsional ini tidak diminta kontrak, tetapi panel \"Tentang Research Pipeline\" menampilkannya bila ada:",
+                         "en": "`{filename}`: these three optional keys are not required by the contract, but the \"About Research Pipeline\" panel shows them when present:"},
     "ap.gain_app": {"id": "fokus aplikasi/trafik yang dicakup pipeline ini.",
                     "en": "the application/traffic focus this pipeline covers."},
     "ap.gain_anti_leakage": {"id": "langkah yang Anda ambil supaya data uji tidak bocor ke pelatihan.",
@@ -466,16 +504,16 @@ CATALOG: dict[str, dict[str, str]] = {
     "ap.lbl_sample_values": {"id": "Contoh nilai kolom", "en": "Sample column values"},
     "ap.ph_sample_values": {"id": "mis. durasi = 0.523",
                             "en": "e.g. duration = 0.523"},
-    "ap.help_sample_values": {"id": "Satu `kolom = nilai` per baris. Melengkapi baris nama kolom pada contoh struktur, sehingga pembacanya tahu bentuk nilainya — bukan hanya nama kolomnya.",
-                              "en": "One `column = value` per line. It completes the column-name line in the structure example, so a reader knows what the values look like — not just the column names."},
+    "ap.help_sample_values": {"id": "Satu `kolom = nilai` per baris. Melengkapi baris nama kolom pada contoh struktur, sehingga pembacanya tahu bentuk nilainya, bukan hanya nama kolomnya.",
+                              "en": "One `column = value` per line. It completes the column-name line in the structure example, so a reader knows what the values look like, not just the column names."},
     "ap.lbl_ignored_columns": {"id": "Kolom yang boleh ada tetapi diabaikan",
                                "en": "Columns allowed but ignored"},
-    "ap.help_ignored_columns": {"id": "Kolom yang tidak mengganggu bila ada di berkas — misalnya indeks, pengenal, atau stempel waktu. Tanpa ini, pemilik dataset mengira setiap kolom tambahan membuat berkasnya ditolak.",
-                                "en": "Columns that do no harm if present — an index, an identifier, a timestamp. Without this, dataset owners assume any extra column gets their file rejected."},
+    "ap.help_ignored_columns": {"id": "Kolom yang tidak mengganggu bila ada di berkas, misalnya indeks, pengenal, atau stempel waktu. Tanpa ini, pemilik dataset mengira setiap kolom tambahan membuat berkasnya ditolak.",
+                                "en": "Columns that do no harm if present: an index, an identifier, a timestamp. Without this, dataset owners assume any extra column gets their file rejected."},
     "re.req_row_sample_values": {"id": "**Contoh nilai**", "en": "**Sample values**"},
     "re.req_row_ignored": {"id": "**Kolom yang diabaikan**",
                            "en": "**Ignored columns**"},
-    "ap.help_dataset_facts": {"id": "Keterangan berikut opsional dan hanya ditampilkan, tidak diperiksa. Yang diisi akan muncul pada panel persyaratan research pipeline ini — yang dikosongkan tidak ditampilkan sama sekali.",
+    "ap.help_dataset_facts": {"id": "Keterangan berikut opsional dan hanya ditampilkan, tidak diperiksa. Yang diisi akan muncul pada panel persyaratan research pipeline ini. Yang dikosongkan tidak ditampilkan sama sekali.",
                               "en": "The following notes are optional and shown, not enforced. What you fill in appears on this research pipeline's requirements panel; what you leave blank is not shown at all."},
     "ap.lbl_row_unit": {"id": "Satu baris berisi", "en": "One row holds"},
     "ap.ph_row_unit": {"id": "mis. satu baris per flow jaringan",
@@ -496,10 +534,10 @@ CATALOG: dict[str, dict[str, str]] = {
                           "en": "Will appear as **{credit} — {name}** in the research pipeline picker."},
     # Kolom DIPILIH dari dataset lampiran, bukan diketik: salah ketik satu
     # huruf membuat kontraknya tidak cocok tanpa ada yang memberi tahu.
-    "ap.columns_from_dataset": {"id": "{count} kolom terbaca dari dataset yang Anda lampirkan — pilih dari daftar agar namanya tidak meleset.",
-                                "en": "{count} columns read from the dataset you attached — pick from the list so the names cannot drift."},
-    "ap.detected_stages": {"id": "Fase progres terbaca: {stages} — periksa urutannya.",
-                           "en": "Progress phases detected: {stages} — check the order."},
+    "ap.columns_from_dataset": {"id": "{count} kolom terbaca dari dataset yang Anda lampirkan. Pilih dari daftar agar namanya tidak meleset.",
+                                "en": "{count} columns read from the dataset you attached. Pick from the list so the names cannot drift."},
+    "ap.detected_stages": {"id": "Fase progres terbaca: {stages}. Periksa urutannya.",
+                           "en": "Progress phases detected: {stages}. Check the order."},
     "ap.lbl_file_role": {"id": "Peran berkas", "en": "File role"},
     "ap.lbl_pipeline_name": {"id": "Nama pipeline", "en": "Pipeline name"},
     "ap.lbl_note": {"id": "Catatan", "en": "Note"},
@@ -525,6 +563,22 @@ CATALOG: dict[str, dict[str, str]] = {
     "ap.btn_check_compat": {"id": "Periksa kecocokan dataset",
                             "en": "Check dataset compatibility"},
     "ap.btn_back": {"id": "← Kembali", "en": "← Back"},
+    # Tombol panduan halaman unggah pipeline, dan modal yang dibukanya.
+    # Akun yang sudah masuk tetapi belum disetujui. Sengaja TIDAK menyuruhnya
+    # masuk: ia sudah di dalam, yang kurang adalah persetujuannya.
+    "ap.gate_pending": {
+        "id": "Menunggu persetujuan Research Admin. Kontrol unggah aktif "
+              "setelah akun Anda disetujui; halaman ini tetap dapat dibaca, "
+              "dan menjalankan eksperimen tidak memerlukan persetujuan.",
+        "en": "Awaiting Research Admin approval. The upload controls switch on "
+              "once your account is approved; this page stays readable, and "
+              "running experiments needs no approval."},
+    "ap.btn_info": {"id": "Info", "en": "Info"},
+    "ap.btn_close_info": {"id": "Tutup", "en": "Close"},
+    "ap.dlg_pipeline_info": {"id": "Panduan unggah pipeline",
+                             "en": "Pipeline upload guide"},
+    "ap.dlg_dataset_info": {"id": "Panduan tambah dataset",
+                            "en": "Dataset upload guide"},
     "ap.btn_deactivate": {"id": "Nonaktifkan", "en": "Deactivate"},
     "ap.btn_reactivate": {"id": "Aktifkan kembali", "en": "Reactivate"},
     "ap.btn_history": {"id": "Riwayat", "en": "History"},
@@ -549,9 +603,8 @@ CATALOG: dict[str, dict[str, str]] = {
     "ap.msg_need_reject_reason": {
         "id": "Isi alasan penolakan pada Catatan tinjauan dulu.",
         "en": "Enter the reason for rejection in the Review note first."},
-    "ap.msg_not_compatible_yet": {
-        "id": "Belum cocok dengan research pipeline mana pun — tetap boleh disimpan.",
-        "en": "Not compatible with any research pipeline yet — it can still be saved."},
+    "ap.msg_not_compatible_yet": {"id": "Belum cocok dengan research pipeline mana pun, tetapi tetap boleh disimpan.",
+                                  "en": "Not compatible with any research pipeline yet, but it can still be saved."},
     "ap.msg_versions_unreadable": {
         "id": "Berkas kedua versi tidak terbaca — tidak ada yang dapat dibandingkan.",
         "en": "Neither version's files could be read — there is nothing to compare."},
@@ -580,8 +633,8 @@ CATALOG: dict[str, dict[str, str]] = {
                           "en": "A short explanation for the reviewer."},
     "ap.help_registry_type": {"id": "Menentukan dataset_type pada entri registry.",
                               "en": "Sets dataset_type on the registry entry."},
-    "ap.help_optional_report": {"id": "Opsional — ikut ditampilkan pada laporan.",
-                                "en": "Optional — also shown on the report."},
+    "ap.help_optional_report": {"id": "Opsional, ikut ditampilkan pada laporan.",
+                                "en": "Optional, also shown on the report."},
     "ap.help_open_outside": {"id": "Membuka penuh di luar aplikasi bila berkasnya panjang.",
                              "en": "Opens in full outside the app if the file is long."},
     "ap.help_edit_new_version": {"id": "Menyimpan akan membuat versi baru.",
@@ -607,11 +660,8 @@ CATALOG: dict[str, dict[str, str]] = {
               "masih ada saat penyunting dibuka lagi.",
         "en": "Unsaved edits stay in this session and are still there when the "
               "editor is reopened."},
-    "ap.help_dataset_direct": {
-        "id": "Tersimpan langsung setelah berkas lolos pemeriksaan kecocokan — "
-              "dataset tidak melewati peninjauan.",
-        "en": "Stored immediately once the file passes the compatibility "
-              "check — datasets do not go through review."},
+    "ap.help_dataset_direct": {"id": "Tersimpan langsung setelah berkas lolos pemeriksaan kecocokan. Dataset tidak melewati peninjauan.",
+                               "en": "Stored immediately once the file passes the compatibility check. Datasets do not go through review."},
     "ap.help_submit_review": {
         "id": "Paket diajukan untuk ditinjau Research Admin. Menyetujui "
               "menandai paket sebagai layak, bukan mengaktifkannya.",
@@ -1267,13 +1317,8 @@ CATALOG: dict[str, dict[str, str]] = {
     "ins.forbid_dataset": {
         "id": "Mengubah dataset asli.",
         "en": "Modifying the original dataset."},
-    "ins.forbid_params": {
-        "id": "Mengubah hyperparameter terkunci sendiri saat berjalan — "
-              "penyesuaian hanya lewat run eksplorasi platform, yang mencatat "
-              "& menandainya.",
-        "en": "Changing its own locked hyperparameters at run time — "
-              "adjustments happen only through the platform's exploration "
-              "run, which records and flags them."},
+    "ins.forbid_params": {"id": "Mengubah hyperparameter terkunci sendiri saat berjalan. Penyesuaian hanya lewat run eksplorasi platform, yang mencatat & menandainya.",
+                          "en": "Changing its own locked hyperparameters at run time. Adjustments happen only through the platform's exploration run, which records and flags them."},
     "ins.forbid_fit_test": {
         "id": "Fit praproses pada data uji.",
         "en": "Fitting preprocessing on the test data."},
@@ -1393,47 +1438,24 @@ CATALOG: dict[str, dict[str, str]] = {
 
     # ── Add Pipeline & Dataset: sisa teks tertanam  (Tahap 4A) ───────────
     # Nilai sisipan (nama berkas, ukuran, nomor pengajuan) TIDAK diterjemahkan.
-    "ap.help_only_pipelines_reviewed": {
-        "id": "Hanya pipeline yang ditinjau — isinya kode yang dieksekusi; "
-              "dataset tersimpan langsung.",
-        "en": "Only pipelines are reviewed — they contain code that gets "
-              "executed; datasets are stored directly."},
-    "ap.msg_legacy_dataset_submission": {
-        "id": "**Pengajuan dataset lama** — dataset tidak lagi memerlukan "
-              "persetujuan. Selesaikan pengajuan ini untuk membersihkan "
-              "antrean.",
-        "en": "**Legacy dataset submission** — datasets no longer need "
-              "approval. Finish this one to clear the queue."},
-    "ap.note_support_file": {
-        "id": "Berkas pendukung: kontrak pipeline tidak berlaku, aturan "
-              "keamanan tetap penuh — berkas ini ikut dieksekusi saat pipeline "
-              "berjalan.",
-        "en": "Support file: the pipeline contract does not apply, but the "
-              "security rules do in full — this file is executed too when the "
-              "pipeline runs."},
-    "ap.note_user_list": {
-        "id": "**Daftar pengguna** — password tidak pernah ditampilkan; hanya "
-              "turunan bersaltnya yang disimpan.",
-        "en": "**User list** — passwords are never shown; only their salted "
-              "derivative is stored."},
+    "ap.help_only_pipelines_reviewed": {"id": "Hanya pipeline yang ditinjau, karena isinya kode yang dieksekusi. Dataset tersimpan langsung.",
+                                        "en": "Only pipelines are reviewed, because they contain code that gets executed. Datasets are stored directly."},
+    "ap.msg_legacy_dataset_submission": {"id": "**Pengajuan dataset lama**: dataset tidak lagi memerlukan persetujuan. Selesaikan pengajuan ini untuk membersihkan antrean.",
+                                         "en": "**Legacy dataset submission**: datasets no longer need approval. Finish this one to clear the queue."},
+    "ap.note_support_file": {"id": "Berkas pendukung: kontrak pipeline tidak berlaku, aturan keamanan tetap penuh. Berkas ini ikut dieksekusi saat pipeline berjalan.",
+                             "en": "Support file: the pipeline contract does not apply, but the security rules do in full. This file is executed too when the pipeline runs."},
+    "ap.note_user_list": {"id": "**Daftar pengguna**: password tidak pernah ditampilkan; hanya turunan bersaltnya yang disimpan.",
+                          "en": "**User list**: passwords are never shown; only their salted derivative is stored."},
     "ap.empty_no_accounts": {"id": "Belum ada akun.", "en": "No accounts yet."},
     "ap.msg_fix_then_reupload": {
         "id": "Perbaiki poin ✖ di atas lalu unggah ulang. Unduhan dan cuplikan "
               "registry muncul setelah paket valid.",
         "en": "Fix the ✖ items above, then upload again. The download and the "
               "registry snippet appear once the package is valid."},
-    "ap.msg_valid_not_active": {
-        "id": "Paket valid — pipeline **belum aktif**, menunggu aktivasi "
-              "manual.",
-        "en": "Package is valid — the pipeline is **not active yet**, it "
-              "awaits manual activation."},
-    "ap.msg_submitted_n": {
-        "id": "Diajukan sebagai pengajuan #{number}. Menunggu peninjauan "
-              "Research Admin — pipeline ini **belum** aktif dan belum dapat "
-              "dijalankan.",
-        "en": "Submitted as submission #{number}. Awaiting Research Admin "
-              "review — this pipeline is **not** active and cannot be run "
-              "yet."},
+    "ap.msg_valid_not_active": {"id": "Paket valid. Pipeline **belum aktif**, menunggu aktivasi manual.",
+                                "en": "Package is valid. The pipeline is **not active yet**, it awaits manual activation."},
+    "ap.msg_submitted_n": {"id": "Diajukan sebagai pengajuan #{number}. Menunggu peninjauan Research Admin. Pipeline ini **belum** aktif dan belum dapat dijalankan.",
+                           "en": "Submitted as submission #{number}. Awaiting Research Admin review. This pipeline is **not** active and cannot be run yet."},
     "ap.step_place_files": {
         "id": "1. Letakkan berkas paket di `pipelines/<subdirektori riset>/`.",
         "en": "1. Place the package files in "
@@ -1443,21 +1465,12 @@ CATALOG: dict[str, dict[str, str]] = {
               "tinjauan manusia tetap diperlukan.",
         "en": "Static validation filters common problems; it is not an "
               "absolute guarantee — human review is still required."},
-    "ap.note_metadata": {
-        "id": "**Metadata pipeline** — mengisi cuplikan entri registry; tidak "
-              "memengaruhi hasil validasi.",
-        "en": "**Pipeline metadata** — fills the registry snippet; it does not "
-              "affect the validation result."},
-    "ap.note_checked_against_all": {
-        "id": "Kecocokan berkas diperiksa terhadap seluruh research pipeline "
-              "sekaligus — tidak perlu memilih pipeline lebih dulu.",
-        "en": "The file's compatibility is checked against every research "
-              "pipeline at once — no need to choose a pipeline first."},
-    "ap.err_file_exists": {
-        "id": "`{filename}` sudah ada di `storage/datasets/`. Ganti nama "
-              "berkasnya — platform tidak menimpa dataset yang sudah ada.",
-        "en": "`{filename}` already exists in `storage/datasets/`. Rename the "
-              "file — the platform never overwrites an existing dataset."},
+    "ap.note_metadata": {"id": "**Metadata pipeline**: mengisi cuplikan entri registry; tidak memengaruhi hasil validasi.",
+                         "en": "**Pipeline metadata**: fills the registry snippet; it does not affect the validation result."},
+    "ap.note_checked_against_all": {"id": "Kecocokan berkas diperiksa terhadap seluruh research pipeline sekaligus, jadi tidak perlu memilih pipeline lebih dulu.",
+                                    "en": "The file's compatibility is checked against every research pipeline at once, so there is no need to choose a pipeline first."},
+    "ap.err_file_exists": {"id": "`{filename}` sudah ada di `storage/datasets/`. Ganti nama berkasnya. Platform tidak menimpa dataset yang sudah ada.",
+                           "en": "`{filename}` already exists in `storage/datasets/`. Rename the file. The platform never overwrites an existing dataset."},
     "ap.msg_saved_as": {
         "id": "Tersimpan sebagai `{filename}` ({size}). Sudah dapat dipilih di "
               "halaman Run Experiment.",
@@ -2623,13 +2636,8 @@ CATALOG: dict[str, dict[str, str]] = {
 
     # Ketegasan dipertahankan: "tidak dijalankan" dan "lolos BUKAN berarti
     # aktif" harus tetap terbaca sekeras aslinya.
-    "ins.static_check_note": {
-        "id": "🔒 Pemeriksaan <b>statis</b> — berkas dibaca, <b>tidak "
-              "dijalankan</b>. Lolos <b>bukan</b> berarti aktif: menunggu "
-              "tinjauan Research Admin.",
-        "en": "🔒 The check is <b>static</b> — the file is read, <b>not "
-              "executed</b>. Passing does <b>not</b> mean active: it waits "
-              "for Research Admin review."},
+    "ins.static_check_note": {"id": "🔒 Pemeriksaan <b>statis</b>: berkas dibaca, <b>tidak dijalankan</b>. Lolos <b>bukan</b> berarti aktif: menunggu tinjauan Research Admin.",
+                              "en": "🔒 The check is <b>static</b>: the file is read, <b>not executed</b>. Passing does <b>not</b> mean active: it waits for Research Admin review."},
 
     "ins.expected_shape": {"id": "**Bentuk yang diharapkan**",
                            "en": "**The expected shape**"},
@@ -2640,9 +2648,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "id": "Paling sering membuat dataset dinyatakan belum cocok",
         "en": "What most often makes a dataset come back as not matching"},
 
-    "ins.exp_full_requirements": {
-        "id": "Persyaratan lengkap — modul & pemanggilan",
-        "en": "Full requirements — modules & calls"},
+    "ins.exp_full_requirements": {"id": "Persyaratan lengkap: modul & pemanggilan",
+                                  "en": "Full requirements: modules & calls"},
     "ins.modules_reasonable": {"id": "**Modul yang wajar dipakai**",
                                "en": "**Modules it is reasonable to use**"},
     "ins.modules_forbidden": {"id": "**Modul yang dilarang**",
@@ -2663,11 +2670,8 @@ CATALOG: dict[str, dict[str, str]] = {
               "`__globals__`, `__builtins__`)."},
 
     # ── Panduan: dokumen kontrak ─────────────────────────────────────────
-    "ins.contract_intro": {
-        "id": "**Kontrak pipeline** — nama field dibaca langsung dari "
-              "`contracts/pipeline_contracts.py`.",
-        "en": "**The pipeline contract** — field names are read directly "
-              "from `contracts/pipeline_contracts.py`."},
+    "ins.contract_intro": {"id": "**Kontrak pipeline**: nama field dibaca langsung dari `contracts/pipeline_contracts.py`.",
+                           "en": "**The pipeline contract**: field names are read directly from `contracts/pipeline_contracts.py`."},
     "ins.tab_input": {"id": "Masukan", "en": "Input"},
     "ins.tab_return": {"id": "Kembalian", "en": "Return"},
     "ins.tab_stages": {"id": "Tahapan", "en": "Stages"},
@@ -2684,11 +2688,8 @@ CATALOG: dict[str, dict[str, str]] = {
     "ins.col_owner": {"id": "Dikerjakan", "en": "Done by"},
     "ins.col_note": {"id": "Catatan", "en": "Note"},
     # Aturan anti-kebocoran: urutannya (split DULU) harus tetap tegas.
-    "ins.anti_leak_note": {
-        "id": "Langkah 2–3 adalah aturan anti-kebocoran: split DULU, baru fit "
-              "praproses — dan hanya pada data latih.",
-        "en": "Steps 2–3 are the anti-leakage rule: split FIRST, then fit the "
-              "preprocessing — and only on the training data."},
+    "ins.anti_leak_note": {"id": "Langkah 2–3 adalah aturan anti-kebocoran: split DULU, baru fit praproses, dan hanya pada data latih.",
+                           "en": "Steps 2–3 are the anti-leakage rule: split FIRST, then fit the preprocessing, and only on the training data."},
 
     "ins.required_heading": {"id": "**Wajib**", "en": "**Required**"},
     "ins.suggested_note": {
@@ -2696,28 +2697,17 @@ CATALOG: dict[str, dict[str, str]] = {
               "pipeline bawaan pun belum menyediakannya.",
         "en": "Suggested, not required: the validator does not check them, "
               "and even the built-in pipelines do not provide them yet."},
-    "ins.suggested_line": {
-        "id": "**Disarankan** — {note} Kunci wajib yang hilang menghasilkan "
-              "{severity}, bukan kegagalan.",
-        "en": "**Suggested** — {note} A missing required key produces "
-              "{severity}, not a failure."},
+    "ins.suggested_line": {"id": "**Disarankan**: {note} Kunci wajib yang hilang menghasilkan {severity}, bukan kegagalan.",
+                           "en": "**Suggested**: {note} A missing required key produces {severity}, not a failure."},
     "ins.severity_warning": {"id": "peringatan", "en": "a warning"},
 
     # Daftar larangan: kerangkanya tetap menyebut alasannya, tidak diperhalus.
-    "ins.forbidden_frame": {
-        "id": "Ini yang memisahkan masukan yang dikendalikan pengguna dari "
-              "parameter yang ditetapkan eksperimen — dasar perbandingan yang "
-              "adil dan hasil yang dapat diulang.",
-        "en": "This is what separates user-controlled input from the "
-              "parameters the experiment fixes — the basis for a fair "
-              "comparison and for results that can be reproduced."},
+    "ins.forbidden_frame": {"id": "Ini yang memisahkan masukan yang dikendalikan pengguna dari parameter yang ditetapkan eksperimen: dasar perbandingan yang adil dan hasil yang dapat diulang.",
+                            "en": "This is what separates user-controlled input from the parameters the experiment fixes: the basis for a fair comparison and for results that can be reproduced."},
 
     # ── Panduan: kesalahan tersering pada pipeline ───────────────────────
-    "ins.mis_entry_point": {
-        "id": "Titik masuk tidak tepat satu — tidak ada berkas dengan kelas "
-              "turunan `{base_class}`, atau justru lebih dari satu.",
-        "en": "The entry point is not exactly one — no file holds a "
-              "`{base_class}` subclass, or more than one does."},
+    "ins.mis_entry_point": {"id": "Titik masuk tidak tepat satu: tidak ada berkas dengan kelas turunan `{base_class}`, atau justru lebih dari satu.",
+                            "en": "The entry point is not exactly one: no file holds a `{base_class}` subclass, or more than one does."},
     "ins.mis_pipeline_class": {
         "id": "Kelas pipeline tidak mewarisi `{base_class}`.",
         "en": "The pipeline class does not inherit from `{base_class}`."},
@@ -2726,15 +2716,12 @@ CATALOG: dict[str, dict[str, str]] = {
     "ins.mis_method_get_info": {
         "id": "Metode wajib `{method}()` belum ada.",
         "en": "The required `{method}()` method is missing."},
-    "ins.mis_forbidden_import": {
-        "id": "Mengimpor modul terlarang — mis. `{module}`.",
-        "en": "Importing a forbidden module — e.g. `{module}`."},
-    "ins.mis_forbidden_call": {
-        "id": "Memakai pemanggilan terlarang — mis. `{call}()`.",
-        "en": "Using a forbidden call — e.g. `{call}()`."},
-    "ins.mis_syntax": {"id": "Berkas gagal diurai — bukan Python yang valid.",
-                       "en": "The file could not be parsed — it is not valid "
-                             "Python."},
+    "ins.mis_forbidden_import": {"id": "Mengimpor modul terlarang, mis. `{module}`.",
+                                 "en": "Importing a forbidden module, e.g. `{module}`."},
+    "ins.mis_forbidden_call": {"id": "Memakai pemanggilan terlarang, mis. `{call}()`.",
+                               "en": "Using a forbidden call, e.g. `{call}()`."},
+    "ins.mis_syntax": {"id": "Berkas gagal diurai: bukan Python yang valid.",
+                       "en": "The file could not be parsed: it is not valid Python."},
     "ins.mis_dunder": {
         "id": "Menyentuh atribut pelolos sandbox (`__globals__`, "
               "`__subclasses__`).",
@@ -2761,9 +2748,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "id": "kolom fitur tidak numerik sehingga tidak dapat dilatih",
         "en": "the feature columns are not numeric, so they cannot be "
               "trained on"},
-    "ins.dsmis_classes": {
-        "id": "hanya satu kelas yang muncul — tidak ada contoh attack",
-        "en": "only one class appears — there are no attack examples"},
+    "ins.dsmis_classes": {"id": "hanya satu kelas yang muncul, tidak ada contoh attack",
+                          "en": "only one class appears, there are no attack examples"},
 
     # ── Panduan: persyaratan dataset ─────────────────────────────────────
     "ins.dsrow_format": {"id": "Format berkas", "en": "File format"},
@@ -2772,17 +2758,14 @@ CATALOG: dict[str, dict[str, str]] = {
     "ins.dsrow_class_count": {"id": "Jumlah kelas", "en": "Number of classes"},
     "ins.dsval_two_classes": {"id": "dua kelas (benign & attack)",
                               "en": "two classes (benign & attack)"},
-    "ins.dslabel_from_suricata": {
-        "id": "`{column}` — dibentuk pipeline dari **alert Suricata**, tidak "
-              "perlu ada di berkas",
-        "en": "`{column}` — built by the pipeline from **Suricata alerts**; "
-              "it need not be present in the file"},
-    "ins.dslabel_binary": {"id": "`{column}` — `0` = benign, `1` = malicious",
-                           "en": "`{column}` — `0` = benign, `1` = malicious"},
+    "ins.dslabel_from_suricata": {"id": "`{column}`: dibentuk pipeline dari **alert Suricata**, tidak perlu ada di berkas",
+                                  "en": "`{column}`: built by the pipeline from **Suricata alerts**; it need not be present in the file"},
+    "ins.dslabel_binary": {"id": "`{column}`: `0` = benign, `1` = malicious",
+                           "en": "`{column}`: `0` = benign, `1` = malicious"},
     # Kontrak yang DIDEKLARASIKAN kontributor: ia menyebut nama kolomnya,
     # bukan arti nilainya — jadi artinya tidak dikarang di sini.
-    "ins.dslabel_declared": {"id": "`{column}` — sesuai kontrak yang dinyatakan pengunggah",
-                             "en": "`{column}` — as declared by the uploader"},
+    "ins.dslabel_declared": {"id": "`{column}`: sesuai kontrak yang dinyatakan pengunggah",
+                             "en": "`{column}`: as declared by the uploader"},
     "ins.dsrow_required_columns": {"id": "Kolom wajib", "en": "Required columns"},
     "ins.dsval_declared_columns": {"id": "{count} kolom sesuai kontrak yang dinyatakan",
                                    "en": "{count} columns per the declared contract"},
@@ -2793,10 +2776,8 @@ CATALOG: dict[str, dict[str, str]] = {
     "ins.dschk_tls_events": {
         "id": "Memuat event TLS (`app_proto`/`event_type` = `tls`).",
         "en": "Contains TLS events (`app_proto`/`event_type` = `tls`)."},
-    "ins.dschk_no_label_column": {
-        "id": "Tidak perlu kolom `{column}` — dibentuk dari alert Suricata.",
-        "en": "No `{column}` column needed — it is built from Suricata "
-              "alerts."},
+    "ins.dschk_no_label_column": {"id": "Tidak perlu kolom `{column}`: dibentuk dari alert Suricata.",
+                                  "en": "No `{column}` column needed: it is built from Suricata alerts."},
     "ins.dschk_alert_events": {
         "id": "Ada event `alert`, sehingga kelas attack tidak kosong.",
         "en": "There are `alert` events, so the attack class is not empty."},
@@ -2813,36 +2794,23 @@ CATALOG: dict[str, dict[str, str]] = {
                               "en": "It holds two classes: benign and "
                                     "malicious."},
 
-    "ins.dataset_sample_note": {
-        "id": "🔍 Angka berasal dari <b>cuplikan</b> berkas, bukan seluruh "
-              "isinya. Dataset <b>tersimpan langsung</b> — tinjauan hanya "
-              "untuk pipeline, yang berisi kode.",
-        "en": "🔍 Figures come from a <b>sample</b>, not the whole file. "
-              "Datasets are <b>stored at once</b> — review covers only "
-              "pipelines, which hold code."},
+    "ins.dataset_sample_note": {"id": "🔍 Angka berasal dari <b>cuplikan</b> berkas, bukan seluruh isinya. Dataset <b>tersimpan langsung</b>: tinjauan hanya untuk pipeline, yang berisi kode.",
+                                "en": "🔍 Figures come from a <b>sample</b>, not the whole file. Datasets are <b>stored at once</b>: review covers only pipelines, which hold code."},
     "ins.exp_dataset_requirements": {"id": "Persyaratan dataset lengkap",
                                      "en": "Full dataset requirements"},
 
     # ── Persyaratan per dataset (konstanta di run_experiment tidak diubah) ─
     "ins.req_hikari_row_unit": {"id": "satu baris per **flow** jaringan",
                                 "en": "one row per network **flow**"},
-    "ins.req_hikari_feature_nature": {
-        "id": "Kolom **numerik berbasis flow** — durasi, hitungan "
-              "paket/header, statistik payload & inter-arrival time.",
-        "en": "**Flow-based numeric** columns — duration, packet/header "
-              "counts, payload statistics & inter-arrival time."},
+    "ins.req_hikari_feature_nature": {"id": "Kolom **numerik berbasis flow**: durasi, hitungan paket/header, statistik payload & inter-arrival time.",
+                                      "en": "**Flow-based numeric** columns: duration, packet/header counts, payload statistics & inter-arrival time."},
     "ins.req_hikari_summary": {"id": "fitur numerik berbasis flow",
                                "en": "flow-based numeric features"},
     "ins.req_eve_row_unit": {
         "id": "satu objek JSON per baris (satu **event**)",
         "en": "one JSON object per line (one **event**)"},
-    "ins.req_eve_feature_nature": {
-        "id": "Field mentah **Suricata EVE log**. Pipeline memfilter **event "
-              "TLS** lalu merekayasa & menyeleksi fiturnya sendiri — berkas "
-              "tidak perlu berisi kolom fitur siap pakai.",
-        "en": "Raw **Suricata EVE log** fields. The pipeline filters **TLS "
-              "events**, then engineers and selects its own features — the "
-              "file need not contain ready-made feature columns."},
+    "ins.req_eve_feature_nature": {"id": "Field mentah **Suricata EVE log**. Pipeline memfilter **event TLS** lalu merekayasa & menyeleksi fiturnya sendiri, jadi berkas tidak perlu berisi kolom fitur siap pakai.",
+                                   "en": "Raw **Suricata EVE log** fields. The pipeline filters **TLS events**, then engineers and selects its own features, so the file need not contain ready-made feature columns."},
     "ins.req_eve_summary": {
         "id": "field EVE mentah, fokus event TLS (label dari alert)",
         "en": "raw EVE fields, focused on TLS events (labels from alerts)"},
@@ -2861,9 +2829,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "en": "The research pipeline this is meant for (e.g. HIKARI2021)."},
     "ins.fld_test_size": {"id": "Proporsi data uji.",
                           "en": "The proportion held out for testing."},
-    "ins.fld_random_state": {"id": "Benih acak — kunci hasil dapat diulang.",
-                             "en": "The random seed — the key to reproducible "
-                                   "results."},
+    "ins.fld_random_state": {"id": "Benih acak: kunci hasil dapat diulang.",
+                             "en": "The random seed: the key to reproducible results."},
     "ins.fld_dataset_path": {
         "id": "Path berkas mentah, untuk pipeline yang membaca berkas sendiri.",
         "en": "Path to the raw file, for pipelines that read the file "
@@ -3066,26 +3033,8 @@ CATALOG: dict[str, dict[str, str]] = {
                                  "en": "Pipeline reviewed"},
     "ap.after_upload_alt": {"id": "Setelah berkas lolos pemeriksaan otomatis: dataset langsung tersimpan; pipeline menunggu tinjauan Research Admin karena berisi kode yang dieksekusi.",
                            "en": "Once a file passes the automatic check: a dataset is stored straight away; a pipeline waits for Research Admin review, because it contains code that will be executed."},
-    "ap.cap_visitor_label": {"id": "Mode pengunjung",
-                            "en": "Visitor mode"},
-    "ap.cap_visitor_what": {"id": "dapat membaca persyaratan dan memeriksa kecocokan dataset; mengunggah memerlukan akun Kontributor",
-                           "en": "can read the requirements and check dataset compatibility; uploading requires a Contributor account"},
-    "ap.cap_user_fallback": {"id": "Pengguna",
-                            "en": "User"},
-    "ap.cap_may_review": {"id": "mengajukan, meninjau, mengelola pengguna",
-                         "en": "submit, review, manage users"},
-    "ap.cap_may_upload": {"id": "mengajukan pipeline & dataset",
-                         "en": "submit pipelines & datasets"},
-    "ap.cap_pending": {"id": "menunggu persetujuan — belum dapat mengajukan",
-                      "en": "awaiting approval — cannot submit yet"},
-    "ap.cap_pending_readable": {"id": "Menunggu persetujuan — halaman tetap dapat dibaca.",
-                               "en": "Awaiting approval — the page can still be read."},
     "ap.cap_login_prompt": {"id": "Mengajukan berkas memerlukan akun.",
                            "en": "Submitting a file requires an account."},
-    "ap.role_contributor": {"id": "Kontributor",
-                           "en": "Contributor"},
-    "ap.role_research_admin": {"id": "Research Admin",
-                              "en": "Research Admin"},
 
 
     # ── Peninjauan: registry (P5) ───────────────────────────────────────
@@ -3262,8 +3211,8 @@ CATALOG: dict[str, dict[str, str]] = {
                        "en": "Rejected"},
     "ap.sub_other": {"id": "lainnya",
                     "en": "other"},
-    "ap.sub_yours": {"id": "Pengajuan Anda — {parts}.",
-                    "en": "Your submissions — {parts}."},
+    "ap.sub_yours": {"id": "Pengajuan Anda: {parts}.",
+                     "en": "Your submissions: {parts}."},
 
 
     # ── Progress & Status: tabel eksperimen ───────────────────────────────────────
@@ -3664,8 +3613,8 @@ CATALOG: dict[str, dict[str, str]] = {
     "ap.zone_examined": {"id": "Yang diperiksa", "en": "What was checked"},
     "ap.zone_testing": {"id": "Pengujian", "en": "Testing"},
     "ap.zone_decision": {"id": "Keputusan", "en": "Decision"},
-    "ap.rejection_note": {"id": "Pengajuan #{id} ditolak — **{note}**",
-                          "en": "Submission #{id} was rejected — **{note}**"},
+    "ap.rejection_note": {"id": "Pengajuan #{id} ditolak: **{note}**",
+                          "en": "Submission #{id} was rejected: **{note}**"},
 
 
     # ── Katalog: pipeline kontribusi & keadaannya ───────────────────────────────────────
@@ -3839,8 +3788,8 @@ CATALOG: dict[str, dict[str, str]] = {
 
     "ap.sec_declare_schema": {"id": "Kontrak dataset research pipeline ini",
                              "en": "Dataset contract for this research pipeline"},
-    "ap.help_declare_schema": {"id": "Paket ini berdiri sendiri, jadi platform tidak punya skema bawaan untuknya. Nyatakan kontraknya di sini — inilah yang dipakai memeriksa dataset yang Anda lampirkan.",
-                               "en": "This package stands alone, so the platform has no built-in schema for it. State its contract here — this is what checks the dataset you attach."},
+    "ap.help_declare_schema": {"id": "Paket ini berdiri sendiri, jadi platform tidak punya skema bawaan untuknya. Nyatakan kontraknya di sini. Inilah yang dipakai memeriksa dataset yang Anda lampirkan.",
+                               "en": "This package stands alone, so the platform has no built-in schema for it. State its contract here. This is what checks the dataset you attach."},
     "ap.lbl_label_column": {"id": "Kolom label",
                            "en": "Label column"},
     "ap.lbl_file_format": {"id": "Format berkas",

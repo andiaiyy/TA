@@ -187,12 +187,51 @@ def test_reduced_motion_turns_transitions_off():
     assert "transition: none !important" in block
 
 
+#: Satu-satunya kelompok selektor yang boleh memuat heksa: tombol HITAM.
+#: Dibaca dari konstanta temanya, bukan ditulis ulang di sini, supaya menambah
+#: satu tombol hitam tidak dapat diam-diam memperluas perkecualian ini tanpa
+#: alasannya ikut diperiksa oleh tes di bawahnya.
+HEX_SCOPES = tuple(f"st-key-{scope}" for scope in theme.DARK_BTN_SCOPES)
+
+
+def _rules(css: str) -> list[str]:
+    """Stylesheet dipotong menjadi aturan, supaya perkecualian dapat disisihkan
+    tanpa ikut menyisihkan tetangganya."""
+    return [bagian + "}" for bagian in css.split("}") if bagian.strip()]
+
+
 def test_hover_colours_are_theme_safe():
     """Warna sorot transparan/mengikuti tema — tidak ada heksa yang bisa
-    menjadi tak terbaca di salah satu tema."""
-    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", CSS), CSS
+    menjadi tak terbaca di salah satu tema.
+
+    Larangannya tetap berlaku untuk SELURUH stylesheet kecuali satu blok yang
+    dikecualikan secara tertulis. Yang membuat blok itu boleh bukan izin
+    khusus, melainkan sebab larangannya tidak berlaku di sana — dan itu yang
+    diperiksa tes berikutnya, bukan dianggap benar begitu saja.
+    """
+    lain = [r for r in _rules(CSS)
+            if not any(scope in r for scope in HEX_SCOPES)]
+
+    assert not re.search(r"#[0-9a-fA-F]{3,8}\b", "".join(lain)), lain
     assert theme.TINT_HOVER.startswith("rgba(")
     assert "var(--primary-color" in CSS
+
+
+def test_the_only_hard_colour_carries_its_own_contrast():
+    """Warna yang dipaku berbahaya karena kontrasnya bergantung pada latar yang
+    dapat berubah. Sebuah aturan yang menetapkan latar DAN teks sekaligus tidak
+    punya ketergantungan itu — kontrasnya miliknya sendiri.
+
+    Jadi setiap aturan yang memakai heksa wajib menetapkan keduanya. Menetapkan
+    salah satu saja mengembalikan persis bahaya yang dilarang."""
+    berheksa = [r for r in _rules(CSS)
+                if re.search(r"#[0-9a-fA-F]{3,8}\b", r)]
+
+    assert berheksa, "perkecualiannya hilang — perbarui tesnya, jangan diamkan"
+    for rule in berheksa:
+        assert any(scope in rule for scope in HEX_SCOPES), rule
+        assert "background-color:" in rule, rule
+        assert re.search(r"color:\s*#", rule), rule
 
 
 # ── the four cards ────────────────────────────────────────────────────────
@@ -581,22 +620,6 @@ def test_the_shortened_notes_are_actually_short(lang):
         assert _words(lookup(key, lang)) <= 22, (key, lang)
 
 
-def test_the_capability_line_is_a_phrase_not_a_sentence():
-    from ui.components.contribute_context import capability
-
-    for user in (None, {"username": "a", "role": "contributor",
-                        "status": "active"}):
-        what = capability(user)["what"]
-        # Batasnya dinaikkan dari 8 kata: baris pengunjung kini menyebut
-        # SPESIFIK apa yang dapat dilakukan ("membaca persyaratan", "memeriksa
-        # kecocokan dataset") dan batasnya ("mengunggah memerlukan akun").
-        # Frasa lama "menjalankan pemeriksaan" memang lebih pendek, tetapi
-        # ambigu — tidak jelas pemeriksaan apa. Yang tetap dijaga: bukan
-        # kalimat bertanya dan tanpa kata pengisi.
-        assert _words(what) <= 14, what
-        assert "?" not in what
-        for filler in ("Anda dapat", "silakan", "Perlu diketahui"):
-            assert filler not in what
 
 
 def test_the_upload_limit_note_still_states_the_limit():

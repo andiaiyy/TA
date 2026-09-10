@@ -444,7 +444,7 @@ def test_the_catalog_opens_by_default_with_every_algorithm(tmp_path):
     at = _run_page(tmp_path)
     from ui.i18n.core import lookup
 
-    assert lookup("re.btn_run", "id") in _button_labels(at)
+    assert lookup("re.btn_setup", "id") in _button_labels(at)
 
     chips = " ".join(m.value for m in at.markdown if "ids-cat-chips" in m.value)
     for entry in PIPELINE_REGISTRY.values():
@@ -526,7 +526,7 @@ def test_pressing_run_experiment_moves_to_the_execute_view(tmp_path):
     at = _run_page(tmp_path)
     from ui.i18n.core import lookup
 
-    label = lookup("re.btn_run", "id")
+    label = lookup("re.btn_setup", "id")
     next(b for b in at.button if b.label == label).click().run()
 
     assert at.exception is None or not at.exception
@@ -535,7 +535,10 @@ def test_pressing_run_experiment_moves_to_the_execute_view(tmp_path):
 
 def test_running_from_the_modal_carries_the_pipeline_into_the_execute_view(tmp_path):
     at = _run_page(tmp_path, {rx.CATALOG_DETAIL_KEY: "HIKARI2021"})
-    next(b for b in at.button if b.label == "Jalankan pipeline ini").click().run()
+    # Ditunjuk lewat KUNCInya. Beberapa tombol kini berbagi label yang sama,
+    # dan memilih berdasarkan label akan mengambil tombol blok katalog yang
+    # kebetulan tergambar lebih dulu, bukan tombol di dalam modal ini.
+    at.button(key="_catalog_run").click().run()
 
     state = at.session_state.filtered_state
     assert state.get(rx._VIEW_KEY) == rx.VIEW_EXECUTE
@@ -556,7 +559,7 @@ def test_a_running_experiment_is_never_hidden_behind_the_catalog(tmp_path):
 
     assert lookup("re.btn_catalog", "id") in labels
     # katalog TIDAK dirender
-    assert lookup("re.btn_run", "id") not in labels
+    assert lookup("re.btn_setup", "id") not in labels
 
     # Stage view tetap tercapai walau alur eksekusi berhenti di early-return.
     assert any(lookup("re.msg_exp_not_found", "id") in e.value

@@ -282,9 +282,15 @@ def test_picking_a_mode_still_grants_nothing():
 
 @pytest.mark.parametrize("lang", ["id", "en"])
 def test_the_mode_labels_stay_short_enough_for_the_sidebar(lang):
-    """Sidebar sempit; label yang panjang akan terpotong atau melipat."""
-    for key in ("mode.visitor_line", "ap.role_contributor",
-                "ap.role_research_admin"):
+    """Sidebar sempit; label yang panjang akan terpotong atau melipat.
+
+    Diperiksa pada kunci yang BENAR-BENAR dipakai pemilih mode
+    (`login._ROLE_LABEL_KEYS`). Dahulu tes ini menjaga `ap.role_*`, sepasang
+    kunci milik baris hak pengguna di halaman kontribusi yang tidak pernah
+    sampai ke sidebar; barisnya kini dicabut dan kuncinya ikut hilang.
+    """
+    for key in ("mode.visitor_line", "mode.contributor",
+                "mode.research_admin"):
         assert len(lookup(key, lang)) <= 32, (key, lang)
 
 

@@ -123,12 +123,17 @@ def test_the_page_mounts_the_panel_for_the_selected_research():
     assert "research_admin_panel.render(" in PAGE_SRC
 
 
-def test_the_panel_sits_between_the_read_only_facts_and_the_picker():
-    """Urutan membacanya: kenali dulu, baru ubah, baru jalankan."""
+def test_the_panel_sits_between_the_two_pickers():
+    """Urutan membacanya: pilih researchnya, baru ubah, baru pilih algoritma.
+
+    Dahulu batas atasnya adalah expander keterangan read-only. Keterangan itu
+    pindah ke modal detail, jadi batas atasnya kini pemilih researchnya sendiri
+    — yang memang menentukan research MANA yang dikelola panel ini.
+    """
     mount = PAGE_SRC.index("research_admin_panel.render(")
-    facts = PAGE_SRC.index('"Tentang Research Pipeline (Read-Only)"')
+    research = PAGE_SRC.index('t("re.lbl_pick_pipeline")')
     picker = PAGE_SRC.index('t("re.sec_algorithm")')
-    assert facts < mount < picker
+    assert research < mount < picker
 
 
 def test_the_page_never_calls_the_registry_writers_itself():

@@ -92,25 +92,22 @@ def test_the_number_is_bigger_than_the_label_and_not_touching_it():
 
 
 def test_both_pages_use_the_same_box():
-    """Baris ringkasan serupa di halaman lain memakai pola yang sama."""
+    """Satu penyaji untuk kotak angka, dan tidak ada gaya kedua.
+
+    Halaman kontribusi DAHULU juga menggambar kotak yang sama; ringkasannya
+    dicabut karena ia menerangkan platform alih-alih menuntun tindakan. Yang
+    dijaga sekarang: penyajinya tetap satu, dan halaman itu tidak menggambar
+    kotak angka dengan cara lain mana pun.
+    """
     run_src = (REPO_ROOT / "ui" / "views" / "run_experiment.py").read_text(
         encoding="utf-8")
     ctx_src = (REPO_ROOT / "ui" / "components" / "contribute_context.py").read_text(
         encoding="utf-8")
     assert "render_counts(" in run_src
-    assert "render_counts(" in ctx_src
-    # Tidak ada lagi gaya kedua untuk hal yang sama.
+    assert "render_counts(" not in ctx_src
     assert "st.metric(" not in ctx_src
 
 
-def test_the_platform_summary_still_reports_the_same_numbers():
-    """Nilainya tetap dari `platform_stats()`, bukan angka baru."""
-    from ui.components.contribute_context import platform_stats, render_platform_summary
-
-    stats = platform_stats()
-    block = _html(render_platform_summary)[0]
-    for key in ("research", "algorithms", "datasets"):
-        assert f'>{stats[key]}<' in block, (key, stats[key])
 
 
 # ── BAGIAN 2: adaptif ─────────────────────────────────────────────────────
@@ -331,7 +328,7 @@ def test_no_dialog_body_reads_files_or_the_database():
         "diagnose_all", "parse_dataset", "check_health", "glob", "iterdir",
         "read_text", "read_csv", "_all_dataset_options", "_diagnose_selected",
         "_build_artifact_files", "_list_dataset_files", "_dataset_preview",
-        "validate_dataset_for_ui", "_experiment_counts",
+        "validate_dataset_for_ui",
     }
 
     found: dict[str, list[str]] = {}
@@ -411,7 +408,6 @@ def test_short_lived_caches_declare_a_ttl():
 
     limits = {
         "_dataset_options_cached": 30,
-        "_experiment_counts": 60,
         "_cached_health": 30,
         "_dash_health": 30,
     }

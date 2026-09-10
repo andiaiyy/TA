@@ -78,6 +78,7 @@ from ui.components.instructions import (
     render_dataset_instructions, render_pipeline_instructions,
 )
 from orchestrator.submission_service import research_credit
+from ui.components import dialogs as dlg
 from ui.components import grid
 from ui.components import review_style as rp
 from ui.components import submission_review as sr
@@ -428,7 +429,7 @@ def _render_review_flow() -> None:
                 except Exception as e:
                     st.error(f"Gagal menyelesaikan: {e}")
                 else:
-                    st.success(f"#{item['id']} selesai — berkas masuk ke "
+                    st.success(f"#{item['id']} selesai. Berkas masuk ke "
                                f"storage/datasets/.")
                     st.rerun()
 
@@ -464,7 +465,7 @@ def _render_check_groups(entry: dict) -> None:
     for check in notable:
         icon = _STATUS_ICON.get(check["status"], "·")
         line = f" _(baris {check['line']})_" if check.get("line") else ""
-        st.markdown(f"- {icon} **{check['name']}** — {check_message(check)}{line}")
+        st.markdown(f"- {icon} **{check['name']}**: {check_message(check)}{line}")
 
 
 # ── Langkah UJI COBA (sebelum keputusan) ──────────────────────────────────
@@ -511,8 +512,8 @@ def _render_trial_compatibility(dataset_type: str, dataset_path: str) -> None:
     lines = []
     for check in checks:
         status = (check or {}).get("status") or ""
-        lines.append(f"- {mark.get(status, '·')} **{diagnostic_title(check)}** "
-                     f"— {diagnostic_message(check)}")
+        lines.append(f"- {mark.get(status, '·')} **{diagnostic_title(check)}**: "
+                     f"{diagnostic_message(check)}")
     st.markdown("\n".join(lines))
 
 
@@ -819,7 +820,7 @@ def _render_file_review(row: dict) -> None:
     if lines:
         st.markdown("Temuan ada di baris: "
                     + ", ".join(f"**{n}**" for n in lines)
-                    + " — nomornya tercetak di sisi kiri kode.")
+                    + ". Nomornya tercetak di sisi kiri kode.")
 
     # Kode dengan NOMOR BARIS, dalam wadah yang dapat digulir sehingga
     # berkas panjang tidak mendominasi layar.
@@ -946,7 +947,7 @@ def _render_submission_review_card(item: dict, user: dict,
         # periksa seluruh berkas tetap terbaca sekaligus lewat kolom berwarna,
         # yang justru tidak dapat dilakukan expander.
         files = sr.file_rows(item, reviewed)
-        st.markdown(f"**Berkas paket** — {len(files)}, "
+        st.markdown(f"**Berkas paket**: {len(files)}, "
                     f"{row['verdict_text']}.")
         _render_file_table(item, files)
 
@@ -1215,6 +1216,17 @@ def _render_upload_gate(kind: str) -> bool:
     if can_upload(user):
         return True
 
+    # DUA sebab, dan keduanya berbeda. Pengunjung perlu tahu jalan masuknya;
+    # akun yang sudah masuk tetapi belum disetujui justru tidak boleh disuruh
+    # masuk lagi — ia sudah di dalam, yang kurang adalah persetujuannya.
+    # Dahulu keduanya menerima kalimat "silakan masuk" yang sama, dan status
+    # menunggu itu hanya terbaca dari baris hak di panel pembuka yang kini
+    # sudah dicabut. Sekarang ia menempel pada kontrol yang mati, tempat
+    # pertanyaannya memang muncul.
+    if user:
+        st.info(t("ap.gate_pending"))
+        return False
+
     label = "dataset" if kind == "dataset" else "pipeline"
     render_login_prompt(
         f"Kontrol unggah dinonaktifkan sampai Anda masuk. Masuk sebagai "
@@ -1233,8 +1245,70 @@ def _render_pipeline_requirements() -> None:
 
     Isinya sama persis dengan sebelumnya (dan tetap dibaca dari konstanta
     validator), hanya disajikan padat; rinciannya ada di expander.
+
+    Sejak panduannya pindah ke modal, fungsi ini HANYA dipanggil dari badan
+    modal itu. Ia tetap ada sebagai satu titik masuk supaya isinya tidak perlu
+    disalin ke dua tempat yang bisa berbeda sendiri.
     """
     render_pipeline_instructions()
+
+
+def _pipeline_info_body() -> None:
+    """Isi modal panduan — seluruh keterangan halaman unggah pipeline.
+
+    Panduannya panjang dengan sendirinya: diagram alur, tabel kontrak, dua
+    daftar modul, kerangka kode, lima tab kontrak, daftar kesalahan umum, dan
+    persyaratan lengkap. Digambar inline, semuanya berdiri di ANTARA judul
+    halaman dan pengunggah berkasnya — pengunggah yang sudah tahu aturannya
+    harus menggulir melewati seluruhnya setiap kali, dan yang belum tahu tetap
+    membacanya dengan tergesa karena kontrol yang dicarinya ada di bawah sana.
+
+    Di dalam modal keduanya terlayani: halamannya menjadi tindakan, panduannya
+    menjadi rujukan yang dibuka saat dibutuhkan. Isinya TIDAK diringkas — yang
+    berpindah hanya tempatnya.
+    """
+    _render_pipeline_requirements()
+    # Catatan metadata ikut: ia menerangkan apa yang harus diisi formulir, dan
+    # itu panduan — bukan label bidang.
+    st.markdown(t("ap.note_metadata"))
+    if st.button(t("ap.btn_close_info"), key="contrib_info_close"):
+        _close_pipeline_info()
+
+
+# `st.dialog` HANYA ada di modul `st` — bukan pada DeltaGenerator hasil
+# st.columns(). Dekorasi sekali di tingkat modul, pola yang sama dengan
+# `_compat_dialog` di ui/views/run_experiment.py. Pada Streamlit lama yang
+# belum punya st.dialog, jalur cadangannya adalah st.expander.
+_HAS_ST_DIALOG = hasattr(st, "dialog")
+
+if _HAS_ST_DIALOG:
+    _pipeline_info_dialog = dlg.dialog_decorator(
+        t("ap.dlg_pipeline_info"), dlg.PIPELINE_INFO_KEY,
+        width="large")(_pipeline_info_body)
+else:  # pragma: no cover - hanya untuk Streamlit < 1.37
+    def _pipeline_info_dialog() -> None:
+        with st.expander(t("ap.dlg_pipeline_info"), expanded=True):
+            _pipeline_info_body()
+
+
+def _request_pipeline_info() -> None:
+    """Tombol HANYA menulis flag; modalnya dipanggil dari ALUR UTAMA script."""
+    dlg.open_dialog(dlg.PIPELINE_INFO_KEY)
+
+
+def _close_pipeline_info() -> None:
+    dlg.close_dialog(dlg.PIPELINE_INFO_KEY)
+    st.rerun()
+
+
+def _maybe_render_pipeline_info() -> None:
+    """Satu-satunya tempat fungsi ber-@st.dialog itu dipanggil.
+
+    Bukan dari dalam blok tombol, bukan dari dalam kolom — keduanya konteks
+    yang tidak sah untuk membuka dialog.
+    """
+    if dlg.is_open(dlg.PIPELINE_INFO_KEY):
+        _pipeline_info_dialog()
 
 
 # ── Jalur pipeline: laporan ───────────────────────────────────────────────
@@ -1246,14 +1320,14 @@ def _render_group(title: str, checks: list[dict]) -> None:
     for c in checks:
         icon = _STATUS_ICON.get(c["status"], "·")
         line = f" _(baris {c['line']})_" if c.get("line") else ""
-        st.markdown(f"- {icon} **{c['name']}** — {check_message(c)}{line}")
+        st.markdown(f"- {icon} **{c['name']}**: {check_message(c)}{line}")
 
 
 def _render_package_report(result: dict, form: dict) -> None:
     st.subheader(t("ap.sec_validation"))
     n_files = len(result["files"])
     if result["valid"]:
-        st.success(f"Valid — {n_files} berkas lolos, entry point "
+        st.success(f"Valid: {n_files} berkas lolos, entry point "
                    f"`{result['entry_points'][0]}`.")
     else:
         st.error(result["summary"])
@@ -1279,7 +1353,7 @@ def _render_package_report(result: dict, form: dict) -> None:
             if item["role"] == ROLE_SUPPORT:
                 st.caption(
                     "Berkas pendukung: kontrak pipeline tidak berlaku, aturan "
-                    "keamanan tetap penuh — berkas ini ikut dieksekusi saat "
+                    "keamanan tetap penuh. Berkas ini ikut dieksekusi saat "
                     "pipeline berjalan."
                 )
             _render_group(GROUP_STRUCTURE, item["groups"][GROUP_STRUCTURE])
@@ -1308,17 +1382,16 @@ def _render_trial_dataset_form() -> tuple[object, str]:
     )
 
     st.markdown(f"**{t('td.heading')}**")
-    # SATU baris keterangan: apa gunanya berkas ini, dan batasnya. Halaman
-    # ini berkuota teks kecil — memecahnya menjadi dua tidak menambah
-    # kejelasan, hanya menambah baris.
-    st.caption(t("td.intro") + " "
-               + t("td.limit_note",
-                   limit=human_size(MAX_TRIAL_DATASET_BYTES),
-                   formats=", ".join(DATASET_SUFFIXES)))
-
+    # Apa gunanya berkas ini dan batasnya menempel pada pengunggahnya, bukan
+    # berdiri sebagai baris tersendiri di atasnya: yang bertanya "berkas apa?"
+    # sedang menatap kontrol itu, dan di situlah jawabannya harus ada.
     picked = st.file_uploader(
         t("td.lbl_file"), type=[s.lstrip(".") for s in DATASET_SUFFIXES],
-        accept_multiple_files=False, key="contrib_trial_dataset")
+        accept_multiple_files=False, key="contrib_trial_dataset",
+        help=t("td.intro") + " "
+             + t("td.limit_note",
+                 limit=human_size(MAX_TRIAL_DATASET_BYTES),
+                 formats=", ".join(DATASET_SUFFIXES)))
     note = st.text_input(t("td.lbl_note"), key="contrib_trial_dataset_note",
                          placeholder=t("td.ph_note"))
     if picked is None:
@@ -1514,7 +1587,7 @@ def _render_info_completeness(result: dict) -> None:
         st.markdown(t("ap.info_incomplete", filename=entry["filename"],
                       have=len(present), total=len(present) + len(missing)))
         for key in missing:
-            st.markdown(f"- `{key}` — {t(_INFO_KEY_COST[key])}")
+            st.markdown(f"- `{key}`: {t(_INFO_KEY_COST[key])}")
     if missing_any:
         prose(t("ap.info_incomplete_note"), key="info_incomplete")
 
@@ -1527,7 +1600,7 @@ def _render_info_completeness(result: dict) -> None:
             continue
         st.markdown(t("ap.info_optional", filename=entry["filename"]))
         for key in absent:
-            st.markdown(f"- `{key}` — {t(_INFO_KEY_GAIN[key])}")
+            st.markdown(f"- `{key}`: {t(_INFO_KEY_GAIN[key])}")
 
 
 def _render_valid_followup(result: dict, form: dict) -> None:
@@ -1732,13 +1805,18 @@ def _render_detected_stages(box, uploaded_file) -> None:
 
 
 def _render_pipeline_flow() -> None:
-    st.subheader(t("ap.sec_upload_pipeline"))
-    _render_pipeline_requirements()
+    # Judul dan tombol panduan pada SATU baris: tombolnya menerangkan halaman
+    # ini, bukan bagian mana pun di bawahnya, jadi tempatnya di sebelah judul.
+    judul, aksi = st.columns([4, 1])
+    judul.subheader(t("ap.sec_upload_pipeline"))
+    if aksi.button(t("ap.btn_info"), key="contrib_info_pipeline",
+                   use_container_width=True):
+        _request_pipeline_info()
     st.divider()
 
-    # Lapis TAMPILAN: persyaratan di atas tetap terbaca siapa pun, tetapi
-    # kontrol unggahnya dimatikan bila belum berhak — supaya tidak ada tombol
-    # yang tampak aktif padahal aksinya pasti ditolak lapis aksi.
+    # Lapis TAMPILAN: panduannya tetap terbaca siapa pun lewat tombol di atas,
+    # tetapi kontrol unggahnya dimatikan bila belum berhak — supaya tidak ada
+    # tombol yang tampak aktif padahal aksinya pasti ditolak lapis aksi.
     may_upload = _render_upload_gate("pipeline")
 
     uploaded = st.file_uploader(
@@ -1767,10 +1845,12 @@ def _render_pipeline_flow() -> None:
             _render_detected_stages(box, f)
 
     st.divider()
-    st.markdown(t("ap.note_metadata"))
+    # `ap.note_metadata` dahulu berdiri di sini. Ia menerangkan apa yang harus
+    # diisi seluruh formulir di bawah — panduan, bukan label bidang — jadi ia
+    # ikut pindah ke modal Info bersama panduan lainnya.
     c1, c2 = st.columns(2)
     name = c1.text_input(t("ap.lbl_pipeline_name"), key="contrib_meta_name",
-                         placeholder="mis. Random Forest — HIKARI2021")
+                         placeholder="mis. Random Forest untuk HIKARI2021")
     # TIDAK ADA pertanyaan "ikut research pipeline mana". Paket yang diunggah
     # ADALAH sebuah research pipeline: ia membawa algoritmanya sendiri — boleh
     # lebih dari satu — dan kontrak datasetnya sendiri. Menanyakan induk kepada
@@ -1853,9 +1933,9 @@ def _render_pipeline_flow() -> None:
     # ditumpangi, dan platform tidak boleh mengarang satu dari nama berkas
     # maupun isinya.
     st.markdown(f"**{t('ap.sec_declare_schema')}**")
-    # `prose`, bukan `caption`: ini kalimat penjelasan setara bagian
-    # lain di halaman ini, dan kuota teks kecil per halaman = 3.
-    prose(t("ap.help_declare_schema"), key="declare_schema")
+    # Keterangannya menempel pada kolom label, bidang PERTAMA bagian ini:
+    # sebagai paragraf lepas ia berdiri di antara judul dan kontrolnya, dan
+    # harus dibaca lebih dulu oleh setiap orang yang sudah tahu isinya.
 
     # Nama kolom DIPILIH dari dataset yang dilampirkan, bukan diketik. Salah
     # ketik satu huruf membuat kontrak ini tidak cocok dengan datasetnya, dan
@@ -1871,7 +1951,7 @@ def _render_pipeline_flow() -> None:
     label_pick = d1.multiselect(
         t("ap.lbl_label_column"), known, max_selections=1,
         accept_new_options=True, key="contrib_schema_label",
-        placeholder="mis. attack")
+        placeholder="mis. attack", help=t("ap.help_declare_schema"))
     label_column = label_pick[0] if label_pick else ""
     file_format = d2.selectbox(
         t("ap.lbl_file_format"), ["csv", "ndjson"], index=0,
@@ -1886,10 +1966,10 @@ def _render_pipeline_flow() -> None:
     # research kontribusi hanya dapat menyebut format dan nama kolom — dan
     # dahulu MENGARANG sisanya dengan kalimat milik HIKARI2021. Seluruhnya
     # OPSIONAL: yang tidak diisi tidak ditampilkan, bukan diisi tanda hubung.
-    prose(t("ap.help_dataset_facts"), key="dataset_facts")
     f1, f2 = st.columns(2)
     row_unit = f1.text_input(t("ap.lbl_row_unit"), key="contrib_schema_rowunit",
-                             placeholder=t("ap.ph_row_unit"))
+                             placeholder=t("ap.ph_row_unit"),
+                             help=t("ap.help_dataset_facts"))
     label_meaning = f2.text_input(
         t("ap.lbl_label_meaning"), key="contrib_schema_labelmeaning",
         placeholder=t("ap.ph_label_meaning"))
@@ -1912,10 +1992,10 @@ def _render_pipeline_flow() -> None:
     # HANYA mengisi kunci yang kode pipelinenya tidak menyebutkan: kode selalu
     # menang (lihat `dynamic_registry.merge_info`).
     st.markdown(f"**{t('ap.sec_method_notes')}**")
-    prose(t("ap.help_method_notes"), key="method_notes")
     m1, m2 = st.columns(2)
     info_app = m1.text_input(t("ap.lbl_info_app"), key="contrib_info_app",
-                             placeholder=t("ap.ph_info_app"))
+                             placeholder=t("ap.ph_info_app"),
+                             help=t("ap.help_method_notes"))
     info_metrics = m2.text_input(t("ap.lbl_info_metrics"),
                                  key="contrib_info_metrics",
                                  placeholder=t("ap.ph_info_metrics"))
@@ -2030,7 +2110,7 @@ def _render_pipeline_flow() -> None:
                         st.write(f"Gagal membaca `{f.name}`: {e}")
                 # Validasi statis seluruh paket (tidak menjalankan apa pun).
                 result = review_package(files, descriptions)
-                status.update(label=f"Selesai — {result['summary']}",
+                status.update(label=f"Selesai: {result['summary']}",
                               state="complete", expanded=False)
             progress.empty()
             st.session_state[_RESULT_KEY] = result
@@ -2040,6 +2120,10 @@ def _render_pipeline_flow() -> None:
     if result:
         st.divider()
         _render_package_report(result, st.session_state.get(_FORM_KEY) or form)
+
+    # Modal panduan digambar TERAKHIR, dari alur utama script — sesudah seluruh
+    # kolom dan container di atas selesai.
+    _maybe_render_pipeline_info()
 
 
 # ── Jalur dataset ─────────────────────────────────────────────────────────
@@ -2183,14 +2267,63 @@ def _render_dataset_requirements_overview() -> None:
 
     Panel persyaratan lengkap milik halaman Run Experiment dipakai apa adanya
     di dalam expander, jadi halaman itu tidak terpengaruh sama sekali.
+
+    Sejak panduannya pindah ke modal, hanya badan modal itu yang memanggilnya.
     """
     render_dataset_instructions()
 
 
-def _render_dataset_flow() -> None:
-    st.subheader(t("ap.sec_add_dataset"))
+def _dataset_info_body() -> None:
+    """Isi modal panduan halaman Tambah Dataset.
+
+    PEMILIH research ikut masuk ke sini, dan itu disengaja. Tugasnya semata
+    memilih *persyaratan siapa yang sedang dibaca* — ia tidak menentukan apa
+    pun tentang berkas yang diunggah, karena berkas itu diperiksa terhadap
+    seluruh research, bukan terhadap satu yang dipilih. Meninggalkannya di
+    halaman berarti menyisakan kontrol yang tampak menentukan sesuatu padahal
+    tidak mengubah apa-apa di halaman itu.
+
+    Mengganti pilihan memicu rerun; modalnya tetap terbuka karena flagnya masih
+    hidup, jadi persyaratan research lain dapat dibaca tanpa menutup apa pun.
+    """
     st.markdown(t("ap.note_checked_against_all"))
     _render_dataset_requirements_overview()
+    if st.button(t("ap.btn_close_info"), key="contrib_info_dataset_close"):
+        _close_dataset_info()
+
+
+if _HAS_ST_DIALOG:
+    _dataset_info_dialog = dlg.dialog_decorator(
+        t("ap.dlg_dataset_info"), dlg.DATASET_INFO_KEY,
+        width="large")(_dataset_info_body)
+else:  # pragma: no cover - hanya untuk Streamlit < 1.37
+    def _dataset_info_dialog() -> None:
+        with st.expander(t("ap.dlg_dataset_info"), expanded=True):
+            _dataset_info_body()
+
+
+def _request_dataset_info() -> None:
+    dlg.open_dialog(dlg.DATASET_INFO_KEY)
+
+
+def _close_dataset_info() -> None:
+    dlg.close_dialog(dlg.DATASET_INFO_KEY)
+    st.rerun()
+
+
+def _maybe_render_dataset_info() -> None:
+    """Dipanggil dari ALUR UTAMA script, bukan dari dalam tab atau tombol."""
+    if dlg.is_open(dlg.DATASET_INFO_KEY):
+        _dataset_info_dialog()
+
+
+def _render_dataset_flow() -> None:
+    # Judul dan tombol panduan sebaris, sama seperti jalur pipeline.
+    judul, aksi = st.columns([4, 1])
+    judul.subheader(t("ap.sec_add_dataset"))
+    if aksi.button(t("ap.btn_info"), key="contrib_info_dataset",
+                   use_container_width=True):
+        _request_dataset_info()
 
     st.divider()
     tab_upload, tab_server = st.tabs(["Unggah berkas", "Daftarkan dari server"])
@@ -2198,6 +2331,8 @@ def _render_dataset_flow() -> None:
         _render_dataset_upload_tab()
     with tab_server:
         _render_dataset_server_tab()
+
+    _maybe_render_dataset_info()
 
 
 def _render_dataset_upload_tab() -> None:
@@ -2225,7 +2360,7 @@ def _render_dataset_upload_tab() -> None:
     if size > MAX_DATASET_UPLOAD_BYTES:
         st.error(f"Berkas terlalu besar ({format_size(size)}, batas "
                  f"{limit_gb:.0f} GB). Salin berkas ke `storage/datasets/` di "
-                 f"server, lalu pakai tab **Daftarkan dari server** — tanpa "
+                 f"server, lalu pakai tab **Daftarkan dari server**, tanpa "
                  f"batas ukuran dan tanpa penyalinan.")
         return
 
@@ -2352,7 +2487,7 @@ def _sample_note(profile: dict) -> str:
     """Catatan wajib bahwa angka berasal dari sampel, bukan seluruh berkas."""
     n = f"{profile.get('rows_read', 0):,}"
     if profile.get("sampled"):
-        return (f"Angka di atas dari {n} baris pertama — berkas tidak dimuat "
+        return (f"Angka di atas dari {n} baris pertama. Berkas tidak dimuat "
                 f"seluruhnya.")
     return f"Berdasarkan seluruh {n} baris berkas ini."
 
@@ -2491,7 +2626,7 @@ def _render_compatibility(diag: dict) -> None:
         with st.container(border=True):
             st.markdown(get_research_short_label(dtype))
             verdict = _verdict(result)
-            headline = f"{_VERDICT_LABEL[verdict]} — {_cause_sentence(diag, dtype, result)}"
+            headline = f"{_VERDICT_LABEL[verdict]}: {_cause_sentence(diag, dtype, result)}"
 
             if result.get("compatible"):
                 st.success(headline)

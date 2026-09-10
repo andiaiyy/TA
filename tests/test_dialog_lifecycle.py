@@ -47,6 +47,7 @@ def test_every_dialog_flag_is_registered():
     assert set(dlg.DIALOG_KEYS) == {
         dlg.DETAIL_KEY, dlg.COMPARE_KEY, dlg.COMPAT_KEY,
         dlg.CATALOG_DETAIL_KEY, dlg.CATALOG_RUN_KEY, dlg.AUTH_KEY,
+        dlg.PIPELINE_INFO_KEY, dlg.DATASET_INFO_KEY, dlg.RUN_INFO_KEY,
     }
     assert len(set(dlg.DIALOG_KEYS)) == len(dlg.DIALOG_KEYS)
 
@@ -168,7 +169,10 @@ def test_the_auth_dialog_keeps_its_own_on_dismiss():
 def test_no_flag_is_set_outside_a_button_block():
     """Flag yang di-set sebagai efek samping render membuat modal tidak pernah
     bisa ditutup — diperiksa lewat rantai induk tiap pemanggilan."""
-    for src in (VIEW_SRC, RUN_SRC):
+    contrib = REPO_ROOT / "ui" / "views" / "contribute.py"
+    # `contribute.py` DAHULU tidak ikut dipindai, sehingga dua pembuka modalnya
+    # tidak pernah diperiksa oleh aturan ini. Celah itu ditutup di sini.
+    for src in (VIEW_SRC, RUN_SRC, contrib):
         tree = ast.parse(src.read_text(encoding="utf-8"))
         parents = {}
         for node in ast.walk(tree):

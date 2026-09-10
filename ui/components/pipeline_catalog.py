@@ -1256,8 +1256,8 @@ def render_catalog(catalog=None, *, on_detail=None,
 
             # Dua kolom berukuran SAMA -> kedua tombol selebar & setinggi sama,
             # sejajar pada satu garis dasar; lebar tetapnya dikunci di CSS.
-            cols = st.columns([1, 1, 3])
-            if cols[0].button(t("re.btn_run_short"), type="primary",
+            cols = st.columns([2, 2, 3])
+            if cols[0].button(t("re.btn_setup"), type="primary",
                               key=f"cat_run_{group['dataset_type']}",
                               use_container_width=True,
                               help=t("re.help_find_dataset")):

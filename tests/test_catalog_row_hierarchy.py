@@ -210,8 +210,12 @@ def test_the_algorithm_chips_are_unchanged():
 def test_the_two_buttons_stay_uniform_and_side_by_side():
     body = CATALOG_SRC.split("def render_catalog(")[1].split("\ndef ")[0]
     assert body.count(".button(") == 2
-    assert 'st.columns([1, 1, 3])' in body        # dua kolom aksi berukuran sama
-    assert 't("re.btn_run_short"), type="primary"' in body
+    # Dua kolom aksi berukuran SAMA. Yang dijaga kesamaannya, bukan angkanya:
+    # lebarnya dinaikkan agar "Siapkan Eksperimen" muat satu baris.
+    rasio = body.split("st.columns([")[1].split("])")[0]
+    bagian = [b.strip() for b in rasio.split(",")]
+    assert bagian[0] == bagian[1], rasio
+    assert 't("re.btn_setup"), type="primary"' in body
     assert 'type="tertiary"' in body              # aksi sekunder lebih tenang
 
     css = theme.stylesheet()
@@ -308,7 +312,13 @@ def test_the_catalog_view_renders_for_every_identity(tmp_path, who):
     labels = [b.label for b in at.button]
     groups = pc.build_catalog()
     # Label datang dari kamus; bahasa bawaan adalah Indonesia.
-    assert labels.count(lookup("re.btn_run_short", "id")) == len(groups)
+    #
+    # Dihitung lewat KUNCI, bukan label: sejak tombol penyiapan di ATAS katalog
+    # memakai kalimat yang sama, menghitung label akan selalu kelebihan satu
+    # dan tes ini berhenti mengatakan "satu tombol per blok".
+    per_blok = [b for b in at.button if str(b.key or "").startswith("cat_run_")]
+    assert len(per_blok) == len(groups)
+    assert all(b.label == lookup("re.btn_setup", "id") for b in per_blok)
     assert labels.count(lookup("re.btn_detail", "id")) == len(groups)
 
 
@@ -337,7 +347,7 @@ def test_the_buttons_still_drive_the_same_callbacks(tmp_path):
     from ui.i18n.core import lookup
 
     # Label tombol kini datang dari kamus; bahasa bawaan Indonesia.
-    fired = {"label": lookup("re.btn_run_short", "id")}
+    fired = {"label": lookup("re.btn_setup", "id")}
 
     with patch.object(pc.st, "container", lambda **kw: _Ctx()), \
          patch.object(pc.st, "markdown", lambda *a, **k: None), \

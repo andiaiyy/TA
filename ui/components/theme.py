@@ -18,6 +18,14 @@ Isinya empat hal:
 atau mengikuti ``currentColor``/``var(--primary-color)`` — tidak ada nilai heksa
 yang bisa menjadi tak terbaca saat pengguna berpindah tema terang/gelap.
 
+Ada SATU perkecualian, dan ia disengaja: tombol "Info" halaman kontribusi —
+satu aturan yang melayani jalur unggah pipeline maupun tambah dataset. Alasan
+aturan di atas adalah warna yang dipaku dapat kehilangan kontras terhadap latar
+yang berubah; tombol itu menetapkan latar DAN teksnya sekaligus (hitam/putih)
+plus tepi semi-transparan, sehingga kontrasnya milik tombol itu sendiri dan
+tidak bergantung pada latar halaman. Perkecualian ini tidak boleh menjadi
+preseden untuk warna heksa lepas.
+
 **Menghormati pengurangan gerak.** Seluruh transisi dimatikan pada
 ``prefers-reduced-motion: reduce``.
 """
@@ -55,8 +63,41 @@ GAP_SECTION = "2rem"
 GAP_IN_BLOCK = "0.75rem"        # antar elemen di dalam satu blok penelitian
 GAP_BETWEEN_BLOCKS = "2.75rem"  # antar blok penelitian
 
-# Lebar tetap tombol aksi katalog — seragam di semua blok.
-CATALOG_BTN_W = "9.5rem"
+# Lebar tetap tombol aksi katalog — seragam di semua blok. Cukup untuk
+# "Siapkan Eksperimen" dalam SATU baris: label yang membungkus membuat tombol
+# ini lebih tinggi daripada "Detail" di sebelahnya, dan barisnya terlihat
+# miring justru pada aksi utamanya.
+CATALOG_BTN_W = "12rem"
+
+# ── Tombol HITAM ─────────────────────────────────────────────────────────
+# Awalan kunci widget yang digambar hitam. SATU daftar, satu aturan: dua
+# tempat yang harus diingat untuk diubah bersama pasti berbeda sendiri suatu
+# saat. Isinya dua kelompok, dan keduanya membawa janji yang sama — "ini akan
+# membuka sesuatu", bukan "ini akan mengeksekusi sesuatu":
+#
+#   contrib_info_  tombol panduan halaman kontribusi
+#   cat_run_       "Siapkan Eksperimen" pada tiap blok katalog
+#   _catalog_run   "Siapkan Eksperimen" di dalam modal detail
+#   _run_go        "Siapkan Eksperimen" di atas katalog
+#   run_info       tombol detail di judul halaman Run Experiment
+#
+# Tombol yang BENAR-BENAR menjalankan eksperimen sengaja TIDAK ada di sini:
+# ia tetap merah, karena warnanya ikut memberi tahu bahwa yang berikutnya
+# terjadi memakan waktu dan menulis hasil.
+DARK_BTN_SCOPES = ("contrib_info_", "cat_run_", "_catalog_run", "_run_go",
+                   "run_info")
+
+
+def _dark_btn_selector(akhiran: str) -> str:
+    """Selektor gabungan untuk seluruh cakupan tombol hitam."""
+    return ",\n".join(f'[class*="st-key-{scope}"] .stButton > button{akhiran}'
+                      for scope in DARK_BTN_SCOPES)
+
+
+DARK_BTN_BASE = _dark_btn_selector("")
+DARK_BTN_HOVER = (_dark_btn_selector(":not(:disabled):hover") + ",\n"
+                  + _dark_btn_selector(":not(:disabled):focus-visible"))
+DARK_BTN_CHILD = _dark_btn_selector(" *")
 
 # Lebar maksimum satu kartu katalog. Pada layar lebar, kartu yang membentang
 # sampai tepi membuat barisnya terlalu panjang untuk dibaca nyaman.
@@ -767,6 +808,37 @@ h3 {{ font-size: {FONT_SECTION}; font-weight: {WEIGHT_STRONG}; }}
 [class*="st-key-mp_active_"] .stButton > button {{
     min-height: 2.3rem;
     white-space: normal;
+}}
+
+/* ── Tombol "Info" halaman kontribusi ──────────────────────────────────
+   SATU aturan untuk KEDUA halaman (unggah pipeline & tambah dataset). Keduanya
+   memakai kunci berawalan `contrib_info_`, jadi gayanya tidak dapat berbeda
+   sendiri di satu halaman — kesalahan yang pasti terjadi bila ada dua aturan
+   kembar yang harus diingat untuk diubah bersama.
+
+   Satu-satunya warna PADAT di berkas ini, dan perkecualiannya disengaja:
+   tombol ini membawa seluruh panduan halaman, jadi ia harus terbaca sebagai
+   satu-satunya benda gelap di sana — bukan tombol kelima yang serupa
+   tetangganya.
+
+   Aturan "tidak ada heksa" berlaku karena warna yang dipaku dapat menjadi tak
+   terbaca saat pengguna berpindah tema. Pasangan di bawah tidak bisa: latar
+   dan teksnya DITETAPKAN BERSAMA, sehingga kontrasnya milik tombol itu sendiri
+   dan tidak bergantung pada latar halaman. Tepi tipis semi-transparan menjaga
+   batasnya tetap terlihat di tema gelap, tempat hitam bertemu hitam. */
+{DARK_BTN_BASE} {{
+    background-color: #111418;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, .28);
+}}
+{DARK_BTN_HOVER} {{
+    background-color: #000000;
+    color: #ffffff;
+    border-color: rgba(255, 255, 255, .55);
+}}
+/* Label anak (Streamlit membungkus teks tombol dalam <p>) ikut mewarisi. */
+{DARK_BTN_CHILD} {{
+    color: inherit;
 }}
 
 /* ── Diff versi: baris ditambah / dihapus ──────────────────────────────

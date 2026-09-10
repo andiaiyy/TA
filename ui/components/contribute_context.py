@@ -1,22 +1,22 @@
 """
-Konteks halaman "Add Pipeline & Dataset" — menjawab pertanyaan pengguna
-SEBELUM ia mencoba: saya sedang menambah ke ekosistem seperti apa, saya boleh
-apa, dan apa yang terjadi setelah saya mengunggah.
+Konteks halaman "Add Pipeline & Dataset": satu pertanyaan yang memang diajukan
+sebelum mengunggah, dan jawabannya hanya bila diketuk.
 
-Prinsip modul ini sama dengan ``ui/components/instructions.py``:
+Dahulu halaman ini dibuka tiga angka ringkas (jumlah research pipeline,
+algoritma, dataset) dan satu baris hak pengguna. Keduanya sudah dicabut.
+Angka-angka itu menerangkan platform, bukan menuntun tindakan, dan berdiri
+tepat di antara pengguna dan pilihan jalur yang ia datangi; barisnya hak
+mengulangi apa yang sudah dikatakan kontrol yang hidup atau mati di hadapannya.
 
-* **Tidak ada angka tetap.** Jumlah research pipeline & algoritma dihitung dari
-  ``config/pipeline_registry``; jumlah dataset dari isi ``storage/datasets/``
-  lewat mekanisme yang SAMA dengan halaman Run Experiment; jumlah pengajuan dari
-  tabel pengajuan. Menambah entri registry atau menaruh berkas baru langsung
-  mengubah tampilan tanpa menyentuh berkas ini.
-* **Hak akses dibaca, bukan disimpulkan ulang.** Baris "Anda boleh apa" memanggil
-  ``can_upload``/``can_approve`` yang sama dengan yang ditegakkan lapis aksi —
-  modul ini tidak pernah menilai peran sendiri, jadi tampilan tidak mungkin
-  menyimpang dari izin sebenarnya.
-* **Kesalahan umum diturunkan dari pemeriksaan NYATA.** Butir-butirnya merujuk
-  nama check yang benar-benar ada di validator (``_CAUSE_PRIORITY``) dan di
-  diagnosa dataset (``_CHECK_TITLES``); tidak ada yang dikarang.
+Yang tersisa dua, dan keduanya menjawab sesuatu yang tidak dijawab tempat lain:
+
+* **Ajakan masuk bagi pengunjung.** Tanpa ini halamannya menampilkan sederet
+  kontrol mati tanpa keterangan apa pun mengapa.
+* **Alur pasca-unggah, di dalam dropdown.** Dua jalur dengan dua aturan yang
+  BERBEDA: dataset (DATA) tersimpan langsung, pipeline (KODE yang akan
+  dieksekusi) menunggu tinjauan Research Admin. Kalimat lama menyamakan
+  keduanya, sehingga pengunggah dataset menunggu sesuatu yang tidak pernah
+  datang.
 """
 from __future__ import annotations
 
@@ -55,149 +55,26 @@ def after_upload_flow_display():
                                            AFTER_UPLOAD_FLOW_KEYS)]
 
 
-# ── Ringkasan keadaan platform ────────────────────────────────────────────
+# ── Ajakan masuk ──────────────────────────────────────────────────
 
-def platform_stats() -> dict:
-    """Angka keadaan platform, DIHITUNG saat dipanggil.
+def render_sign_in_invite(user: dict | None) -> None:
+    """Ajakan masuk, HANYA bagi pengunjung.
 
-    ``research``   — banyak research pipeline (dataset_type berbeda di registry)
-    ``algorithms`` — banyak algoritma yang dapat dijalankan, dijumlahkan per
-                     research pipeline (dedup nama algoritma di dalam satu
-                     research pipeline, sama seperti daftar pilihan di
-                     halaman Run Experiment)
-    ``datasets``   — banyak berkas dataset di ``storage/datasets/``, dibaca
-                     lewat mekanisme yang sama dengan halaman Run Experiment
-    ``contributed``— banyak pipeline hasil kontribusi yang sudah terdaftar
+    Dahulu fungsi ini juga menggambar satu baris status ("Kontributor, boleh
+    mengajukan pipeline & dataset"). Baris itu dicabut: pengguna yang sudah
+    masuk melihat haknya dari kontrol yang hidup atau mati di hadapannya, dan
+    kalimat yang mengulanginya hanya menunda ia sampai ke kontrol itu.
+
+    Ajakan masuknya TIDAK ikut dicabut. Bagi pengunjung, tanpa kalimat ini
+    halamannya menampilkan sederet kontrol mati tanpa satu pun keterangan
+    mengapa — dan "kenapa saya tidak bisa menekan apa pun" adalah pertanyaan
+    yang harus dijawab sebelum ia ditanyakan.
     """
-    stats = {"research": 0, "algorithms": 0, "datasets": 0, "contributed": 0}
-
-    try:
-        from config.pipeline_registry import list_all_pipelines
-        registry = list_all_pipelines()
-        per_research: dict[str, set] = {}
-        for info in registry.values():
-            dtype = info.get("dataset_type")
-            if not dtype:
-                continue
-            algo = info.get("algorithm") or info.get("name")
-            per_research.setdefault(dtype, set())
-            if algo:
-                per_research[dtype].add(algo)
-        stats["research"] = len(per_research)
-        stats["algorithms"] = sum(len(a) for a in per_research.values())
-    except Exception:                       # pragma: no cover - defensif
-        logger.debug("Registry tidak terbaca untuk ringkasan platform", exc_info=True)
-
-    try:
-        from ui.views.run_experiment import _all_dataset_options
-        stats["datasets"] = len(_all_dataset_options())
-    except Exception:                       # pragma: no cover - defensif
-        logger.debug("Folder dataset tidak terbaca", exc_info=True)
-
-    try:
-        from orchestrator.dynamic_registry import list_registered
-        stats["contributed"] = len(list_registered(active_only=True))
-    except Exception:                       # pragma: no cover - defensif
-        logger.debug("Registry dinamis tidak terbaca", exc_info=True)
-
-    return stats
-
-
-def render_platform_summary() -> None:
-    """Tiga angka ringkas, dalam KOTAK yang sama dengan halaman Run Experiment.
-
-    Sebelumnya bagian ini memakai `st.metric` berjajar sementara halaman lain
-    memakai kotak sel angka — dua gaya untuk hal yang sama. Sekarang keduanya
-    memakai penyaji yang sama, jadi tampilannya tidak mungkin berbeda.
-    """
-    from ui.components.sections import render_counts
-
-    stats = platform_stats()
-    render_counts([
-        ("research pipeline", stats["research"],
-         (f"{stats['contributed']} pipeline hasil kontribusi sudah aktif di "
-          f"registry." if stats["contributed"] else
-          "Research pipeline yang terdaftar di registry.")),
-        ("algoritma", stats["algorithms"],
-         "Dijumlahkan per research pipeline."),
-        ("dataset", stats["datasets"],
-         "Berkas dataset di storage/datasets/."),
-    ])
-
-
-# ── Status & hak pengguna ─────────────────────────────────────────────────
-
-def capability(user: dict | None) -> dict:
-    """Status pengguna + apa yang boleh dilakukannya.
-
-    ``{"label", "what", "may_upload", "may_review"}``. Kedua boolean DIBACA dari
-    ``can_upload``/``can_approve`` — helper yang sama dengan yang ditegakkan
-    lapis aksi — dan kalimatnya dipilih dari boolean itu, bukan dari peran.
-    Jadi tampilan ini tidak mungkin menjanjikan hak yang sebenarnya ditolak.
-    """
-    from orchestrator.auth_service import can_approve, can_upload
-
-    may_upload, may_review = bool(can_upload(user)), bool(can_approve(user))
-
-    # Frasa, bukan kalimat — apa yang boleh dilakukan, tanpa kata pengisi.
-    from ui.i18n import t
-
-    if not user:
-        label = t("ap.cap_visitor_label")
-        # Disebut spesifik: OBJEK yang dapat dibaca dan diperiksa,
-        # plus batasnya. Sesuai perilaku nyata — `can_upload(None)`
-        # False, sedangkan diagnosa kecocokan dataset berada sebelum
-        # gerbang izin sehingga pengunjung benar-benar dapat
-        # menjalankannya.
-        what = t("ap.cap_visitor_what")
-    else:
-        label = role_display(user.get("role")) or t("ap.cap_user_fallback")
-        if may_review:
-            what = t("ap.cap_may_review")
-        elif may_upload:
-            what = t("ap.cap_may_upload")
-        else:
-            what = t("ap.cap_pending")
-
-    return {"label": label, "what": what,
-            "may_upload": may_upload, "may_review": may_review}
-
-
-#: Peran tersimpan → kunci label tampilan. Nilai perannya sendiri
-#: (`contributor`, `research_admin`) TIDAK berbahasa dan tidak diubah.
-ROLE_LABEL_KEYS = {
-    "contributor": "ap.role_contributor",
-    "research_admin": "ap.role_research_admin",
-}
-
-
-def role_display(role: str | None) -> str:
-    """Nama peran pada bahasa aktif.
-
-    Peran yang belum punya kunci jatuh kembali ke label lama, bukan ke teks
-    kosong — peran baru tetap terbaca meski belum diterjemahkan.
-    """
-    from database.models import normalize_role, role_label
-    from ui.i18n import t
-
-    key = ROLE_LABEL_KEYS.get(normalize_role(role))
-    return t(key) if key else role_label(role)
-
-
-def render_capability(user: dict | None) -> None:
-    """Satu baris status + ajakan masuk bila memang relevan."""
     from ui.views.login import render_login_prompt
 
     from ui.i18n import t
 
-    cap = capability(user)
-    _status = f"**{cap['label']}** — {cap['what']}"
-    if user and not cap["may_upload"]:
-        _status += " " + t("ap.cap_pending_readable")
-    st.markdown(_status)
     if not user:
-        # Keterangan WAJIB "kenapa aksi tak tersedia" — diringkas sependek
-        # mungkin; penunjuk jalur masuknya ditambahkan render_login_prompt.
         render_login_prompt(t("ap.cap_login_prompt"))
 
 
@@ -309,16 +186,18 @@ def render_related_pages() -> None:
 # ── Panel konteks (dipakai di tampilan awal halaman) ──────────────────────
 
 def render_page_context(user: dict | None) -> None:
-    """Konteks platform → status & hak pengguna → alur pasca-unggah.
+    """Ajakan masuk bila perlu, lalu satu dropdown alur pasca-unggah.
 
-    Urutan ini sengaja mendahului pilihan jalur: pengguna tahu lebih dulu ia
-    menambah ke ekosistem seperti apa dan ia boleh apa, sebelum memilih.
+    Dahulu halaman ini dibuka tiga angka ringkas dan satu baris hak pengguna,
+    keduanya sebelum pilihan jalurnya. Angka-angka itu menerangkan platform,
+    bukan menuntun tindakan, dan berdiri tepat di antara pengguna dan pilihan
+    yang ia datangi. Yang tersisa sekarang menjawab satu pertanyaan yang memang
+    diajukan sebelum mengunggah, dan hanya bila ia diketuk.
     """
     inject_css()
-    render_platform_summary()
-    render_capability(user)
+    render_sign_in_invite(user)
     with st.expander(t("ctx.after_upload_q"), expanded=False):
         render_after_upload(user)
-    # Kaitan ke halaman lain tetap di tampilan utama: satu baris, dan justru
-    # inilah alasan seseorang mengunggah.
-    render_related_pages()
+        # Kaitan ke halaman lain ikut MASUK ke sini: ia menjawab pertanyaan
+        # yang sama — apa yang terjadi sesudah berkasnya diterima.
+        render_related_pages()

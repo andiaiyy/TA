@@ -44,10 +44,11 @@ def test_no_control_shares_a_row_with_its_summary_block():
 def test_each_summary_follows_its_control_in_source_order():
     """Urutan sumber = urutan tampil: kontrol dulu, ringkasannya menyusul."""
     pairs = [
-        ('t("re.lbl_pick_dataset")', "render_facts(_dataset_facts("),
-        # Penanda khas baris angka milik Pipeline Selection — `render_counts(`
-        # sendiri juga dipakai pada keadaan "belum ada dataset terpilih".
-        ('t("re.lbl_pick_pipeline")', '("algoritma", len(algo_to_pid),'),
+        # Pemilih dataset dan pemilih research pipeline TIDAK lagi punya
+        # ringkasan menyusul: baris ringkasan berkas dan baris tiga angkanya
+        # dicabut, keduanya melaporkan keadaan alih-alih menuntun langkah
+        # berikutnya. Yang tersisa adalah ringkasan PIPELINE, yang memang
+        # menerangkan apa yang akan dijalankan.
         ("selected = algo_to_pid.get(algorithm)", "render_facts(_pipeline_facts("),
     ]
     for control, summary in pairs:
@@ -68,7 +69,11 @@ def test_the_summary_stays_short_by_splitting_into_columns_inside_itself():
     """Vertikal TIDAK boleh berarti panjang: pasangan label-nilai dibagi ke
     beberapa kolom DI DALAM blok ringkasannya sendiri."""
     assert "_FACT_COLUMNS = 2" in EXECUTE_BODY
-    assert EXECUTE_BODY.count("columns=_FACT_COLUMNS") >= 2
+    # Satu konstanta bersama, dan setiap blok ringkasan memakainya. Dahulu ada
+    # dua blok; ringkasan dataset dicabut, jadi yang tersisa satu.
+    assert EXECUTE_BODY.count("render_facts(") >= 1
+    assert (EXECUTE_BODY.count("columns=_FACT_COLUMNS")
+            == EXECUTE_BODY.count("render_facts(_pipeline_facts("))
 
     from unittest.mock import patch as _patch
 
@@ -92,36 +97,8 @@ def test_the_execute_section_stacks_status_above_the_action():
 
 # ── (b) informasi yang dinaikkan berasal dari data NYATA ──────────────────
 
-def test_dataset_facts_come_from_validation_and_diagnosis():
-    """Tidak ada nilai tetap: semuanya dibaca dari dua sumber yang sudah ada."""
-    from ui.views.run_experiment import _dataset_facts
-
-    validation = {"row_count": 1234, "column_count": 88,
-                  "unique_labels": ["Benign", "Malicious"]}
-    diagnosis = {"profile": {"detected_format": "csv", "label_column": "Label",
-                             "column_count": 88},
-                 "results": {"HIKARI2021": {"compatible": True}},
-                 "compatible_types": ["HIKARI2021"]}
-
-    facts = dict(_dataset_facts("HIKARI2021", __file__, validation, diagnosis))
-    assert facts["Format"] == "csv"
-    assert facts["Baris"] == "1,234"
-    assert facts["Kolom"] == 88
-    assert facts["Kolom label"] == "Label"
-    assert facts["Kelas"] == 2
-    assert "HIKARI" in str(facts["Cocok untuk"])
 
 
-def test_dataset_facts_never_invent_a_value():
-    """Sumber kosong -> pasangan kosong, bukan angka karangan."""
-    from ui.views.run_experiment import _dataset_facts
-
-    facts = dict(_dataset_facts("", __file__, {}, {}))
-    assert facts["Format"] == ""
-    assert facts["Baris"] == ""
-    assert facts["Cocok untuk"] == "belum ada"
-    # Penyaji membuang pasangan kosong, jadi tidak ada baris "—" pengisi ruang.
-    assert "Kelas" in facts
 
 
 def test_pipeline_facts_come_from_get_info():
@@ -153,9 +130,9 @@ def test_only_a_few_locked_params_are_lifted_out_of_the_expander():
     facts = _pipeline_facts(pid, info)
     lifted = [k for k, _ in facts if k in fixed]
     assert len(lifted) <= 3, lifted
-    # Daftar lengkapnya masih dirender di expander.
-    assert 'st.expander("Pipeline Detail (Read-Only)")' in RUN_SRC
-    assert 'st.json(info["fixed_params"])' in RUN_SRC
+    # Daftar lengkapnya masih dirender, kini di tab Algoritma modal detail.
+    algo = RUN_SRC.split("def _detail_algorithm(")[1].split(chr(10) + "def ")[0]
+    assert 'st.json(info["fixed_params"])' in algo
 
 
 def test_the_selected_run_mode_is_shown_next_to_the_algorithm():
@@ -197,29 +174,8 @@ def test_the_compact_panel_changes_shape_only():
 
 # ── (c) ringkasan keadaan DIHITUNG ────────────────────────────────────────
 
-def test_the_counts_row_is_computed_not_hardcoded():
-    from ui.views.run_experiment import _experiment_counts
-
-    counts = _experiment_counts()
-    assert isinstance(counts, dict)
-    # Dihitung dari basis data nyata; nilainya bilangan bulat non-negatif.
-    assert all(isinstance(v, int) and v >= 0 for v in counts.values())
-
-    tree = ast.parse(RUN_SRC)
-    fn = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)
-              and n.name == "_experiment_counts")
-    called = {getattr(c.func, "id", None) or getattr(c.func, "attr", None)
-              for c in ast.walk(fn) if isinstance(c, ast.Call)}
-    assert "list_all_experiments" in called
 
 
-def test_the_counts_row_uses_real_sources_for_every_number():
-    """Tiga angka, tiga sumber nyata — tidak ada yang ditulis tangan."""
-    block = EXECUTE_BODY.split("render_counts([")[2].split("])")[0]
-    assert "len(_ds_options)" in block            # isi storage/datasets/
-    assert "len(algo_to_pid)" in block            # registry pipeline kompatibel
-    assert "_counts.get(pid, 0)" in block         # basis data eksperimen
-    assert not re.search(r"\(\s*\"[^\"]+\"\s*,\s*\d+\s*\)", block), block
 
 
 def test_no_result_metric_is_shown_on_this_page():
@@ -290,13 +246,21 @@ def test_mandatory_notes_survive_the_relayout():
     assert login.SIGN_IN_HINT
 
 
-def test_the_detail_expanders_were_not_emptied():
-    """JANGAN memindahkan SELURUH isi expander ke tampilan utama."""
-    for expander in ('st.expander(t("re.dlg_dataset_detail")',
-                     'st.expander("Tentang Research Pipeline (Read-Only)"',
-                     'st.expander("Pipeline Detail (Read-Only)")',
-                     'st.expander("Pipeline Config Viewer'):
-        assert expander in RUN_SRC, expander
+def test_the_detail_panels_were_not_emptied():
+    """Keempat keterangan pindah ke tab modal, dan TIDAK boleh menyusut jadi
+    cangkang kosong dalam perjalanannya.
+
+    Dahulu tes ini menjaga agar isinya tidak dipindah ke tampilan utama.
+    Sekarang arahnya terbalik — isinya memang keluar dari halaman — jadi yang
+    dijaga adalah isinya benar-benar sampai di tempat barunya.
+    """
+    for nama, penanda in (
+            ("_detail_dataset", "_dataset_preview("),
+            ("_detail_research", "research_about_groups("),
+            ("_detail_algorithm", 'st.json(info["fixed_params"])'),
+            ("_detail_files", "render_file_browser(")):
+        badan = RUN_SRC.split(f"def {nama}(")[1].split(chr(10) + "def ")[0]
+        assert penanda in badan, nama
 
 
 # ── AppTest: tiga status pengguna × tiga kondisi dataset ──────────────────
@@ -360,8 +324,19 @@ def test_the_page_renders_for_every_identity_and_dataset_state(tmp_path, who,
 
 @pytest.mark.parametrize("kondisi", ["belum dipilih", "tidak cocok"])
 def test_the_summary_column_is_filled_in_every_state(tmp_path, kondisi):
-    """Kolom kanan tidak pernah kosong — itulah yang membuat halaman terasa
-    berisi."""
+    """Setiap keadaan menawarkan sesuatu; tidak ada layar yang berhenti diam.
+
+    Yang MENGISI berbeda per keadaan, dan bedanya disengaja. Belum ada dataset
+    dipilih: baris angka keadaan folder, supaya terlihat ada berapa berkas untuk
+    dipilih. Dataset terpilih tetapi tidak cocok dengan research pipeline mana
+    pun: kotak per research beserta tombol uji kecocokannya, yang menawarkan
+    TINDAKAN alih-alih laporan.
+
+    Dahulu keadaan kedua juga menampilkan baris ringkasan berkas (format,
+    ukuran, baris, kolom). Baris itu dicabut: ia melaporkan keadaan berkas
+    tanpa menuntun langkah berikutnya, dan pada keadaan "tidak cocok" langkah
+    berikutnya justru sudah ada tepat di bawahnya.
+    """
     from streamlit.testing.v1 import AppTest
 
     preset = {"_current_page": "Run Experiment", "_run_view": "execute"}
@@ -375,6 +350,13 @@ def test_the_summary_column_is_filled_in_every_state(tmp_path, kondisi):
     at.run()
     assert at.exception is None or not at.exception
 
-    blocks = [e.proto.body for e in at.get("html")]
-    filled = [b for b in blocks if "ids-facts" in b or "ids-counts" in b]
-    assert filled, (kondisi, blocks[:2])
+    if kondisi == "belum dipilih":
+        blocks = [e.proto.body for e in at.get("html")]
+        assert [b for b in blocks if "ids-counts" in b], blocks[:2]
+    else:
+        # Peringatan "tidak ada yang cocok otomatis" plus satu kotak per
+        # research pipeline. Inilah tawaran halaman pada keadaan itu.
+        from ui.i18n.core import lookup
+        peringatan = " ".join(w.value for w in at.warning)
+        assert lookup("re.msg_no_auto_match", "id") in peringatan, peringatan
+        assert at.button, "tidak ada tombol uji kecocokan"

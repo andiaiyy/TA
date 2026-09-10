@@ -640,7 +640,7 @@ def common_dataset_mistakes(limit: int = 5) -> list[str]:
     # Judulnya lewat lapisan tampilan diagnosa, supaya satu pemeriksaan
     # bernama sama di panduan dan di hasil diagnosa.
     return [f"**{diagnostic_title({'key': key, 'title': _CHECK_TITLES[key]})}**"
-            f" — {t(hint_key)}"
+            f": {t(hint_key)}"
             for key, hint_key in hints.items() if key in _CHECK_TITLES][:limit]
 
 
@@ -696,7 +696,7 @@ def dataset_contract_rows(dataset_type: str) -> list[tuple[str, str]]:
     if req:
         return [
             (t("ins.dsrow_format"),
-             f"{exts} — {dataset_requirement_text(dataset_type, 'row_unit')}"),
+             f"{exts}, {dataset_requirement_text(dataset_type, 'row_unit')}"),
             (t("ins.dsrow_label_column"), label_meaning),
             (t("ins.dsrow_feature_nature"),
              dataset_requirement_text(dataset_type, "summary_line")),
@@ -711,9 +711,9 @@ def dataset_contract_rows(dataset_type: str) -> list[tuple[str, str]]:
     facts = declared_dataset_facts(dataset_type)
     row_unit = str(facts.get("row_unit") or "").strip()
     arti = str(facts.get("label_meaning") or "").strip()
-    rows = [(t("ins.dsrow_format"), f"{exts} — {row_unit}" if row_unit else exts),
+    rows = [(t("ins.dsrow_format"), f"{exts}, {row_unit}" if row_unit else exts),
             (t("ins.dsrow_label_column"),
-             f"`{label_col}` — {arti}" if arti else label_meaning)]
+             f"`{label_col}`: {arti}" if arti else label_meaning)]
     if facts.get("feature_nature"):
         rows.append((t("ins.dsrow_feature_nature"),
                      str(facts["feature_nature"])))

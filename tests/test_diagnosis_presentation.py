@@ -16,7 +16,7 @@ from contracts.dataset_schemas import supported_datasets
 from orchestrator.dataset_diagnostics import sanitize_display_value
 from ui.views.run_experiment import (
     VERDICT_NEAR, VERDICT_NO, VERDICT_OK, _ACTION_HINTS, _action_sentence,
-    _any_compatible, _cause_sentence, _compatible_names, _primary_failure,
+    _any_compatible, _cause_sentence, _primary_failure,
     _requirement_summary, _sorted_results, _verdict,
 )
 
@@ -174,10 +174,6 @@ def test_any_compatible_is_false_on_a_failed_diagnosis():
     assert _any_compatible({"error": "boom", "results": {}, "compatible_types": []}) is False
 
 
-def test_compatible_names_are_display_names_not_raw_types():
-    diag = {"compatible_types": ["HIKARI2021"]}
-    names = _compatible_names(diag)
-    assert names and names[0] != "HIKARI2021"     # resolved to the research label
 
 
 # ── the box summary line is schema-derived, one per research pipeline ─────
