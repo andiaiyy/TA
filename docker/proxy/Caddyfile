@@ -1,0 +1,51 @@
+# Reverse proxy TLS untuk platform IDS.
+#
+# Streamlit berbicara HTTP polos. Tanpa lapisan ini, sandi melintas jaringan
+# apa adanya — termasuk sandi Research Admin, yang memegang persetujuan kode
+# yang akan dieksekusi platform.
+#
+# Dua cara memakainya:
+#
+#   1. Jaringan lab (bawaan berkas ini). `tls internal` membuat Caddy
+#      menerbitkan sertifikat dari CA-nya sendiri. Peramban akan memperingatkan
+#      sekali sampai CA itu dipercaya; pasang dari:
+#          docker compose --profile proxy exec proxy \
+#              cat /data/caddy/pki/authorities/local/root.crt
+#
+#   2. Domain publik. Ganti `:443` dengan nama domainnya dan HAPUS baris
+#      `tls internal`: Caddy akan mengurus sertifikat Let's Encrypt sendiri.
+#          ids.contoh.ac.id {
+#              reverse_proxy ui:8501
+#          }
+
+:443 {
+	tls internal
+
+	# Streamlit memakai WebSocket untuk seluruh interaksinya. `reverse_proxy`
+	# Caddy meneruskan upgrade itu tanpa konfigurasi tambahan; menuliskannya
+	# di sini supaya jelas bahwa ia memang diandalkan, bukan kebetulan.
+	reverse_proxy ui:8501
+
+	# Unggahan dataset dibatasi 5 GB di Streamlit (maxUploadSize). Batas di
+	# sini dibuat SAMA supaya penolakan datang dari aplikasi, dengan pesan
+	# yang dapat dibaca orang, bukan dari proxy dengan 413 tanpa keterangan.
+	request_body {
+		max_size 5GB
+	}
+
+	encode gzip
+
+	header {
+		# HSTS hanya masuk akal setelah sertifikatnya tepercaya; dibiarkan
+		# mati untuk pemasangan lab dengan CA internal.
+		# Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "same-origin"
+	}
+}
+
+# HTTP dialihkan ke HTTPS, bukan dilayani.
+:80 {
+	redir https://{host}{uri} permanent
+}

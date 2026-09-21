@@ -1,0 +1,1082 @@
+"""
+Registry dinamis — FASE 4.
+
+Pipeline yang sudah DISETUJUI dapat dimuat dan dijalankan tanpa mengubah kode
+registry. Mekanisme ini **menambah**, tidak menggantikan:
+``config/pipeline_registry.py`` tetap satu-satunya sumber sepuluh pipeline
+bawaan, dan berkas itu tidak pernah disentuh dari sini.
+
+Tiga pengaman yang dijaga modul ini:
+
+A. **Pipeline bawaan tidak dapat ditimpa.** Pipeline terunggah selalu berada di
+   namespace ``uploaded.<nama>@v<N>``; saat menggabungkan, entri statis SELALU
+   menang bila (secara teoretis) ada tabrakan ID.
+
+B. **Immutable & berversi.** Menyetujui nama yang sama sekali lagi membuat
+   ``version = max+1`` dengan berkas terpisah. Berkas/record versi lama tidak
+   pernah ditimpa, sehingga eksperimen lama tetap menunjuk kode yang identik.
+
+C. **Ketertelusuran.** Setiap entri menyimpan SHA-256 berkas entry point.
+   Hash DIVERIFIKASI ULANG setiap kali kelas dimuat — termasuk di sisi worker,
+   karena worker memakai jalur pemuatan yang sama (``execute_pipeline`` →
+   ``get_pipeline_instance_merged``). Berkas yang berubah/rusak ditolak.
+
+⚠️ Pemuatan memakai ``importlib.util.spec_from_file_location`` untuk BERKAS
+SPESIFIK. Folder unggahan TIDAK PERNAH ditambahkan ke ``sys.path``, sehingga
+berkas di sana tidak dapat membajak nama modul platform. Hanya pipeline
+berstatus approved & active yang pernah dimuat — tidak ada jalan untuk memuat
+pengajuan yang belum disetujui.
+"""
+from __future__ import annotations
+
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import logging
+import sys
+from pathlib import Path
+
+from database.db import _retry_on_locked, get_connection
+from database.models import UPLOADED_PREFIX
+from utils.timestamps import now_iso
+from orchestrator.user_errors import UserFacingMixin
+
+logger = logging.getLogger(__name__)
+
+_HASH_CHUNK = 1024 * 1024
+
+
+class DynamicRegistryError(UserFacingMixin, RuntimeError):
+    """Pipeline terunggah tidak dapat dimuat (hash, berkas, atau kontrak)."""
+
+
+# ── Identitas & versi ─────────────────────────────────────────────────────
+
+def safe_pipeline_name(raw: str) -> str:
+    """Nama pipeline yang aman untuk dipakai sebagai bagian ID."""
+    cleaned = "".join(ch if ch.isalnum() or ch in "_-" else "_"
+                      for ch in (raw or "").strip().lower())
+    cleaned = cleaned.strip("_-")
+    if not cleaned:
+        raise DynamicRegistryError("Nama pipeline tidak sah.",
+                                   key="err.bad_pipeline_name")
+    return cleaned[:60]
+
+
+def build_pipeline_id(name: str, version: int) -> str:
+    """``uploaded.<nama>@v<N>`` — versi menjadi BAGIAN dari ID, sehingga
+    eksperimen lama selamanya menunjuk versi yang dipakainya."""
+    return f"{UPLOADED_PREFIX}{name}@v{version}"
+
+
+def next_version(name: str, db_path: str | None = None) -> int:
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute(
+            "SELECT MAX(version) FROM registered_pipelines WHERE name = ?",
+            (name,)).fetchone()
+        return int(row[0] or 0) + 1
+    finally:
+        conn.close()
+
+
+# ── Query ─────────────────────────────────────────────────────────────────
+
+def list_registered(*, active_only: bool = False,
+                    db_path: str | None = None) -> list[dict]:
+    sql = "SELECT * FROM registered_pipelines"
+    if active_only:
+        sql += " WHERE active = 1"
+    sql += " ORDER BY name, version"
+    conn = get_connection(db_path)
+    try:
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+    finally:
+        conn.close()
+
+
+def get_registered(pipeline_id: str, db_path: str | None = None) -> dict | None:
+    conn = get_connection(db_path)
+    try:
+        row = conn.execute("SELECT * FROM registered_pipelines WHERE pipeline_id = ?",
+                           (pipeline_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+# ── Pendaftaran & penonaktifan ────────────────────────────────────────────
+
+def file_sha256(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(_HASH_CHUNK), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def package_manifest(folder: Path) -> dict[str, str]:
+    """``{nama berkas: sha256}`` SELURUH berkas .py di folder paket ini.
+
+    Dihitung dari berkas yang benar-benar ada saat pendaftaran, bukan disalin
+    dari catatan lain: versi baru lahir dari berkas yang berbeda, dan hash yang
+    disalin akan menjamin sesuatu yang tidak pernah diperiksa.
+
+    Fungsi MURNI terhadap basis data; ia hanya membaca disk.
+    """
+    keluar: dict[str, str] = {}
+    try:
+        for path in sorted(folder.glob("*.py")):
+            keluar[path.name] = file_sha256(path)
+    except OSError:                          # pragma: no cover - defensif
+        logger.warning("Manifes paket %s tidak terbaca", folder, exc_info=True)
+        return {}
+    return keluar
+
+
+@_retry_on_locked()
+def register_pipeline(*, name: str, dataset_type: str, entry_class: str,
+                      entry_file: str | Path, registered_by: str,
+                      submission_id: int | None = None, algorithm: str | None = None,
+                      paper: str | None = None, edited_by: str | None = None,
+                      edited_at: str | None = None, change_note: str | None = None,
+                      stages: list | None = None,
+                      info_extra: dict | None = None,
+                      db_path: str | None = None) -> dict:
+    """Daftarkan satu VERSI BARU pipeline terunggah.
+
+    Tidak pernah menimpa: versi dihitung dari maksimum yang sudah ada + 1, dan
+    (name, version) unik di level skema. Hash berkas dihitung SAAT INI dan
+    disimpan sebagai patokan verifikasi saat dimuat nanti.
+
+    ``edited_by``/``edited_at``/``change_note`` hanya terisi bila versi ini
+    lahir dari PENYUNTINGAN Research Admin. Versi 1 lahir dari persetujuan,
+    jadi ketiganya kosong di sana — itu fakta, bukan data yang hilang.
+
+    ``stages`` adalah label fase progres yang dibaca STATIS dari panggilan
+    `_emit_progress()` pada kode paketnya. Pipeline bawaan menyimpannya di
+    `config/pipeline_registry.py`; yang terunggah tidak punya tempat itu, dan
+    tanpa ini bar progresnya berjalan tanpa nama fase padahal pipelinenya SUDAH
+    memancarkan fase itu. Kosong berarti paketnya memang tidak memanggil
+    `_emit_progress` — keadaan yang sah.
+
+    POTRET ``get_info()`` diambil DI SINI, sekali, dan disimpan bersama
+    barisnya. Ia menjadi satu-satunya sumber keterangan bagi katalog dan
+    halaman riwayat, sehingga keduanya tidak perlu memuat kode kontribusi hanya
+    untuk menjelaskannya. Diambil di sini — bukan dititipkan pemanggil — karena
+    setiap versi baru lahir dari berkas yang berbeda: menyunting kode tanpa
+    memotret ulang akan menyimpan keterangan versi lama pada versi baru.
+    """
+    safe_name = safe_pipeline_name(name)
+    entry_path = Path(entry_file)
+    if not entry_path.is_file():
+        raise DynamicRegistryError(
+            f"Berkas entry point tidak ditemukan: {entry_path}",
+            key="err.entry_file_missing", values={"path": str(entry_path)})
+
+    version = next_version(safe_name, db_path)
+    pipeline_id = build_pipeline_id(safe_name, version)
+    digest = file_sha256(entry_path)
+    # Dihitung SEKALI, dipakai dua kali: memotret `get_info()` (yang terjadi
+    # sebelum barisnya ada) dan disimpan bersama barisnya.
+    manifest = package_manifest(entry_path.parent)
+    # Potret diambil SEBELUM INSERT karena namanya ikut dibaca dari sini.
+    # `get_info()["algorithm"]` adalah nama yang ditulis penulis pipeline-nya
+    # sendiri; tanpa ini, pemanggil yang tidak menyodorkan nama mendaftarkan
+    # pipeline dengan nama KELAS Python-nya ("AuditSinglePipeline"), padahal
+    # jawaban yang benar sedang dipegang di baris yang sama.
+    potret = merge_info(
+        _snapshot_info(entry_path, entry_class, digest, manifest), info_extra)
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute(
+            """INSERT INTO registered_pipelines
+               (pipeline_id, name, version, submission_id, dataset_type,
+                entry_class, entry_file, file_hash, algorithm, paper,
+                registered_by, registered_at, active,
+                edited_by, edited_at, change_note, stages_json, info_json,
+                package_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?)""",
+            (pipeline_id, safe_name, version, submission_id, dataset_type,
+             entry_class, str(entry_path), digest,
+             (algorithm or (potret or {}).get("algorithm")
+              or entry_class), paper,
+             registered_by, now_iso(), edited_by, edited_at, change_note,
+             json.dumps(list(stages)) if stages else None,
+             _dumped_info(potret),
+             # Sidik jari SELURUH berkas paket, termasuk pendukungnya. Tanpa
+             # ini, folder VERSI tidak punya catatan hash apa pun untuk berkas
+             # pendukung, dan pemuatnya menolak mengimpornya: versi baru paket
+             # multi-berkas gagal dijalankan meski tersimpan dan tampil "ok".
+             json.dumps(manifest, ensure_ascii=False)),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("Pipeline terunggah didaftarkan: %s (kelas %s, hash %s…)",
+                pipeline_id, entry_class, digest[:12])
+    return get_registered(pipeline_id, db_path)
+
+
+def _declared_notes_of(submission_id, db_path: str | None = None) -> dict:
+    """Keterangan metode dari FORMULIR pengajuan sebuah baris registry.
+
+    Potret meratakan kunci yang ditulis kode dengan kunci yang diketik
+    pengunggah, sehingga potret itu sendiri tidak dapat ditanya "yang mana
+    milik siapa". Yang dapat ditanya adalah ``submissions.metadata_json``:
+    jawaban formulirnya tersimpan di sana apa adanya, dan ia catatan sejarah —
+    tidak pernah ditulis ulang. Itulah provenansi yang membuat potret dapat
+    diambil ulang tanpa menghapus keterangan yang tidak berasal dari kode.
+
+    Tanpa pengajuan (baris uji, baris lama) -> {}.
+    """
+    if not submission_id:
+        return {}
+    from orchestrator.submission_service import info_extra_of
+
+    try:
+        with get_connection(db_path) as conn:
+            row = conn.execute(
+                "SELECT metadata_json FROM submissions WHERE id = ?",
+                (submission_id,)).fetchone()
+        metadata = json.loads((row["metadata_json"] if row else "") or "{}")
+    except Exception:                        # pragma: no cover - defensif
+        logger.warning("Metadata pengajuan #%s tidak terbaca", submission_id,
+                       exc_info=True)
+        return {}
+    return info_extra_of(metadata if isinstance(metadata, dict) else {})
+
+
+@_retry_on_locked()
+def refresh_info(pipeline_id: str, *, actor: dict | None,
+                 db_path: str | None = None) -> dict:
+    """Ambil ULANG potret ``get_info()`` sebuah pipeline terdaftar.
+
+    Dibutuhkan HANYA oleh baris yang terdaftar sebelum kolom potretnya ada.
+    Baris seperti itu tidak dapat menjelaskan dirinya — katalog menampilkannya
+    tanpa hyperparameter maupun langkah preprocessing — dan satu-satunya cara
+    jujur mengisinya adalah memuat kodenya sekali lagi, SENGAJA, atas perintah
+    Research Admin. Bukan diam-diam saat halaman digambar: itu mengembalikan
+    persis biaya yang dihapus, tepat pada baris yang paling lama.
+
+    Hash tetap diverifikasi seperti biasa; berkas yang berubah ditolak sebelum
+    kodenya dieksekusi. Hanya Research Admin.
+
+    Memotret ulang TIDAK BOLEH menghapus keterangan yang bukan berasal dari
+    kode. Untuk research kontribusi keterangan itu memang tidak ada di sini —
+    ia tinggal di baris research dan ditumpuk saat tampil. Untuk paket yang
+    MENUMPANG jenis bawaan tidak ada baris research yang memilikinya, jadi
+    keterangannya diterapkan kembali dari pengajuannya, persis seperti saat
+    pendaftaran. Tanpa itu tombol ini menghapus jawaban formulir kontributor
+    tanpa cara mengembalikannya selain mengajukan ulang paketnya.
+    """
+    from database.models import is_uploaded_research
+    from orchestrator.auth_service import require_approve   # hindari impor siklik
+
+    require_approve(actor, db_path)
+    item = get_registered(pipeline_id, db_path)
+    if item is None:
+        raise DynamicRegistryError(
+            f"Pipeline terdaftar tidak ditemukan: {pipeline_id}",
+            key="err.pipeline_not_registered",
+            values={"pipeline": pipeline_id})
+
+    # Potret diperiksa SENDIRI: berkas yang berubah harus tetap ditolak walau
+    # pengajuannya membawa keterangan formulir. Tanpa pemeriksaan terpisah,
+    # keterangan itu akan mengisi potret yang gagal dan kegagalannya lolos.
+    potret = _snapshot_info(Path(item["entry_file"]), item["entry_class"],
+                            item["file_hash"])
+    if potret is None:
+        raise DynamicRegistryError(
+            f"Keterangan {pipeline_id} tidak dapat dibaca dari berkasnya.",
+            key="err.info_snapshot_failed",
+            values={"pipeline": pipeline_id})
+
+    ekstra = {} if is_uploaded_research(item["dataset_type"]) else \
+        _declared_notes_of(item.get("submission_id"), db_path)
+    dumped = _dumped_info(merge_info(potret, ekstra))
+    if dumped is None:
+        raise DynamicRegistryError(
+            f"Keterangan {pipeline_id} tidak dapat dibaca dari berkasnya.",
+            key="err.info_snapshot_failed",
+            values={"pipeline": pipeline_id})
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute("UPDATE registered_pipelines SET info_json = ? "
+                     "WHERE pipeline_id = ?", (dumped, pipeline_id))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("Potret get_info() %s diperbarui oleh %s", pipeline_id,
+                (actor or {}).get("username"))
+    return get_registered(pipeline_id, db_path)
+
+
+@_retry_on_locked()
+def set_pipeline_active(pipeline_id: str, active: bool, *, actor: dict | None,
+                        db_path: str | None = None) -> dict:
+    """Aktifkan/nonaktifkan pipeline terunggah. Hanya Research Admin.
+
+    Menonaktifkan TIDAK menghapus record maupun berkas: eksperimen lama yang
+    memakainya tetap tercatat lengkap dengan versi & hash-nya.
+    """
+    from orchestrator.auth_service import require_approve   # hindari impor siklik
+
+    require_approve(actor, db_path)
+    item = get_registered(pipeline_id, db_path)
+    if item is None:
+        raise DynamicRegistryError(
+            f"Pipeline terdaftar tidak ditemukan: {pipeline_id}",
+            key="err.pipeline_not_registered",
+            values={"pipeline": pipeline_id})
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute("UPDATE registered_pipelines SET active = ? WHERE pipeline_id = ?",
+                     (1 if active else 0, pipeline_id))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("Pipeline %s di-%s oleh %s", pipeline_id,
+                "aktifkan" if active else "nonaktifkan", (actor or {}).get("username"))
+    return get_registered(pipeline_id, db_path)
+
+
+# ── Research pipeline sebagai SATU kesatuan ───────────────────────────────
+#
+# Sebuah research pipeline terunggah memuat beberapa algoritma; tiap algoritma
+# adalah satu baris `registered_pipelines` dengan `dataset_type` yang sama.
+# Sampai di sini, satu-satunya kendali yang ada bekerja per baris — padahal
+# yang paling sering dimaksud adalah "matikan research pipeline ini", dan
+# melakukannya satu per satu berarti keadaan setengah jalan setiap kali ada
+# yang terlewat.
+
+
+def research_algorithms(dataset_type: str,
+                        db_path: str | None = None) -> list[dict]:
+    """Seluruh algoritma sebuah research pipeline — aktif maupun tidak.
+
+    Diurutkan seperti `list_registered`: nama lalu versi, sehingga daftarnya
+    stabil antar penggambaran.
+    """
+    wanted = str(dataset_type or "")
+    if not wanted:
+        return []
+    return [row for row in list_registered(db_path=db_path)
+            if row.get("dataset_type") == wanted]
+
+
+def research_active_count(dataset_type: str,
+                          db_path: str | None = None) -> tuple[int, int]:
+    """(berapa yang aktif, berapa seluruhnya) pada satu research pipeline."""
+    rows = research_algorithms(dataset_type, db_path)
+    return sum(1 for r in rows if r.get("active")), len(rows)
+
+
+def set_research_active(dataset_type: str, active: bool, *, actor: dict | None,
+                        db_path: str | None = None) -> list[dict]:
+    """Aktifkan/nonaktifkan SELURUH algoritma satu research pipeline.
+
+    Hanya Research Admin, dan hanya research pipeline TERUNGGAH: keluarga
+    bawaan (`hikari2021.*`, `eve_cbr.*`) adalah pembanding tetap skripsi ini —
+    kodenya tidak disunting dan ketersediaannya tidak dimatikan dari sini.
+
+    Satu transaksi: kalau salah satu baris gagal ditulis, tidak ada satu pun
+    yang berubah. Keadaan setengah jalan — sebagian algoritma hidup, sebagian
+    mati, tanpa ada yang menghendakinya — justru yang paling membingungkan.
+    """
+    from database.models import is_uploaded_research
+    from orchestrator.auth_service import require_approve   # hindari impor siklik
+
+    require_approve(actor, db_path)
+    if not is_uploaded_research(dataset_type):
+        raise DynamicRegistryError(
+            f"Research pipeline bawaan tidak dapat diubah dari sini: "
+            f"{dataset_type}",
+            key="err.research_builtin_readonly",
+            values={"research": str(dataset_type)})
+
+    rows = research_algorithms(dataset_type, db_path)
+    if not rows:
+        raise DynamicRegistryError(
+            f"Research pipeline tidak ditemukan: {dataset_type}",
+            key="err.research_not_found",
+            values={"research": str(dataset_type)})
+
+    conn = get_connection(db_path)
+    try:
+        conn.execute("UPDATE registered_pipelines SET active = ? "
+                     "WHERE dataset_type = ?",
+                     (1 if active else 0, dataset_type))
+        conn.commit()
+    finally:
+        conn.close()
+    logger.info("Research pipeline %s di-%s (%s algoritma) oleh %s",
+                dataset_type, "aktifkan" if active else "nonaktifkan",
+                len(rows), (actor or {}).get("username"))
+    return research_algorithms(dataset_type, db_path)
+
+
+def last_active_algorithm_blocker(pipeline_id: str,
+                                  db_path: str | None = None) -> str:
+    """Alasan algoritma ini tidak boleh dinonaktifkan sendirian; "" bila boleh.
+
+    Mematikan algoritma terakhir yang masih hidup membuat research pipeline-nya
+    lenyap dari halaman Jalankan Eksperimen tanpa pernah dikatakan "research
+    pipeline ini dimatikan". Yang dimaksud pada keadaan itu hampir selalu
+    "matikan seluruhnya" — jadi itulah yang ditawarkan, bukan hasil yang sama
+    yang dicapai diam-diam.
+    """
+    row = get_registered(pipeline_id, db_path)
+    if row is None:
+        return "err.pipeline_not_registered"
+    if not row.get("active"):
+        return ""                                  # sudah nonaktif
+    live, _total = research_active_count(row.get("dataset_type"), db_path)
+    return "mp.blocked_last_algorithm" if live <= 1 else ""
+
+
+# ── Pemuatan kelas (dengan verifikasi hash) ───────────────────────────────
+
+class _VerifiedSourceLoader(importlib.machinery.SourceFileLoader):
+    """Pemuat yang TIDAK PERNAH memakai bytecode tersimpan.
+
+    Sebuah `.pyc` dianggap sah bila **detik** mtime dan **ukuran** sumbernya
+    cocok. Berkas yang ditulis ulang dalam detik yang sama dengan ukuran yang
+    sama — dua versi sebuah pipeline yang hanya berbeda beberapa huruf — lolos
+    pemeriksaan itu, sehingga yang DIJALANKAN adalah bytecode lama sementara
+    hash yang baru saja diverifikasi adalah isi yang baru.
+
+    Itu membatalkan justru apa yang dijaga pemeriksaan hash: bahwa kode yang
+    berjalan adalah kode yang diperiksa. Di sini kode selalu disusun dari byte
+    yang sama dengan yang dihitung hash-nya — dan tidak ada `.pyc` yang ditulis
+    ke dalam folder unggahan.
+    """
+
+    def get_code(self, fullname):
+        return self.source_to_code(self.get_data(self.path), self.path)
+
+
+# ── Berkas PENDUKUNG sepaket ──────────────────────────────────────────────
+#
+# Sebuah pengajuan boleh membawa beberapa berkas: satu titik masuk ditambah
+# berkas pendukung. Jalur unggah menerimanya, validator memeriksa seluruhnya,
+# dan kartu peninjauan menampilkannya. Tetapi titik masuk yang menulis
+# ``import common_prep`` GAGAL dimuat — paketnya tidak pernah menjadi tempat
+# pencarian impor — sehingga paket seperti itu tidak dapat lolos gerbang uji
+# coba, karena itu tidak dapat disetujui, dan seandainya lolos pun tidak akan
+# berjalan. Pengajuan nyata tersangkut karenanya.
+#
+# Yang TIDAK dilakukan untuk memperbaikinya: menambahkan folder unggahan ke
+# ``sys.path``. Itu menjadikan folder itu tempat pencarian bagi SELURUH proses,
+# sehingga sebuah `json.py` di dalam paket dapat membayangi pustaka standar
+# bagi kode platform yang sama sekali tidak berhubungan.
+#
+# Yang dilakukan: satu pencari impor yang dipasang di UJUNG ``sys.meta_path``,
+# hanya menjawab nama yang TERCATAT pada paket itu, dan hanya menunjuk berkas
+# di dalam foldernya sendiri. Karena ia di ujung, pencari baku sudah menjawab
+# lebih dulu untuk pustaka standar dan modul platform: paket tidak dapat
+# membayangi apa pun, termasuk bagi dirinya sendiri.
+
+#: Paket unggahan yang berkas pendukungnya dapat diimpor:
+#: ``{folder: {nama modul: sha256}}``.
+_PACKAGES: dict[str, dict[str, str]] = {}
+
+
+class _PackageFinder:
+    """Pencari impor berkas pendukung, untuk SELURUH paket unggahan.
+
+    Satu pencari, bukan satu per paket, dan ia menjawab menurut SIAPA yang
+    mengimpor. Itu yang membuat dua paket boleh sama-sama membawa
+    ``common_prep.py`` dengan isi berbeda: masing-masing mendapat berkasnya
+    sendiri, bukan berkas tetangganya.
+
+    Percobaan pertama memakai satu pencari per paket dan menolak nama yang
+    bertabrakan. Yang ditolak ternyata keadaan yang wajar: v1 dan v2 sebuah
+    paket, atau dua kontributor yang sama-sama menamai penolongnya
+    ``common_prep.py``, tidak dapat dijalankan dalam satu proses tanpa memuat
+    ulang aplikasi.
+
+    Pengaman yang tidak berubah: hanya nama yang TERCATAT pada pengajuannya
+    yang dapat diimpor, hash tiap berkas diverifikasi sebelum dieksekusi, dan
+    pencari ini duduk di UJUNG ``sys.meta_path`` sehingga pustaka standar serta
+    modul platform selalu dijawab lebih dulu.
+    """
+
+    def _package_of_caller(self) -> tuple[Path, dict[str, str]] | None:
+        """Paket milik kode yang sedang mengimpor, dari tumpukan panggilan.
+
+        Dibaca dari ``__file__`` bingkai pemanggil, bukan dari keadaan global:
+        keadaan global harus dipasang dan dilepas oleh seseorang, dan impor
+        yang terjadi di dalam ``run()`` berada jauh dari tempat pemasangan itu.
+        Yang di sini bekerja untuk keduanya.
+        """
+        bingkai = sys._getframe(1)
+        while bingkai is not None:
+            berkas = bingkai.f_globals.get("__file__")
+            if berkas:
+                folder = str(Path(berkas).parent.resolve())
+                manifest = _PACKAGES.get(folder)
+                if manifest is not None:
+                    return Path(folder), manifest
+            bingkai = bingkai.f_back
+        return None
+
+    def find_spec(self, fullname, path=None, target=None):
+        # Hanya nama TINGKAT ATAS: sebuah paket unggahan tidak pernah
+        # menyediakan submodul bagi paket lain.
+        if "." in fullname or not _PACKAGES:
+            return None
+        milik = self._package_of_caller()
+        if milik is None:
+            return None                       # bukan kode paket yang mengimpor
+        folder, manifest = milik
+        if fullname not in manifest:
+            return None
+        berkas = folder / f"{fullname}.py"
+        if not berkas.is_file():
+            return None
+        tercatat = manifest[fullname]
+        nyata = file_sha256(berkas)
+        if nyata != tercatat:
+            raise DynamicRegistryError(
+                f"Hash berkas pendukung tidak cocok untuk {berkas.name}: "
+                f"tercatat {tercatat[:12]}…, ditemukan {nyata[:12]}…. Berkas "
+                f"berubah atau rusak: pemuatan ditolak.",
+                key="err.support_hash_mismatch",
+                values={"file": berkas.name, "recorded": tercatat[:12],
+                        "found": nyata[:12]})
+        return importlib.util.spec_from_file_location(
+            fullname, berkas,
+            loader=_VerifiedSourceLoader(fullname, str(berkas)))
+
+
+#: Dipasang SEKALI, di ujung `sys.meta_path`.
+_FINDER = _PackageFinder()
+
+
+def _manifest_modules(manifest: dict | None) -> dict[str, str]:
+    """``{nama modul: sha256}`` dari manifes ``{nama berkas: sha256}``."""
+    keluar = {}
+    for nama, digest in (manifest or {}).items():
+        nama = str(nama)
+        if nama.endswith(".py") and digest:
+            keluar[nama[:-3]] = str(digest)
+    return keluar
+
+
+def _recorded_files(folder: Path) -> dict[str, str]:
+    """``{nama modul: sha256}`` berkas paket ini MENURUT CATATAN pengajuan.
+
+    Sumbernya ``submissions.metadata_json``, satu-satunya tempat sha256 tiap
+    berkas benar-benar disimpan. Dicocokkan lewat ``stored_location`` supaya
+    jalur yang dicatat di dalam container tetap ketemu saat dijalankan di host.
+
+    ``{}`` bila tidak ada catatannya — pengajuannya sudah dihapus, atau paket
+    itu memang satu berkas. Ketiadaan catatan berarti tidak ada berkas
+    pendukung yang dapat diimpor, BUKAN berarti impor tanpa verifikasi: yang
+    tidak dapat dibuktikan tidak dijalankan.
+    """
+    from orchestrator.submission_service import stored_location
+
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT stored_path, metadata_json FROM submissions "
+                "WHERE kind = 'pipeline'").fetchall()
+    except Exception:                        # pragma: no cover - defensif
+        logger.warning("Catatan berkas paket tidak terbaca", exc_info=True)
+        return {}
+
+    sasaran = folder.resolve()
+    for row in rows:
+        if not row["stored_path"]:
+            continue
+        try:
+            if stored_location(row["stored_path"]).resolve() != sasaran:
+                continue
+            meta = json.loads(row["metadata_json"] or "{}")
+        except (OSError, ValueError):        # pragma: no cover - defensif
+            continue
+        keluar = {}
+        for berkas in meta.get("files") or []:
+            nama = str(berkas.get("filename") or "")
+            if nama.endswith(".py") and berkas.get("sha256"):
+                keluar[nama[:-3]] = str(berkas["sha256"])
+        return keluar
+    return _recorded_files_from_registry(sasaran)
+
+
+def _recorded_files_from_registry(folder: Path) -> dict[str, str]:
+    """Catatan hash paket dari BARIS REGISTRY versi ini.
+
+    Folder pengajuan punya catatannya di `submissions.metadata_json`; folder
+    VERSI tidak, dan tidak akan pernah punya — ia lahir dari penyuntingan,
+    bukan dari pengajuan. Selama satu-satunya sumber catatan adalah pengajuan,
+    versi baru sebuah paket multi-berkas tidak dapat mengimpor pendukungnya
+    sama sekali: ia tersimpan, menjadi aktif, tampil "ok" di katalog, lalu
+    gagal saat dijalankan dengan `ModuleNotFoundError`.
+
+    Sumbernya `registered_pipelines.package_json`, ditulis saat pendaftaran
+    dari berkas yang BENAR-BENAR ada di folder itu. Baris lama tidak punya
+    kolomnya terisi; bagi mereka jawabannya tetap `{}`, persis seperti dahulu.
+    """
+    try:
+        with get_connection() as conn:
+            rows = conn.execute(
+                "SELECT entry_file, package_json FROM registered_pipelines "
+                "WHERE package_json IS NOT NULL").fetchall()
+    except Exception:                        # pragma: no cover - defensif
+        logger.warning("Manifes paket registry tidak terbaca", exc_info=True)
+        return {}
+
+    for row in rows:
+        try:
+            if Path(row["entry_file"]).resolve().parent != folder:
+                continue
+            manifest = json.loads(row["package_json"] or "{}")
+        except (OSError, ValueError):        # pragma: no cover - defensif
+            continue
+        keluar = {}
+        for nama, digest in (manifest or {}).items():
+            nama = str(nama)
+            if nama.endswith(".py") and digest:
+                keluar[nama[:-3]] = str(digest)
+        return keluar
+    return {}
+
+
+def _mount_package(folder: Path, manifest: dict[str, str]) -> None:
+    """Daftarkan paket ini sebagai pemilik nama-nama pendukungnya."""
+    _PACKAGES[str(folder.resolve())] = manifest
+    if _FINDER not in sys.meta_path:
+        # DI UJUNG: pencari baku menjawab lebih dulu, jadi sebuah `json.py` di
+        # dalam paket tidak pernah membayangi pustaka standar bagi siapa pun.
+        sys.meta_path.append(_FINDER)
+
+
+def _forget_plain_names(manifest: dict[str, str],
+                        folder: Path | None = None) -> None:
+    """Buang nama POLOS modul pendukung dari ``sys.modules``.
+
+    ``import common_prep`` mengembalikan ``sys.modules["common_prep"]`` bila ada,
+    TANPA bertanya kepada pencari mana pun. Membiarkan nama polos mengendap
+    berarti paket berikutnya yang mengimpor nama yang sama menerima modul milik
+    paket sebelumnya — kode yang salah, tanpa satu pun tanda.
+
+    Yang dibuang hanya modul yang benar-benar berasal dari folder paket
+    unggahan; modul platform dengan nama serupa tidak pernah tersentuh.
+
+    Modul yang sudah TERIKAT pada paket yang memuatnya tidak terpengaruh: ia
+    memegang objeknya, bukan namanya.
+    """
+    diakui = set(_PACKAGES)
+    if folder is not None:
+        diakui.add(str(Path(folder).resolve()))
+    for nama in manifest:
+        modul = sys.modules.get(nama)
+        if modul is None:
+            continue
+        berkas = getattr(modul, "__file__", "") or ""
+        if str(Path(berkas).parent.resolve()) in diakui:
+            sys.modules.pop(nama, None)
+
+
+def _reset_plain_names() -> None:
+    """Kosongkan nama polos SELURUH paket yang sedang terdaftar.
+
+    Dipanggil tepat sebelum sebuah paket dimuat. Pemuatan selalu mendahului
+    penjalanan pada kedua jalur — uji coba memuat lalu menjalankan di proses
+    anaknya, dan eksperimen memuat lewat `load_registered_instance` tepat
+    sebelum menjalankan — sehingga impor yang terlambat di dalam ``run()`` pun
+    bertanya kepada pencari alih-alih menerima sisa paket sebelumnya.
+    """
+    for folder, manifest in list(_PACKAGES.items()):
+        _forget_plain_names(manifest, Path(folder))
+
+
+def unmount_package(entry_file: str | Path) -> None:
+    """Cabut kembali pendaftaran paket sebuah titik masuk, beserta modulnya.
+
+    Dipakai pemanggil yang memuat paket hanya SEBENTAR — misalnya memotret
+    ``get_info()`` saat pendaftaran.
+    """
+    from orchestrator.submission_service import stored_location
+
+    folder = stored_location(entry_file).parent
+    manifest = _PACKAGES.pop(str(folder.resolve()), None)
+    if manifest:
+        _forget_plain_names(manifest, folder)
+
+
+def load_pipeline_class(entry_file: str | Path, entry_class: str,
+                        expected_hash: str, manifest: dict | None = None):
+    """Muat sebuah kelas pipeline dari BERKAS SPESIFIK.
+
+    Urutannya penting:
+      1. berkas harus ada,
+      2. SHA-256 harus sama persis dengan yang tercatat saat pendaftaran —
+         berkas yang berubah ditolak SEBELUM kodenya dieksekusi,
+      3. modul dimuat lewat spec_from_file_location (tanpa menyentuh sys.path),
+      4. kelasnya harus ada dan benar-benar turunan ``BasePipeline`` dengan
+         ``run`` & ``get_info``.
+    """
+    from pipelines.base import BasePipeline
+    from orchestrator.submission_service import stored_location
+
+    # Jalur berkas dicatat ABSOLUT saat pendaftaran. Platform ini berpindah
+    # antara container dan host di atas folder `storage/` yang sama, jadi jalur
+    # yang benar di satu lingkungan salah di lingkungan lain — dan pipeline
+    # yang berkasnya ada persis di sana dilaporkan "bermasalah". Impor di dalam
+    # fungsi: `submission_service` mengimpor modul ini.
+    path = stored_location(entry_file)
+    if not path.is_file():
+        raise DynamicRegistryError(
+            f"Berkas pipeline tidak ditemukan: {path}",
+            key="err.pipeline_file_missing", values={"path": str(path)})
+
+    actual = file_sha256(path)
+    if actual != expected_hash:
+        raise DynamicRegistryError(
+            f"Hash berkas tidak cocok untuk {path.name}: tercatat "
+            f"{expected_hash[:12]}…, ditemukan {actual[:12]}…. Berkas berubah "
+            f"atau rusak: pemuatan ditolak.",
+            key="err.hash_mismatch",
+            values={"file": path.name, "recorded": expected_hash[:12],
+                    "found": actual[:12]})
+
+    # Berkas PENDUKUNG sepaket dibuat dapat diimpor SEBELUM titik masuknya
+    # dieksekusi, sebab `import common_prep` terjadi pada baris pertama modul.
+    # Yang dipasang hanya nama yang tercatat pada pengajuannya, hanya menunjuk
+    # folder ini, dan di ujung `sys.meta_path` (lihat `_PackageFinder`).
+    # `manifest` diberikan pemanggil yang SUDAH menghitungnya dan belum
+    # menyimpannya: pendaftaran memotret `get_info()` sebelum barisnya ada di
+    # basis data, jadi membaca catatan dari sana akan selalu kosong justru pada
+    # saat yang menentukan. Tanpa itu, jawabannya dibaca dari catatan seperti
+    # biasa.
+    catatan = (_manifest_modules(manifest) if manifest is not None
+               else _recorded_files(path.parent))
+    pendukung = {n: d for n, d in catatan.items() if n != path.stem}
+    if pendukung:
+        # Nama polos paket mana pun dikosongkan lebih dulu: cache sys.modules
+        # menjawab lebih cepat daripada pencari, dan sisa paket sebelumnya
+        # adalah kode yang salah bagi paket ini.
+        _reset_plain_names()
+        _mount_package(path.parent, pendukung)
+
+    # Nama modul unik & bernamespace: tidak menimpa modul platform mana pun,
+    # dan folder unggahan TIDAK ditambahkan ke sys.path.
+    module_name = f"_uploaded_pipeline_{actual[:16]}"
+    spec = importlib.util.spec_from_file_location(
+        module_name, path, loader=_VerifiedSourceLoader(module_name, str(path)))
+    if spec is None or spec.loader is None:
+        raise DynamicRegistryError(
+            f"Tidak dapat menyiapkan pemuatan untuk {path.name}",
+            key="err.cannot_prepare_load", values={"path": path.name})
+
+    module = importlib.util.module_from_spec(spec)
+    try:
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    except DynamicRegistryError:
+        # Kegagalan yang SUDAH berbentuk — hash berkas pendukung tidak cocok,
+        # nama pendukung bertabrakan — diteruskan apa adanya. Membungkusnya
+        # lagi sebagai "gagal memuat" akan mengganti kalimat yang menyebutkan
+        # berkas mana dan apa yang salah dengan kalimat yang umum.
+        sys.modules.pop(module_name, None)
+        raise
+    except Exception as e:
+        sys.modules.pop(module_name, None)
+        raise DynamicRegistryError(
+            f"Gagal memuat {path.name}: {type(e).__name__}: {e}",
+            key="err.pipeline_load_failed",
+            values={"filename": path.name, "kind": type(e).__name__,
+                    "detail": str(e)}) from e
+
+    if pendukung:
+        _forget_plain_names(pendukung, path.parent)
+
+    cls = getattr(module, entry_class, None)
+    if cls is None:
+        raise DynamicRegistryError(
+            f"Kelas {entry_class} tidak ada di {path.name}",
+            key="err.class_not_in_file",
+            values={"cls": entry_class, "filename": path.name})
+    if not (isinstance(cls, type) and issubclass(cls, BasePipeline)):
+        raise DynamicRegistryError(
+            f"{entry_class} bukan turunan BasePipeline: ditolak.",
+            key="err.not_a_base_pipeline", values={"cls": entry_class})
+    for method in ("run", "get_info"):
+        if not callable(getattr(cls, method, None)):
+            raise DynamicRegistryError(
+                f"{entry_class} tidak mengimplementasi {method}(): ditolak.",
+                key="err.missing_contract_method",
+                values={"cls": entry_class, "method": method})
+    return cls
+
+
+def load_registered_instance(pipeline_id: str, db_path: str | None = None):
+    """Instance pipeline terunggah yang siap dijalankan, atau None bila
+    pipeline_id itu bukan pipeline terunggah yang aktif.
+
+    Raise DynamicRegistryError bila terdaftar tetapi tidak dapat dimuat —
+    pemanggil (worker) mengubahnya menjadi kegagalan eksperimen yang jelas.
+    """
+    item = get_registered(pipeline_id, db_path)
+    if item is None or not item["active"]:
+        return None
+    cls = load_pipeline_class(item["entry_file"], item["entry_class"],
+                              item["file_hash"])
+    return cls()
+
+
+# ── Tampilan gabungan (statis + terunggah) ────────────────────────────────
+
+def _stages_of(row: dict) -> list:
+    """Fase progres sebuah baris registry; [] bila tidak ada atau rusak.
+
+    Baris LAMA tidak punya kolomnya sama sekali, dan itu bukan kesalahan —
+    jawabannya sama dengan "paket ini tidak memancarkan fase".
+    """
+    raw = row.get("stages_json")
+    if not raw:
+        return []
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):           # pragma: no cover - defensif
+        logger.warning("stages_json tidak terbaca pada %s", row.get("pipeline_id"))
+        return []
+    return [str(v) for v in value] if isinstance(value, list) else []
+
+
+def _snapshot_info(entry_file: Path, entry_class: str,
+                   digest: str, manifest: dict | None = None) -> dict | None:
+    """``get_info()`` paket ini, dipanggil sekali saat pendaftaran.
+
+    Ini SATU-SATUNYA tempat kode kontribusi dimuat demi keterangan, dan ia
+    terjadi pada saat kode itu memang sudah divalidasi dan diuji. Sesudahnya
+    tidak ada halaman tampilan yang perlu mengimpornya lagi.
+
+    Kegagalan TIDAK menggagalkan pendaftaran: pipeline yang sah tidak boleh
+    ditolak karena keterangannya tidak terbaca. Yang hilang hanya
+    keterangannya, dan kehilangan itu terlihat sebagai potret kosong.
+    """
+    try:
+        instance = load_pipeline_class(entry_file, entry_class, digest,
+                                       manifest)()
+        info = instance.get_info()
+    except Exception:
+        logger.warning("get_info() tidak dapat dipotret untuk %s (kelas %s)",
+                       entry_file, entry_class, exc_info=True)
+        return None
+    finally:
+        # Potret ini SEBENTAR: paketnya dicabut lagi supaya proses yang panjang
+        # tidak menahan modul pendukung setiap paket yang pernah didaftarkan,
+        # dan supaya dua paket yang kebetulan bernama sama tidak bertabrakan
+        # hanya karena keduanya pernah dipotret.
+        unmount_package(entry_file)
+    return info if isinstance(info, dict) else None
+
+
+def merge_info(info: dict | None, extra: dict | None) -> dict | None:
+    """Potret ``get_info()`` DITUMPUK keterangan dari formulir pengajuan.
+
+    Aturannya satu, dan arahnya tidak boleh terbalik: **kode menang**. Yang
+    ditulis pipeline adalah kebenaran tentang apa yang benar-benar dijalankan;
+    isian formulir hanya menerangkan, dan hanya mengisi kunci yang kodenya
+    memang tidak menyebutkan. Bila formulir dibiarkan menimpa kode, keterangan
+    yang dibaca peninjau dapat berbeda dari yang dieksekusi — dan seluruh
+    klaim ketertelusuran bertumpu pada keduanya tidak pernah berbeda.
+
+    Nilai kosong pada ``extra`` diabaikan: "tidak diisi" bukan "kosongkan".
+    """
+    bersih = {k: v for k, v in (extra or {}).items()
+              if v not in (None, "", [], {})}
+    if not bersih:
+        return info
+    gabung = dict(bersih)
+    gabung.update({k: v for k, v in (info or {}).items()
+                   if v not in (None, "", [], {})})
+    return gabung
+
+
+def _dumped_info(info: dict | None) -> str | None:
+    """Potret ``get_info()`` sebagai JSON; None bila tidak dapat dipotret.
+
+    Nilai yang tidak dapat diserialkan TIDAK menggagalkan pendaftaran: sebuah
+    pipeline yang sah tidak boleh ditolak karena keterangannya membawa objek
+    aneh. Yang hilang hanyalah keterangannya, dan kehilangan itu terlihat.
+    """
+    if not info:
+        return None
+    try:
+        return json.dumps(info, default=str)
+    except (TypeError, ValueError):           # pragma: no cover - defensif
+        logger.warning("get_info() tidak dapat dipotret sebagai JSON")
+        return None
+
+
+def _info_of(row: dict) -> dict:
+    """Potret ``get_info()`` sebuah baris registry; {} bila tidak ada.
+
+    Baris yang terdaftar sebelum kolomnya ada tidak punya potret — jawabannya
+    "tidak diketahui", dan pemanggilnya yang memutuskan bagaimana mengatakan
+    itu kepada pembaca.
+    """
+    raw = row.get("info_json")
+    if not raw:
+        return {}
+    try:
+        value = json.loads(raw)
+    except (TypeError, ValueError):           # pragma: no cover - defensif
+        logger.warning("info_json tidak terbaca pada %s", row.get("pipeline_id"))
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _method_notes_map(db_path: str | None = None) -> dict:
+    """``dataset_type`` -> keterangan metode yang dinyatakan pengunggahnya.
+
+    Dibaca SEKALI untuk seluruh penggambaran, bukan sekali per baris registry:
+    sebuah research pipeline lazimnya punya beberapa algoritma dan beberapa
+    versi, dan menanyakan catatan yang sama berulang kali akan mengembalikan
+    persis biaya yang dihapus potret ``info_json``.
+
+    Gagal membaca -> peta KOSONG. Daftar pipeline harus tetap utuh walau tabel
+    research hilang; yang hilang hanya keterangannya, dan itu terlihat.
+
+    Barisnya dibaca lewat ``merge_attribution`` — bukan langsung dari
+    ``attribution_json`` — supaya aturan timpaan yang sama berlaku di sini:
+    baris bernama jenis BAWAAN yang tidak lahir dari penyuntingan tidak menimpa
+    apa pun, dan karenanya tidak dapat menyelundupkan keterangan.
+    """
+    from orchestrator.research_registry import list_research, merge_attribution
+
+    out: dict = {}
+    for row in list_research(active_only=False, db_path=db_path):
+        dtype = row["dataset_type"]
+        try:
+            notes = (merge_attribution(dtype, row) or {}).get("method_notes")
+        except Exception:                     # pragma: no cover - defensif
+            continue
+        if isinstance(notes, dict) and notes:
+            out[dtype] = notes
+    return out
+
+
+def _entry_from_row(row: dict, notes: dict | None = None) -> dict:
+    """Baris DB -> entri bergaya registry, TANPA memuat kelasnya.
+
+    Menampilkan daftar tidak boleh mengeksekusi kode unggahan; kelas baru
+    dimuat saat pipeline benar-benar dijalankan.
+
+    ``notes`` adalah keterangan metode research ini, ditumpuk ke potret DI SINI
+    — saat tampil, bukan saat menulis. Itulah yang membuatnya dapat disunting:
+    potret merekam apa yang KODE katakan dan tidak pernah berubah, sedangkan
+    catatan hidup di baris research dan boleh diperbaiki kapan saja. Arah
+    presedennya tetap sama, ``merge_info`` yang menjaganya: kode menang.
+    """
+    return {
+        "dataset_type": row["dataset_type"],
+        "name": f"{row['name']} v{row['version']} (terunggah)",
+        "paper": row.get("paper") or "Pipeline terunggah (di luar git)",
+        "algorithm": row.get("algorithm") or row["name"],
+        "class": None,
+        # Fase progres paket ini, bila kodenya memancarkannya. Dibaca dari
+        # baris registry — BUKAN dengan menengok pengajuannya, yang berarti
+        # satu kueri tambahan untuk setiap pipeline pada setiap penggambaran.
+        "stages": _stages_of(row),
+        # Potret `get_info()`. Inilah yang membuat katalog dan halaman riwayat
+        # dapat MENJELASKAN pipeline ini tanpa mengimpor kodenya.
+        "info": merge_info(_info_of(row), notes),
+        "uploaded": True,
+        "version": row["version"],
+        "file_hash": row["file_hash"],
+        "entry_class": row["entry_class"],
+        "entry_file": row["entry_file"],
+    }
+
+
+def get_all_pipelines(db_path: str | None = None) -> dict:
+    """PIPELINE_REGISTRY statis + pipeline terunggah yang aktif.
+
+    Entri statis SELALU menang: pipeline terunggah tidak pernah dapat menimpa
+    ``hikari2021.*`` / ``eve_cbr.*``. Kegagalan membaca daftar terunggah tidak
+    boleh merusak registry — pipeline bawaan tetap dikembalikan.
+    """
+    from config.pipeline_registry import PIPELINE_REGISTRY
+
+    merged = dict(PIPELINE_REGISTRY)
+    try:
+        rows = list_registered(active_only=True, db_path=db_path)
+    except Exception:
+        logger.warning("Daftar pipeline terunggah tidak terbaca — "
+                       "hanya pipeline bawaan yang ditampilkan", exc_info=True)
+        return merged
+
+    # SATU pembacaan untuk seluruh daftar. Keterangan metode milik research,
+    # bukan milik masing-masing versi, jadi menanyakannya per baris berarti
+    # kueri yang tumbuh linear terhadap jumlah algoritma × versi.
+    try:
+        notes = _method_notes_map(db_path)
+    except Exception:                        # pragma: no cover - defensif
+        logger.warning("Keterangan metode research tidak terbaca — "
+                       "pipeline tetap ditampilkan tanpa keterangan itu",
+                       exc_info=True)
+        notes = {}
+
+    for row in rows:
+        pipeline_id = row["pipeline_id"]
+        if pipeline_id in merged:            # tidak mungkin terjadi (namespace
+            logger.error(                    # berbeda), tetapi dijaga eksplisit
+                "Pipeline terunggah %s bertabrakan dengan pipeline bawaan — "
+                "entri bawaan dipertahankan.", pipeline_id)
+            continue
+        try:
+            merged[pipeline_id] = _entry_from_row(
+                row, notes.get(row["dataset_type"]))
+        except Exception:                    # pragma: no cover - defensive
+            logger.warning("Entri pipeline terunggah %s dilewati", pipeline_id,
+                           exc_info=True)
+    return merged
+
+
+def get_pipelines_for_dataset_merged(dataset_type: str,
+                                     db_path: str | None = None) -> dict:
+    return {pid: info for pid, info in get_all_pipelines(db_path).items()
+            if info.get("dataset_type") == dataset_type}
+
+
+def get_pipeline_instance_merged(pipeline_id: str, db_path: str | None = None):
+    """Instance untuk pipeline_id apa pun — bawaan ATAU terunggah.
+
+    Pipeline bawaan diambil lebih dulu dari registry statis, sehingga
+    mekanisme dinamis tidak pernah berada di jalur eksekusi mereka.
+    """
+    from config.pipeline_registry import get_pipeline_instance
+
+    instance = get_pipeline_instance(pipeline_id)
+    if instance is not None:
+        return instance
+    if not str(pipeline_id).startswith(UPLOADED_PREFIX):
+        return None
+    return load_registered_instance(pipeline_id, db_path)
+
+
+def traceability_for(pipeline_id: str, db_path: str | None = None) -> dict:
+    """(pipeline_version, pipeline_hash) untuk dicatat pada eksperimen.
+
+    Pipeline bawaan -> keduanya None: definisinya ada di git.
+    """
+    if not str(pipeline_id or "").startswith(UPLOADED_PREFIX):
+        return {"pipeline_version": None, "pipeline_hash": None}
+    try:
+        item = get_registered(pipeline_id, db_path)
+    except Exception:                        # pragma: no cover - defensive
+        return {"pipeline_version": None, "pipeline_hash": None}
+    if item is None:
+        return {"pipeline_version": None, "pipeline_hash": None}
+    return {"pipeline_version": item["version"], "pipeline_hash": item["file_hash"]}

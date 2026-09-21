@@ -1,0 +1,228 @@
+# ============================================================
+# IDS Research Pipeline System — Full Docker Stack
+#
+# Usage:
+#   docker-compose up --build           # start all services
+#   docker-compose up --build -d        # start in background
+#   docker-compose down                 # stop all
+#   docker-compose logs -f worker       # watch worker logs
+#   docker-compose exec ui bash         # shell into UI container
+#
+# Data persistence:
+#   - storage/datasets/ → mounted from host (put CSVs here BEFORE starting)
+#   - storage/artifacts/ → mounted from host (experiment outputs persist)
+#   - storage/experiments.db → mounted from host (SQLite DB persists)
+# ============================================================
+
+services:
+  # --- Redis (message broker for Celery) ---
+  redis:
+    image: redis:7-alpine
+    container_name: ids_redis
+    # TIDAK dipublikasikan ke host. Redis di sini adalah broker Celery TANPA
+    # autentikasi: siapa pun yang dapat menjangkau porta ini dapat menitipkan
+    # task, dan task Celery adalah kode yang dijalankan worker. `ui` dan
+    # `worker` menjangkaunya lewat jaringan compose dengan nama `redis`, jadi
+    # tidak ada yang hilang dengan menutupnya.
+    #
+    # Untuk menengoknya saat pengembangan, pakai jalur yang tidak membuka
+    # porta bagi seluruh jaringan:
+    #     docker compose exec redis redis-cli ping
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    # Rotasi log. Tanpa ini, log Docker tumbuh tanpa batas sampai memenuhi
+    # disk — dan yang memenuhi disk di host ini adalah drive SISTEM.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    restart: unless-stopped
+
+  # --- Celery Worker (ML pipeline execution) ---
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    container_name: ids_worker
+    command: >
+      celery -A workers.celery_worker worker
+      --loglevel=info
+      --pool=solo
+      --concurrency=1
+    # RAM cap for the cbr EVE pipeline (validated resource budget ~3.53 GB).
+    mem_limit: 3500m
+    volumes:
+      - ./storage:/app/storage          # shared storage with UI
+    depends_on:
+      redis:
+        condition: service_healthy
+    # Worker yang MATI tetapi containernya hidup adalah kegagalan paling
+    # membingungkan di sini: eksperimen mengantre selamanya tanpa satu pun
+    # pesan galat. `inspect ping` menanyakannya lewat broker, jadi yang
+    # dijawab adalah worker yang benar-benar mendengarkan antrean.
+    healthcheck:
+      # CMD-SHELL, bukan CMD: bentuk CMD tidak menjalankan shell, sehingga
+      # `$HOSTNAME` diteruskan apa adanya dan tidak ada node yang cocok
+      # dengan nama "celery@$HOSTNAME" — healthcheck-nya gagal selamanya.
+      # `$$` di sini adalah cara compose menuliskan satu `$` untuk shell.
+      test: ["CMD-SHELL", "celery -A workers.celery_worker inspect ping -d \"celery@$$HOSTNAME\" -t 10 | grep -q pong"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 40s
+    # Rotasi log. Tanpa ini, log Docker tumbuh tanpa batas sampai memenuhi
+    # disk — dan yang memenuhi disk di host ini adalah drive SISTEM.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - USE_ASYNC=true
+      - DB_PATH=/app/storage/experiments.db
+      - CELERY_CONCURRENCY=1
+      - JSON_LOGS=true
+      - LOG_LEVEL=INFO
+      # Folder kerja sementara pipeline. TANPA ini `tempfile.mkdtemp()` jatuh
+      # ke `/tmp`, yaitu lapisan overlay kontainer — yang bersandar pada
+      # `docker_data.vhdx` di drive SISTEM (C:), bukan pada disk tempat dataset
+      # tinggal. Kontainer melaporkan ~1 TB tersedia di sana, tetapi itu disk
+      # virtual sparse: yang sebenarnya membatasi adalah sisa ruang C:, dan
+      # pipeline EVE menulis hasil split TLS-nya ke folder ini dengan
+      # `max_rows_per_app=0` — tanpa cap, sebesar subset TLS dari berkas
+      # masukan. Pada dataset 5,55 GB itu sudah dekat dinding; pada berkas yang
+      # lebih besar ia mengisi drive sistem, bukan gagal dengan rapi.
+      #
+      # `/app/storage` adalah bind-mount ke disk tempat dataset disimpan, jadi
+      # ruang kerjanya kini sebesar disk itu. Ia memang lebih lambat (9p pada
+      # WSL2), dan itu pertukaran yang disengaja: yang gagal hari ini adalah
+      # kapasitas, bukan kecepatan. Folder kerja tiap run tetap dihapus
+      # `shutil.rmtree(work_root)` di blok `finally` adapter-nya.
+      - TMPDIR=/app/storage/tmp
+      # Admin pertama (dipakai UI saat start; worker ikut membacanya agar
+      # environment kedua service konsisten). TIDAK ada password bawaan:
+      # `pass1234` dahulu tertulis di sini sebagai default, sehingga siapa pun
+      # yang menjalankan `docker compose up` tanpa `.env` mendapat admin
+      # bersandi yang tertulis di repositori.
+      # Password minimal 8 karakter — bila lebih pendek, admin TIDAK dibuat.
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-Ai}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # Menutup jalur "siapa pun boleh menjalankan eksperimen". Bawaan kosong
+      # = terbuka, persis seperti sebelumnya.
+      #
+      # HARUS diteruskan di sini. Compose membaca `.env` hanya untuk
+      # SUBSTITUSI di dalam berkas ini, bukan untuk menyuntikkannya ke
+      # container: tanpa baris ini, `REQUIRE_LOGIN_TO_RUN=true` di `.env`
+      # tidak pernah sampai ke aplikasi, dan aksesnya tetap terbuka padahal
+      # pemasangnya mengira sudah menutupnya.
+      - REQUIRE_LOGIN_TO_RUN=${REQUIRE_LOGIN_TO_RUN:-}
+      # Pembatas beban. Bawaannya longgar: pada pemakaian lab tak seorang pun
+      # akan menyentuhnya. Nilai 0 mematikan pembatasnya.
+      - MAX_ACTIVE_RUNS_PER_OWNER=${MAX_ACTIVE_RUNS_PER_OWNER:-}
+      - MAX_RUNS_PER_WINDOW=${MAX_RUNS_PER_WINDOW:-}
+      - RUN_WINDOW_MINUTES=${RUN_WINDOW_MINUTES:-}
+    restart: unless-stopped
+
+  # --- Streamlit UI ---
+  ui:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: ids_ui
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./storage:/app/storage          # shared storage with worker
+    depends_on:
+      redis:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    # Endpoint kesehatan bawaan Streamlit. Diminta lewat `python`, bukan
+    # `curl`: image ini python:3.11-slim dan tidak memuat curl.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8501/_stcore/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    # Rotasi log. Tanpa ini, log Docker tumbuh tanpa batas sampai memenuhi
+    # disk — dan yang memenuhi disk di host ini adalah drive SISTEM.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - USE_ASYNC=true
+      - DB_PATH=/app/storage/experiments.db
+      # Pagu RAM worker, dibaca UI untuk mengunci tombol Run pada dataset CSV
+      # yang pasti tidak muat (lihat `dataset_ram_blocker`). Nilainya WAJIB
+      # sama dengan `mem_limit` service worker di atas; ditulis di sini supaya
+      # UI tidak menyimpan salinan kedua yang dapat menyimpang diam-diam.
+      - WORKER_MEM_LIMIT_MB=3500
+      # Admin pertama dibuat oleh service ini saat start, dari environment.
+      # Setel di berkas .env (jangan di repo):
+      #   ADMIN_USERNAME=admin
+      #   ADMIN_PASSWORD=<password kuat, minimal 8 karakter>
+      # Bila ADMIN_PASSWORD kosong, TIDAK ada admin yang dibuat (aplikasi
+      # menampilkan petunjuk di halaman login) — tidak ada password bawaan.
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-Ai}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      # Menutup jalur "siapa pun boleh menjalankan eksperimen". Bawaan kosong
+      # = terbuka, persis seperti sebelumnya.
+      #
+      # HARUS diteruskan di sini. Compose membaca `.env` hanya untuk
+      # SUBSTITUSI di dalam berkas ini, bukan untuk menyuntikkannya ke
+      # container: tanpa baris ini, `REQUIRE_LOGIN_TO_RUN=true` di `.env`
+      # tidak pernah sampai ke aplikasi, dan aksesnya tetap terbuka padahal
+      # pemasangnya mengira sudah menutupnya.
+      - REQUIRE_LOGIN_TO_RUN=${REQUIRE_LOGIN_TO_RUN:-}
+      # Pembatas beban. Bawaannya longgar: pada pemakaian lab tak seorang pun
+      # akan menyentuhnya. Nilai 0 mematikan pembatasnya.
+      - MAX_ACTIVE_RUNS_PER_OWNER=${MAX_ACTIVE_RUNS_PER_OWNER:-}
+      - MAX_RUNS_PER_WINDOW=${MAX_RUNS_PER_WINDOW:-}
+      - RUN_WINDOW_MINUTES=${RUN_WINDOW_MINUTES:-}
+    restart: unless-stopped
+
+  # --- Reverse proxy TLS (OPSIONAL) ---
+  # Streamlit berbicara HTTP polos, jadi tanpa lapisan ini sandi melintas
+  # jaringan apa adanya. Tidak dijalankan secara bawaan supaya `docker compose
+  # up` di laptop tetap sesederhana sebelumnya:
+  #
+  #     docker compose --profile proxy up -d       # dengan HTTPS di :443
+  #     docker compose up -d                       # tanpa, seperti dahulu
+  #
+  # Saat proxy dipakai, tutup porta 8501 di atas supaya tidak ada jalan
+  # memutar lewat HTTP: hapus blok `ports:` pada service `ui`.
+  proxy:
+    image: caddy:2-alpine
+    container_name: ids_proxy
+    profiles: ["proxy"]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/proxy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - ui
+    restart: unless-stopped
+
+volumes:
+  redis_data:
+  caddy_data:
+  caddy_config:

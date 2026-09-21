@@ -1,0 +1,28 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+!.env.example
+venv/
+.venv/
+*.db
+storage/datasets/*
+storage/artifacts/*
+!storage/datasets/.gitkeep
+!storage/artifacts/.gitkeep
+*.pkl
+# Abaikan isi .streamlit/ (secrets.toml dll), KECUALI config.toml — di sana
+# server.maxUploadSize disetel sejalan dengan MAX_DATASET_UPLOAD_BYTES, jadi
+# batas unggahnya harus ikut ter-clone. (Pola "isi + negasi": git tidak bisa
+# me-recover berkas bila direktori induknya sendiri yang diabaikan.)
+.streamlit/*
+!.streamlit/config.toml
+.idea/
+.vscode/
+*.egg-info/
+dist/
+build/
+
+# Local dev tooling — kept on disk for local workflow, excluded from repo.
+CLAUDE.md
+.claude/
