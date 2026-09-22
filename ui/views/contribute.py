@@ -471,7 +471,12 @@ def _render_review_flow() -> None:
     # tersimpan langsung, jadi tidak pernah masuk antrean ini lagi.
     # TERLAMA MENUNGGU LEBIH DULU — antrean tinjauan, bukan tumpukan.
     pending = sr.sort_pending([s for s in waiting if s["kind"] == KIND_PIPELINE])
-    active_count = len(mp.active_rows())
+    # Angka pada tab "Aktif" HARUS berasal dari daftar yang digambar bagian
+    # itu, bukan dari registry kontribusi: bagiannya mendaftar research
+    # pipeline bawaan maupun kontribusi.
+    from ui.components import research_manage as rs
+
+    active_count = rs.active_count()
     section = mp.render_section_switch(len(pending), active_count)
 
     # SATU judul untuk halaman ini, bukan dua. Dahulu "Peninjauan Pengajuan"
@@ -610,13 +615,21 @@ def _render_trial_compatibility(dataset_type: str, dataset_path: str) -> None:
     if not checks:
         prose(t("trial.compat_unavailable"), key="compat_unavail_b")
         return
+    # Bentuknya SAMA dengan blok fakta pada bagian "Keputusan" di bawah:
+    # pasangan label-nilai berlatar abu-abu, bukan daftar berbutir. Keduanya
+    # menjawab pertanyaan sejenis, yaitu apa yang sistem ketahui tentang
+    # kiriman ini, dan dua bentuk berbeda untuk satu jenis isi membuat halaman
+    # ini terbaca seperti dua halaman yang disambung.
+    #
+    # Satu pasang per baris, bukan dua: kalimat pemeriksaan jauh lebih panjang
+    # daripada nilai pada blok Keputusan, dan dua pasang sebaris membuatnya
+    # melipat menjadi empat baris di dalam kolom sempit.
     mark = {"pass": "✔", "warn": "⚠", "fail": "✖"}
-    lines = []
-    for check in checks:
-        status = (check or {}).get("status") or ""
-        lines.append(f"- {mark.get(status, '·')} **{diagnostic_title(check)}**: "
-                     f"{diagnostic_message(check)}")
-    st.markdown("\n".join(lines))
+    pasangan = [(diagnostic_title(c),
+                 f"{mark.get((c or {}).get('status') or '', '·')} "
+                 f"{diagnostic_message(c)}")
+                for c in checks]
+    _render_fact_rows(pasangan, columns=1)
 
 
 def _render_trial_outcome(trial: dict) -> None:
@@ -1459,7 +1472,7 @@ def _render_file_actions(item: dict, filename: str, source: str,
     paket = _safe_read("berkas paket", read_submission_sources, item,
                        default=[]) or []
 
-    lebar = [1] * (1 + 2 * int(boleh_sunting) + int(bool(paket)))
+    lebar = [1] * (1 + int(boleh_sunting) + int(bool(paket)))
     kolom = iter(st.columns(lebar))
 
     if boleh_sunting:
@@ -1469,7 +1482,6 @@ def _render_file_actions(item: dict, filename: str, source: str,
                               help=t("ap.help_edit_source")):
             _open_editor(sid, filename)
             st.rerun()
-        _render_file_replace(sid, filename, source, next(kolom))
 
     next(kolom).download_button(
         t("ap.btn_download_file"), data=source.encode("utf-8"),
@@ -1484,59 +1496,6 @@ def _render_file_actions(item: dict, filename: str, source: str,
             file_name=f"pengajuan_{sid}_paket.zip", mime="application/zip",
             key=f"review_dl_pkg_{sid}", use_container_width=True,
             help=t("ap.help_download_package"))
-
-
-def _render_file_replace(sid: int, filename: str, source: str, kolom) -> None:
-    """Ganti SATU berkas dengan berkas dari perangkat peninjau.
-
-    Jalannya SAMA PERSIS dengan menyunting berkas di layar penyunting: isinya
-    masuk ke suntingan tertunda, lalu seluruh suntingan disimpan sekali lewat
-    jalur revisi. Tidak ada berkas yang ditulis di sini.
-
-    Kenapa begitu dan bukan menulis langsung: satu putaran revisi adalah satu
-    keputusan peninjau, bukan satu berkas. Menulis tiap penggantian sebagai
-    putarannya sendiri akan melahirkan riwayat sepanjang jumlah berkas yang
-    disentuh, dan catatan revisinya menjadi kosong — padahal catatan itulah
-    yang menjelaskan kenapa paket orang lain diubah.
-
-    Hanya untuk berkas yang memang dapat disunting. Berkas yang bukan sumber
-    Python tidak menawarkan tindakan ini sama sekali, alih-alih menawarkannya
-    lalu menolak isinya.
-    """
-    if not filename.lower().endswith(".py"):
-        return
-
-    with kolom.popover(t("ap.btn_replace_file"), use_container_width=True):
-        # Keterangannya menempel pada pemilih berkasnya sebagai tooltip, bukan
-        # berdiri sebagai baris teks kecil: halaman ini punya kuota teks kecil
-        # yang dijaga sebuah test, dan tooltip menjawab pertanyaan yang sama
-        # tepat ketika orang menanyakannya.
-        unggah = st.file_uploader(
-            t("ap.lbl_replace_pick"), type=["py"],
-            key=f"replace_pick_{sid}_{filename}",
-            help=t("ap.help_replace_file", filename=filename))
-        if unggah is None:
-            return
-
-        # Berkas biner atau berpengkodean lain ditolak DI SINI, sebelum apa
-        # pun tersimpan: paket ini teks Python, dan menyimpan byte yang tidak
-        # terbaca akan gagal jauh kemudian, saat pipeline dimuat.
-        try:
-            teks = unggah.getvalue().decode("utf-8")
-        except (UnicodeDecodeError, AttributeError):
-            st.error(t("ap.err_replace_not_text"))
-            return
-
-        if teks == source:
-            st.info(t("ap.msg_replace_identical"))
-            return
-        if st.button(t("ap.btn_replace_keep"),
-                     key=f"replace_keep_{sid}_{filename}",
-                     type="primary", use_container_width=True,
-                     help=t("ap.help_keep_edit")):
-            st.session_state.setdefault(_DRAFT_KEY, {}).setdefault(
-                str(sid), {})[filename] = teks
-            st.rerun()
 
 
 #: Penanda formulir unggah-ulang yang sedang terbuka, per pengajuan.
@@ -4067,7 +4026,6 @@ def _render_dataset_server_tab() -> None:
     # Pembacaan folder memakai mekanisme yang SAMA dengan halaman Run Experiment.
     from ui.views.run_experiment import _all_dataset_options, _diagnose_selected
 
-    st.markdown(t("ap.help_register_existing"))
     try:
         options = [p for p, _dtype in _all_dataset_options()]
     except Exception as e:                 # pragma: no cover - defensive

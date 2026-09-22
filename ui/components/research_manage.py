@@ -25,7 +25,6 @@ from html import escape
 import streamlit as st
 
 from orchestrator.submission_service import parse_fixed_params
-from ui.components.tables import dataset_code
 from ui.components.theme import dark_button_scope
 from ui.i18n import t
 
@@ -403,10 +402,35 @@ def _catalog_cached(nonce: int) -> list[dict]:
     return research_catalog()
 
 
+def active_count() -> int:
+    """Berapa research pipeline AKTIF pada daftar ini. Untuk label tab.
+
+    Dihitung dari sumber yang SAMA dengan yang digambar :func:`render`, lewat
+    cache yang sama, sehingga tidak ada pembacaan basis data tambahan dan
+    angkanya tidak pernah bercerita lain daripada tabelnya.
+
+    Sebelumnya angka itu datang dari `registered_pipelines`, yang hanya memuat
+    pipeline KONTRIBUSI. Akibatnya tab menulis "Aktif (0)" tepat di atas tabel
+    berisi dua research pipeline bawaan yang keduanya aktif: dua hitungan atas
+    dua himpunan berbeda, yang dipasang seolah menghitung hal yang sama.
+    """
+    try:
+        rows = _catalog_cached(st.session_state.get(NONCE_KEY, 0))
+    except Exception:                       # pragma: no cover - defensif
+        return 0
+    return sum(1 for r in rows if r.get("active"))
+
+
 def _controls(rows) -> tuple:
     """Kotak cari + penyaring + pengurut. Mengembalikan (query, status, origin,
     sort)."""
-    cari, saring = st.columns([3, 2])
+    # Penyaring mendapat lebih banyak ruang daripada kotak cari: kotak cari
+    # menyusut dengan rapi karena isinya teks bebas, sedangkan TIGA selectbox
+    # yang berbagi dua per lima lebar berakhir menampilkan "Semu" dan "Terba".
+    # Jangkar di bawah dipakai lembar gaya untuk membuat ketiganya MEMBUNGKUS
+    # saat lebarnya menipis, bukan memampat sampai labelnya terpotong.
+    st.markdown('<span class="ids-rs-filters"></span>', unsafe_allow_html=True)
+    cari, saring = st.columns([3, 4])
     query = cari.text_input(t("rs.search"), key=QUERY_KEY,
                             placeholder=t("rs.search_ph"),
                             label_visibility="collapsed")
@@ -438,15 +462,19 @@ def _controls(rows) -> tuple:
 # Tombol yang tidak terbaca lebih mahal daripada dua angka yang dapat dibaca
 # di tempat lain: format ada di formulir sunting research ini, dan jumlah
 # eksperimen ada di halaman Progres & Status.
+# Kolom "Dataset" DICABUT. Kode jenis dataset sudah terbaca di dua tempat
+# lain pada baris yang sama, yaitu nama research-nya sendiri dan formulir
+# sunting, sementara sebagai kolom ia memakan empat satuan lebar untuk satu
+# kata yang tidak pernah dibandingkan antarbaris. Pada lebar sedang kode itu
+# justru terpecah di tengah token menjadi "HIKARI202 / 1".
 _RS_COLS = (
-    ("rs.col_pipeline", 12),
-    ("rs.col_dataset", 4),
+    ("rs.col_pipeline", 14),
     # Yang menentukan lebar kolom ini adalah JUDULNYA, bukan isinya: isinya
     # satu angka, sedangkan "Algoritma" sembilan huruf. Pada lebar 2 judul itu
-    # terpatah di tengah kata menjadi "Algorit / ma". Ruangnya diambil dari
-    # kolom aksi, yang tombolnya berakhir jauh sebelum kolomnya habis.
-    ("rs.col_algorithms", 3),
-    ("rs.col_status", 3),
+    # terpatah di tengah kata menjadi "Algorit / ma". Ruang yang dilepas kolom
+    # Dataset sebagian jatuh ke sini supaya judulnya utuh pada lebar sedang.
+    ("rs.col_algorithms", 4),
+    ("rs.col_status", 4),
     ("", 10),
 )
 
@@ -483,19 +511,16 @@ def _render_row(row: dict, user: dict | None) -> None:
             f"**{escape(row.get('full_name') or row['name'])}**"
             + (f'<span class="ids-row-sub">{escape(sub)}</span>' if sub else ""),
             unsafe_allow_html=True)
-        # Tanpa awalan ruang nama: `uploaded:` milik mesin, dan kolom Status
-        # di sebelahnya sudah menyebut research ini kontribusi atau bawaan.
-        sel[1].markdown(f"`{escape(dataset_code(dtype))}`")
-        sel[2].markdown(str(row.get("algorithms", 0)))
+        sel[1].markdown(str(row.get("algorithms", 0)))
         titik = "🟢" if row.get("active") else "⚪"
-        sel[3].markdown(f"{titik} {status_label(row)}")
+        sel[2].markdown(f"{titik} {status_label(row)}")
 
         # Tiga slot tetap, walau slot ketiga sering kosong: lebar tombol yang
         # berubah-ubah antar baris membuat kolom Aksi tidak lagi sejajar.
         # Slot ketiga sengaja lebih sempit — ia hanya terisi pada research yang
         # pernah disunting, dan memberinya sepertiga penuh membuat dua tombol
         # yang SELALU ada terjepit sampai labelnya patah di tengah kata.
-        aksi = sel[4].columns([4, 4, 3])
+        aksi = sel[3].columns([4, 4, 3])
         if aksi[0].button(t("rs.btn_edit"), key=f"rs_edit_{dtype}",
                           use_container_width=True):
             st.session_state[EDIT_KEY] = dtype

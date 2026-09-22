@@ -343,8 +343,8 @@ CATALOG: dict[str, dict[str, str]] = {
                             "en": "Run Research Pipeline"},
     "re.dlg_dataset_detail": {"id": "Detail dataset (preview & validasi)",
                               "en": "Dataset details (preview & validation)"},
-    "re.dlg_about_pipeline": {"id": "Tentang Research Pipeline (Baca-saja)",
-                              "en": "About the Research Pipeline (read-only)"},
+    "re.dlg_about_pipeline": {"id": "Tentang Research Pipeline (hanya baca)",
+                              "en": "About the Research Pipeline (read only)"},
     "re.dlg_diag_detail": {"id": "Detail diagnostik", "en": "Diagnostic details"},
     "re.dlg_dataset_req": {"id": "Persyaratan dataset", "en": "Dataset requirements"},
 
@@ -744,23 +744,6 @@ CATALOG: dict[str, dict[str, str]] = {
               "tunggu selesai lebih dulu.",
         "en": "This experiment is still queued or running. Cancel it or wait "
               "for it to finish first."},
-    "ap.my_subs_head": {"id": "Pengajuan saya", "en": "My submissions"},
-    "ap.my_subs_col_id": {"id": "Nomor", "en": "Number"},
-    "ap.my_subs_col_name": {"id": "Nama", "en": "Name"},
-    "ap.my_subs_col_status": {"id": "Status", "en": "Status"},
-    "ap.my_subs_col_check": {"id": "Pemeriksaan", "en": "Static check"},
-    "trial.my_subs_col": {"id": "Uji coba", "en": "Trial"},
-    "ap.my_subs_check_ok": {"id": "lolos", "en": "passed"},
-    "ap.my_subs_check_bad": {"id": "tidak lolos", "en": "failed"},
-    "ap.my_subs_check_none": {"id": "belum diperiksa", "en": "not checked yet"},
-    "trial.my_subs_none": {"id": "belum diuji", "en": "not tested yet"},
-    "ap.my_subs_revised": {
-        "id": "Paket Anda disunting peninjau ({count}×). Yang dinilai adalah "
-              "paket hasil suntingan itu, bukan kiriman asli Anda.",
-        "en": "A reviewer edited your package ({count}×). What is judged is "
-              "that edited package, not your original upload."},
-    "ap.my_subs_note": {"id": "Catatan peninjau untuk #{id}: {note}",
-                        "en": "Reviewer note for #{id}: {note}"},
     "re.dlg_method_notes": {"id": "Keterangan metode", "en": "Method notes"},
     # Label SATU baris hyperparameter. Namanya lebih pendek daripada label
     # formulirnya ("Hyperparameter terkunci") karena di sini ia berdiri
@@ -862,23 +845,6 @@ CATALOG: dict[str, dict[str, str]] = {
 
     # ── Tombol ───────────────────────────────────────────────────────────
     "ap.btn_download_file": {"id": "Unduh berkas ini", "en": "Download this file"},
-    # ── Ganti satu berkas dari perangkat ─────────────────────────────
-    #
-    # Kata "pengajuan", bukan "pipeline": yang berubah di sini kiriman yang
-    # sedang ditinjau, dan pipeline yang berjalan tidak tersentuh sama sekali.
-    "ap.btn_replace_file": {"id": "Ganti berkas", "en": "Replace file"},
-    "ap.help_replace_file": {
-        "id": "Mengganti isi {filename} dengan berkas dari perangkat Anda. Perubahannya masuk ke revisi pengajuan, bukan ke pipeline yang berjalan.",
-        "en": "Replaces the contents of {filename} with a file from your device. The change goes into the submission revision, not the running pipeline."},
-    "ap.lbl_replace_pick": {"id": "Berkas pengganti",
-                            "en": "Replacement file"},
-    "ap.btn_replace_keep": {"id": "Pakai berkas ini", "en": "Use this file"},
-    "ap.err_replace_not_text": {
-        "id": "Berkas itu bukan teks Python berpengkodean UTF-8.",
-        "en": "That file is not UTF-8 encoded Python text."},
-    "ap.msg_replace_identical": {
-        "id": "Isinya sama persis dengan berkas yang sekarang.",
-        "en": "Its contents are identical to the current file."},
     "ap.btn_create_account": {"id": "Buat akun", "en": "Create account"},
     "ap.btn_submit_review": {"id": "Ajukan untuk ditinjau", "en": "Submit for review"},
     "ap.btn_upload_validate": {"id": "Unggah & Validasi", "en": "Upload & Validate"},
@@ -1113,11 +1079,6 @@ CATALOG: dict[str, dict[str, str]] = {
     "dx.unknown_type": {
         "id": "Tipe dataset `{dataset_type}` tidak dikenal.",
         "en": "Dataset type `{dataset_type}` is not recognised."},
-    "dx.sample_note": {
-        "id": "Angka di atas berasal dari cuplikan {rows} baris pertama, bukan "
-              "seluruh berkas.",
-        "en": "The numbers above come from a sample of the first {rows} rows, "
-              "not the whole file."},
 
     # ═══════════════════════════════════════════════════════════════════
     # LAPORAN PDF & EKSPOR TABEL  (Tahap 3)
@@ -1169,135 +1130,140 @@ CATALOG: dict[str, dict[str, str]] = {
 
     # ── Format berkas ────────────────────────────────────────────────────
     "dx.format_ok_csv": {
-        "id": "Terdeteksi {format} (satu baris per flow).",
-        "en": "Detected {format} (one row per flow)."},
+        "id": "Format file sesuai: {format}, satu baris per flow.",
+        "en": "File format matches: {format}, one row per flow."},
     "dx.format_ok_ndjson": {
-        "id": "Terdeteksi {format} (satu objek JSON per baris).",
-        "en": "Detected {format} (one JSON object per line)."},
+        "id": "Format file sesuai: {format}, satu objek JSON per baris.",
+        "en": "File format matches: {format}, one JSON object per line."},
     "dx.format_wrong": {
-        "id": "Format terdeteksi **{detected}**, tetapi pipeline ini "
-              "membutuhkan **{needed}**.",
-        "en": "Detected format is **{detected}**, but this pipeline requires "
+        "id": "File Anda berformat **{detected}**, sedangkan pipeline ini "
+              "butuh **{needed}**.",
+        "en": "Your file is **{detected}**, but this pipeline needs "
               "**{needed}**."},
 
     # ── Dilewati — BUKAN gagal ───────────────────────────────────────────
     # Bedanya harus terbaca: "belum sempat diperiksa", bukan "tidak memenuhi".
     "dx.skipped_format": {
-        "id": "Tidak diperiksa karena format berkas belum sesuai.",
-        "en": "Not checked: the file format does not match yet."},
+        "id": "Menunggu format file yang sesuai.",
+        "en": "Waiting for a matching file format."},
     "dx.skipped_no_features": {
         "id": "Tidak ada kolom fitur untuk diperiksa.",
         "en": "No feature columns to check."},
     "dx.skipped_no_label": {
-        "id": "Tidak dapat diperiksa tanpa kolom `{column}`.",
-        "en": "Cannot be checked without the `{column}` column."},
+        "id": "Butuh kolom `{column}` lebih dulu.",
+        "en": "Needs the `{column}` column first."},
 
     # ── Kolom label ──────────────────────────────────────────────────────
     "dx.label_found": {
         "id": "Kolom label `{column}` ditemukan.",
         "en": "Label column `{column}` was found."},
     "dx.label_missing": {
-        "id": "Dataset Anda kurang kolom label `{column}`.",
-        "en": "Your dataset is missing the label column `{column}`."},
+        "id": "Kolom label `{column}` tidak ada di file Anda.",
+        "en": "Your file has no `{column}` label column."},
 
     # ── Kolom fitur ──────────────────────────────────────────────────────
     "dx.features_none": {
-        "id": "Tidak ada kolom fitur: berkas hanya berisi kolom label.",
-        "en": "No feature columns: the file contains only the label column."},
+        "id": "Tidak ada kolom fitur. File hanya berisi kolom label.",
+        "en": "No feature columns. The file has only the label column."},
     "dx.features_missing": {
-        "id": "Dataset Anda kurang {count} kolom yang diminta skema: {columns}.",
-        "en": "Your dataset is missing {count} columns required by the "
-              "schema: {columns}."},
+        "id": "{count} kolom yang dibutuhkan belum ada: {columns}.",
+        "en": "{count} required columns are missing: {columns}."},
     "dx.features_ok": {
-        "id": "{count} kolom selain label ditemukan; seluruh kolom yang "
-              "diminta skema lengkap.",
-        "en": "{count} columns besides the label were found; every column the "
-              "schema requires is present."},
+        "id": "{count} kolom fitur ditemukan, semuanya lengkap.",
+        "en": "{count} feature columns found, all present."},
 
     # ── Tipe data fitur ──────────────────────────────────────────────────
     "dx.dtype_ok": {
-        "id": "Seluruh kolom fitur bertipe numerik.",
-        "en": "Every feature column is numeric."},
+        "id": "Semua kolom fitur berisi angka.",
+        "en": "All feature columns contain numbers."},
     "dx.dtype_non_numeric": {
-        "id": "{count} kolom fitur bukan numerik dan akan diabaikan pipeline: "
-              "{columns}.",
-        "en": "{count} feature columns are not numeric and will be ignored by "
-              "the pipeline: {columns}."},
+        "id": "{count} kolom fitur bukan angka dan akan diabaikan: {columns}.",
+        "en": "{count} feature columns are not numbers and will be ignored: "
+              "{columns}."},
 
     # ── Distribusi kelas ─────────────────────────────────────────────────
     "dx.classes_ok": {
-        "id": "{count} kelas terdeteksi pada kolom `{column}`: {classes}.",
-        "en": "{count} classes detected in column `{column}`: {classes}."},
+        "id": "{count} kelas ditemukan di kolom `{column}`: {classes}.",
+        "en": "{count} classes found in column `{column}`: {classes}."},
     "dx.classes_single": {
-        "id": "Hanya satu kelas terdeteksi pada kolom `{column}` ({classes}); "
-              "pipeline butuh dua kelas (benign & attack).",
-        "en": "Only one class was detected in column `{column}` ({classes}); "
-              "the pipeline needs two classes (benign & attack)."},
+        "id": "Hanya satu kelas di kolom `{column}` ({classes}). Pipeline "
+              "butuh dua kelas: normal dan serangan.",
+        "en": "Only one class in column `{column}` ({classes}). The pipeline "
+              "needs two classes: benign and attack."},
 
     # ── EVE / Suricata ───────────────────────────────────────────────────
     # Maknanya harus UTUH: label tidak ada di berkas mentah, melainkan
     # DITURUNKAN dari alert Suricata. Menghilangkan bagian itu membuat
     # pengguna mengira berkasnya kurang kolom.
     "dx.eve_label_derived": {
-        "id": "Kolom `{column}` tidak perlu ada: pipeline menurunkannya dari "
-              "**alert Suricata**; {events} event dengan bukti alert ditemukan "
-              "pada sampel.",
-        "en": "The `{column}` column does not need to exist: the pipeline "
-              "derives it from **Suricata alerts**; {events} events carrying "
-              "alert evidence were found in the sample."},
-    "dx.eve_label_no_alert": {
-        "id": "Tidak ada bukti alert Suricata pada sampel, padahal `{column}` "
-              "diturunkan dari alert (`event_type` = `alert`, atau objek "
-              "`alert` yang memiliki `severity`). Label tidak dapat dibentuk.",
-        "en": "No Suricata alert evidence in the sample, yet `{column}` is "
-              "derived from alerts (`event_type` = `alert`, or an `alert` "
-              "object carrying `severity`). The label cannot be built."},
-    "dx.eve_keys_missing": {
-        "id": "Dataset Anda kurang {count} kunci JSON yang diminta skema: "
-              "{keys}.",
-        "en": "Your dataset is missing {count} JSON keys required by the "
-              "schema: {keys}."},
-    "dx.eve_keys_ok": {
-        "id": "Seluruh kunci skema ada; {events} event TLS ditemukan pada "
-              "sampel.",
-        "en": "Every schema key is present; {events} TLS events were found in "
+        "id": "Tidak perlu kolom `{column}`. Label dibuat otomatis dari "
+              "**alert Suricata**, dan {events} alert ditemukan di cuplikan.",
+        "en": "No `{column}` column needed. The label is built automatically "
+              "from **Suricata alerts**, and {events} alerts were found in "
               "the sample."},
+    "dx.eve_label_no_alert": {
+        "id": "Tidak ada alert Suricata di cuplikan, jadi label `{column}` "
+              "tidak bisa dibuat. Yang dicari: `event_type` = `alert`, atau "
+              "objek `alert` yang punya `severity`.",
+        "en": "No Suricata alerts in the sample, so the `{column}` label "
+              "cannot be built. What we look for: `event_type` = `alert`, or "
+              "an `alert` object with `severity`."},
+    "dx.eve_keys_missing": {
+        "id": "{count} kunci JSON yang dibutuhkan belum ada: {keys}.",
+        "en": "{count} required JSON keys are missing: {keys}."},
+    "dx.eve_keys_ok": {
+        "id": "Semua kunci JSON yang dibutuhkan ada. {events} event TLS "
+              "ditemukan.",
+        "en": "All required JSON keys are present. {events} TLS events found."},
     "dx.eve_no_tls": {
-        "id": "Tidak ditemukan event TLS pada sampel (`app_proto`/`event_type` "
-              "= `tls`, atau port TLS); pipeline ini hanya menganalisis "
-              "trafik TLS.",
-        "en": "No TLS events were found in the sample (`app_proto`/"
-              "`event_type` = `tls`, or a TLS port); this pipeline analyses "
-              "TLS traffic only."},
+        "id": "Tidak ada event TLS di cuplikan. Pipeline ini hanya "
+              "menganalisis trafik TLS.",
+        "en": "No TLS events in the sample. This pipeline analyses TLS "
+              "traffic only."},
     "dx.eve_dtype_na": {
-        "id": "Tidak berlaku: pipeline merekayasa & menyeleksi fiturnya "
-              "sendiri (MI/RFE/PCA) dari field EVE mentah.",
-        "en": "Not applicable: the pipeline engineers and selects its own "
-              "features (MI/RFE/PCA) from the raw EVE fields."},
+        "id": "Pipeline menyiapkan fiturnya sendiri dari data EVE mentah.",
+        "en": "The pipeline prepares its own features from the raw EVE "
+              "data."},
     "dx.eve_classes_ok": {
-        "id": "Dua kelas dapat terbentuk pada sampel: {tls} event TLS dan "
-              "{alerts} event beralert.",
-        "en": "Both classes can be formed from the sample: {tls} TLS events "
-              "and {alerts} alerting events."},
+        "id": "Dua kelas terbentuk: {tls} event TLS dan {alerts} event "
+              "beralert.",
+        "en": "Both classes form: {tls} TLS events and {alerts} alerting "
+              "events."},
     "dx.eve_classes_no_alert": {
-        "id": "Hanya satu kelas yang dapat terbentuk: tidak ada event `alert` "
-              "pada sampel, sehingga kelas attack akan kosong.",
-        "en": "Only one class can be formed: there are no `alert` events in "
-              "the sample, so the attack class would be empty."},
+        "id": "Hanya satu kelas yang terbentuk. Tidak ada event `alert` di "
+              "cuplikan, jadi kelas serangan kosong.",
+        "en": "Only one class forms. There are no `alert` events in the "
+              "sample, so the attack class is empty."},
     "dx.eve_classes_no_tls": {
-        "id": "Hanya satu kelas yang dapat terbentuk: tidak ada event TLS pada "
-              "sampel, sehingga kelas benign TLS akan kosong.",
-        "en": "Only one class can be formed: there are no TLS events in the "
-              "sample, so the benign TLS class would be empty."},
+        "id": "Hanya satu kelas yang terbentuk. Tidak ada event TLS di "
+              "cuplikan, jadi kelas normal kosong.",
+        "en": "Only one class forms. There are no TLS events in the sample, "
+              "so the benign class is empty."},
 
 
     # ── Perenderan hasil diagnosa ────────────────────────────────────────
     "dx.skipped_one": {
-        "id": "dilewati: {reason}",
-        "en": "skipped: {reason}"},
+        "id": "Dilewati. {reason}",
+        "en": "Skipped. {reason}"},
     "dx.skipped_others": {
-        "id": "Pemeriksaan lain ({names}) dilewati: {reason}",
-        "en": "Other checks ({names}) were skipped: {reason}"},
+        "id": "{names} dilewati. {reason}",
+        "en": "{names} skipped. {reason}"},
+    # Daftar algoritma dibuat SEBARIS, bukan butir bertumpuk: empat butir
+    # setinggi empat baris mendorong rincian pemeriksaan keluar layar,
+    # padahal isinya cuma empat nama.
+    "dx.algorithms_inline": {
+        "id": "**Algoritma tersedia:** {names}",
+        "en": "**Algorithms available:** {names}"},
+    # Catatan penutup. Dahulu dua kalimat yang mengatakan hal yang sama dua
+    # kali, yaitu bahwa berkas tidak dimuat seluruhnya.
+    "dx.footer_note": {
+        "id": "Uji ini hanya membaca isi file dan tidak menjalankan pipeline "
+              "apa pun.",
+        "en": "This check only reads the file and does not run any "
+              "pipeline."},
+    "dx.footer_sampled": {
+        "id": "Diperiksa dari **{rows} baris pertama**.",
+        "en": "Checked from the **first {rows} rows**."},
     "dx.unit_column": {"id": "kolom", "en": "columns"},
     "dx.unit_json_key": {"id": "kunci JSON", "en": "JSON keys"},
 
@@ -1836,11 +1802,6 @@ CATALOG: dict[str, dict[str, str]] = {
               "halaman Run Experiment.",
         "en": "Saved as `{filename}` ({size}). It can now be selected on the "
               "Run Experiment page."},
-    "ap.help_register_existing": {
-        "id": "Berkas yang sudah berada di `storage/datasets/`. Tidak ada "
-              "penyalinan dan tidak ada batas ukuran.",
-        "en": "Files already in `storage/datasets/`. Nothing is copied and "
-              "there is no size limit."},
     "ap.empty_no_files_on_server": {
         "id": "Belum ada berkas di `storage/datasets/`. Salin berkas ke folder "
               "tersebut di server, lalu segarkan halaman ini.",

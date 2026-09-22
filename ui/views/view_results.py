@@ -1220,7 +1220,20 @@ def _render_history(experiments: list[dict], all_rows: list[dict]) -> None:
     param_keys = et.parameter_keys(lambda: params_map)
     all_columns = et.build_columns(param_keys)
 
-    bar = st.columns([1, 1, 3, 2])
+    # Tiga kontrol pencarian dipak RAPAT KE KIRI, lalu satu kolom penyangga
+    # kosong, lalu "Unduh CSV" menempel KANAN. Penyangganya berada di TENGAH,
+    # bukan di ujung: penyangga di ujung membuat tombolnya ikut terdorong ke
+    # tengah dan tidak lagi rata kanan.
+    #
+    # Lebar "Filter" dan "Kolom" dipangkas mendekati lebar tombolnya sendiri.
+    # Sebelumnya masing-masing memegang kolom selebar seperempat halaman untuk
+    # satu tombol pendek, sehingga yang terbaca bukan deretan kontrol melainkan
+    # pulau-pulau yang berjauhan.
+    #
+    # "Unduh CSV" ikut menyusut: ia tindakan sekunder, dan lebar sebelumnya
+    # membuatnya tombol terbesar di halaman, lebih menonjol daripada tabel
+    # yang justru menjadi isi halaman ini.
+    bar = st.columns([2, 2, 12, 6, 3])
     with bar[0]:
         filters = _render_filters(all_rows)
     with bar[1]:
@@ -1231,7 +1244,7 @@ def _render_history(experiments: list[dict], all_rows: list[dict]) -> None:
     rows = et.apply_filters(rows, **filters)
     columns = et.visible_columns(all_columns, selected_keys)
 
-    with bar[3]:
+    with bar[4]:
         st.download_button(
             t("ps.btn_csv"),
             data=et.to_csv(rows, columns,

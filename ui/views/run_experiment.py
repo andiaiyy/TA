@@ -1536,7 +1536,10 @@ def _diagnose_selected(dataset_path: str) -> dict:
                 "results": {}, "compatible_types": []}
 
 
-_STATUS_ICON = {"pass": "✔", "warn": "⚠", "fail": "✖", "skip": "–"}
+#: Ikon "dilewati" memakai lingkaran kosong, BUKAN tanda pisah: tanda pisah
+#: terbaca sebagai butir daftar biasa dan tidak membedakan dirinya dari
+#: ketiga ikon lain yang semuanya bermakna keputusan.
+_STATUS_ICON = {"pass": "✔", "warn": "⚠", "fail": "✖", "skip": "○"}
 
 # ── Penyajian bertingkat: verdict → penyebab → tindakan ───────────────────
 # Semua di bawah ini murni PENYAJIAN atas hasil diagnose_all(); tidak ada satu
@@ -1715,9 +1718,7 @@ def _sample_note(diag: dict) -> str:
     """
     if not diag.get("rows_read") or not diag.get("sampled"):
         return ""
-    n = f"{diag['rows_read']:,}"
-    return (f"Berdasarkan **{n} baris pertama** (sampel; berkas tidak dimuat "
-            f"seluruhnya).")
+    return t("dx.footer_sampled", rows=f"{diag['rows_read']:,}")
 
 
 # ── Penyaji BERSAMA untuk "kolom/kunci yang hilang" ───────────────────────
@@ -1895,7 +1896,17 @@ def _compat_dialog_body(diag: dict, dataset_type: str, *,
     tergambar sebagai butir-butir di kartu, dan kartunya diganti tabel.
     """
     result = (diag.get("results") or {}).get(dataset_type) or {}
-    st.markdown(f"**{get_research_display_name(dataset_type)}**  ·  `{dataset_type}`")
+
+    # Judul TEBAL, daftar penulis kecil di bawahnya. Sebelumnya keduanya satu
+    # baris tebal, sehingga tujuh nama penulis mendominasi puncak modal dan
+    # nama research-nya sendiri terdorong ke ujung baris kedua. Pemecahnya
+    # dipakai ulang dari katalog, bukan ditebak dari tanda baca di sini.
+    from ui.components.pipeline_catalog import split_credit
+
+    nama, kredit = split_credit(get_research_display_name(dataset_type))
+    st.markdown(f"**{nama}**  ·  `{dataset_type}`")
+    if kredit:
+        st.caption(kredit)
 
     if not result:
         st.warning(diag.get("error") or "Hasil diagnosa tidak tersedia.")
@@ -1917,9 +1928,8 @@ def _compat_dialog_body(diag: dict, dataset_type: str, *,
         # Kecocokan ditentukan `dataset_type`; algoritma adalah pilihan DI
         # DALAM research pipeline yang sama — bukan pemeriksaan terpisah.
         if algorithms:
-            st.markdown(f"Tersedia **{len(algorithms)}** algoritma:")
-            for algo in algorithms:
-                st.markdown(f"- {algo}")
+            st.markdown(t("dx.algorithms_inline",
+                          names=", ".join(algorithms)))
 
         if collapsible:
             with st.expander(t("re.dlg_check_detail"), expanded=False):
@@ -1928,15 +1938,13 @@ def _compat_dialog_body(diag: dict, dataset_type: str, *,
             st.markdown("**Rincian pemeriksaan**")
             _render_check_list(result, dataset_type)
 
-        # DUA catatan wajib (angka berbasis cuplikan + tidak menjalankan
-        # pipeline) digabung menjadi SATU baris penutup, bukan dua baris kecil
-        # bertumpuk. Keduanya tetap tampil utuh.
+        # SATU baris penutup. Dahulu dua kalimat yang mengatakan hal yang
+        # sama dua kali: "berkas tidak dimuat seluruhnya" lalu "tidak memuat
+        # seluruh dataset". Yang tersisa hanya dua fakta yang berbeda, yaitu
+        # dari berapa baris angkanya berasal dan bahwa tidak ada pipeline yang
+        # dijalankan.
         note = _sample_note(diag)
-        st.caption(
-            (f"{note} " if note else "")
-            + "Uji ini hanya membaca cuplikan berkas (tidak memuat seluruh "
-              "dataset) dan tidak menjalankan pipeline apa pun."
-        )
+        st.caption((f"{note} " if note else "") + t("dx.footer_note"))
 
     if st.button("Tutup", key=f"compat_close_{dataset_type}"):
         _close_compat_dialog()

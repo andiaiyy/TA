@@ -57,7 +57,6 @@ _DETAIL_FIELDS = (
 # CSS-nya — bukan testid yang ditebak. Ada test yang mencocokkan awalan ini
 # dengan bundel frontend yang benar-benar terpasang. Nilainya dimiliki `theme`
 # supaya satu konstanta melayani gaya dan kode sekaligus.
-from ui.components.tables import dataset_code
 from ui.components.theme import ROW_KEY_PREFIX
 
 
@@ -127,10 +126,6 @@ _CSS = """
     display: inline-block; padding: .08rem .55rem; border-radius: 999px;
     font-size: .76rem; line-height: 1.6; white-space: nowrap;
     background: rgba(127,127,127,.16); opacity: .9;
-}
-.ids-cat-chip-accent {
-    background: transparent; opacity: 1;
-    border: 1px solid var(--primary-color, currentColor);
 }
 .ids-cat-count {
     display: inline-block; font-size: .78rem; opacity: .7;
@@ -1420,10 +1415,13 @@ def render_modal_body(group: dict) -> None:
     """
     st.markdown(_CSS, unsafe_allow_html=True)
 
+    # Kode jenis dataset TIDAK ditempelkan pada judul. Ia pengenal mesin, dan
+    # di modal ini ia berdiri sebagai lencana berbingkai tepat di samping
+    # judul research, sehingga yang paling menarik mata justru yang paling
+    # tidak dicari pembacanya. Isinya tetap terbaca pada bagian "Persyaratan
+    # dataset" di bawah, tempat ia memang berarti sesuatu.
     st.markdown(
-        f'<div class="ids-cat-title">{escape(group["title"])} '
-        f'<span class="ids-cat-chip ids-cat-chip-accent">'
-        f'{escape(dataset_code(group["dataset_type"]))}</span></div>',
+        f'<div class="ids-cat-title">{escape(group["title"])}</div>',
         unsafe_allow_html=True)
     if group.get("short"):
         _line(group["short"], "ids-cat-short")

@@ -450,6 +450,7 @@ div[data-testid="stVerticalBlock"] > .stElementContainer:has(.ids-user-head),
 div[data-testid="stVerticalBlock"] > .stElementContainer:has(.ids-compat-row),
 div[data-testid="stVerticalBlock"] > .stElementContainer:has(.ids-compat-head),
 div[data-testid="stVerticalBlock"] > .stElementContainer:has(.ids-queue-row),
+div[data-testid="stVerticalBlock"] > .stElementContainer:has(.ids-rs-filters),
 div[data-testid="stVerticalBlock"] > .stElementContainer:has(.ids-queue-head) {{
     display: none;
 }}
@@ -1100,6 +1101,23 @@ div[data-testid="stVerticalBlock"]:has(> .stElementContainer .ids-progress-page)
    kolomnya melebar. */
 [data-testid="{COL_ONE}"] code {{ overflow-wrap: anywhere; }}
 
+/* JUDUL KOLOM tidak pernah pecah di tengah kata. Streamlit memberi paragraf
+   markdown `word-break` yang memutus di mana saja, sehingga pada lebar sedang
+   "Algoritma" tergambar sebagai "Algorit / ma" dan judul tabel berhenti
+   terbaca sebagai kata. Judul kolom pendek dan jumlahnya sedikit: bila tidak
+   muat, yang benar adalah kolomnya melebar atau barisnya menumpuk, bukan
+   katanya dipotong. */
+div[data-testid="stVerticalBlock"]:has(> .stElementContainer .ids-queue-head)
+    [data-testid="{COL_ONE}"] p,
+div[data-testid="stVerticalBlock"]:has(> .stElementContainer .ids-user-head)
+    [data-testid="{COL_ONE}"] p,
+div[data-testid="stVerticalBlock"]:has(> .stElementContainer .ids-compat-head)
+    [data-testid="{COL_ONE}"] p {{
+    overflow-wrap: normal;
+    word-break: normal;
+    hyphens: none;
+}}
+
 /* ── Kolom AKSI pada baris tabel ───────────────────────────────────────
    Tombol tidak pernah dipaksa lebih sempit daripada labelnya: bila tidak muat
    berdampingan, ia PINDAH ke baris berikutnya. Memampatkannya menghasilkan
@@ -1127,6 +1145,25 @@ div[data-testid="stVerticalBlock"]:has(> .stElementContainer .ids-queue-row)
     white-space: nowrap;
 }}
 
+/* ── Baris penyaring tabel kelola research ─────────────────────────────
+   TIGA selectbox berdampingan. Dipaksa tetap sebaris, masing-masing tinggal
+   sepertiga dari kolomnya, dan Streamlit memotong labelnya di tengah kata:
+   "Semua status" menjadi "Semu", "Terbaru diperbarui" menjadi "Terba". Label
+   yang terpotong tidak mengatakan penyaring mana yang sedang aktif.
+
+   Aturannya sama bentuknya dengan kolom aksi pada baris tabel: beri lantai,
+   lalu biarkan yang tidak muat PINDAH ke baris berikutnya. */
+div[data-testid="stVerticalBlock"]:has(> .stElementContainer .ids-rs-filters)
+    [data-testid="{COL_ROW}"] [data-testid="{COL_ROW}"] {{
+    flex-wrap: wrap;
+    row-gap: .4rem;
+}}
+div[data-testid="stVerticalBlock"]:has(> .stElementContainer .ids-rs-filters)
+    [data-testid="{COL_ROW}"] [data-testid="{COL_ROW}"]
+    > [data-testid="{COL_ONE}"] {{
+    flex: 1 1 9rem;
+    min-width: 9rem;
+}}
 /* ── Adaptif terhadap lebar konten ─────────────────────────────────────
    Nama testid di bawah DIAMBIL dari bundel frontend yang benar-benar
    terpasang (streamlit/static/static/js/*.js) dan dikunci oleh test — bukan
